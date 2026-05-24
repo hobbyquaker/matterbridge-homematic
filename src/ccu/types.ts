@@ -63,3 +63,19 @@ export interface CcuStatusSnapshot {
   connectedInterfaces: CcuInterfaceName[];
   discoveredHosts: string[];
 }
+
+/** Metadata for a single Homematic channel discovered via RPC + ReGa. */
+export interface CcuChannelInfo {
+  /** Full channel address, e.g. `'OEQ0854602:1'`. */
+  address: string;
+  /** Root device address, e.g. `'OEQ0854602'`. */
+  deviceAddress: string;
+  /** Zero-based channel index parsed from the address suffix. */
+  channelIndex: number;
+  /** Homematic channel type string, e.g. `'DIMMER'`. */
+  type: string;
+  /** RPC interface on which this channel was discovered. */
+  interfaceName: Exclude<CcuInterfaceName, 'ReGaHSS'>;
+  /** ReGa display name for the channel, if available. */
+  name?: string;
+}

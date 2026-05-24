@@ -22,11 +22,12 @@
  * limitations under the License.
  */
 
-import { MatterbridgeDynamicPlatform, MatterbridgeEndpoint, onOffOutlet, PlatformConfig, PlatformMatterbridge } from 'matterbridge';
+import { MatterbridgeDynamicPlatform, PlatformConfig, PlatformMatterbridge } from 'matterbridge';
 import { AnsiLogger, LogLevel } from 'matterbridge/logger';
 
 import { parseCcuConnectionConfig } from './ccu/config.js';
 import { CcuConnectionLayer } from './ccu/connection-layer.js';
+import { createEndpointForChannel, isSupportedChannelType } from './ccu/device-mapper.js';
 
 /**
  * This is the standard interface for Matterbridge plugins.
@@ -125,31 +126,27 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
   private async discoverDevices(): Promise<void> {
     this.log.info('Discovering devices...');
-    // Implement device discovery logic here.
-    // For example, you might fetch devices from an API.
-    // and register them with the Matterbridge instance.
 
-    // Example: Create and register an outlet device
-    // If you want to create an Accessory platform plugin and your platform extends MatterbridgeAccessoryPlatform,
-    // instead of createDefaultBridgedDeviceBasicInformationClusterServer, call createDefaultBasicInformationClusterServer().
-    const outlet = new MatterbridgeEndpoint(onOffOutlet, { id: 'outlet1' })
-      .createDefaultBridgedDeviceBasicInformationClusterServer('Outlet', 'SN123456', this.matterbridge.aggregatorVendorId, 'Matterbridge', 'Matterbridge Outlet', 10000, '1.0.0')
-      .createDefaultPowerSourceWiredClusterServer()
-      .addRequiredClusterServers()
-      .addCommandHandler('on', (data: { cluster: string }) => {
-        this.log.info(`Command on called on cluster ${data.cluster}`);
-      })
-      .addCommandHandler('off', (data: { cluster: string }) => {
-        this.log.info(`Command off called on cluster ${data.cluster}`);
-      });
+    if (!this.ccuConnection) {
+      this.log.warn('CCU connection not available. No devices will be discovered.');
+      return;
+    }
 
-    // Set the selectDevice for the outlet we created. This is used to link the device with the select in the frontend.
-    this.setSelectDevice('SN123456', 'Outlet');
+    const channels = await this.ccuConnection.discoverChannels();
+    this.log.info(`Discovered ${channels.length} channels from CCU.`);
 
-    // Validate the device with the select before registering it.
-    const selected = this.validateDevice(['Outlet', 'SN123456']);
+    for (const channel of channels) {
+      if (!isSupportedChannelType(channel.type)) continue;
 
-    // Register the device with this Matterbridge Platform.
-    if (selected) await this.registerDevice(outlet);
+      const displayName = channel.name ?? channel.address;
+      const endpoint = createEndpointForChannel(
+        channel as Parameters<typeof createEndpointForChannel>[0],
+        this.matterbridge.aggregatorVendorId,
+      );
+
+      this.setSelectDevice(channel.address, displayName);
+      const selected = this.validateDevice([displayName, channel.address]);
+      if (selected) await this.registerDevice(endpoint);
+    }
   }
 }

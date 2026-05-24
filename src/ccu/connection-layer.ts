@@ -7,7 +7,7 @@
 import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
 
-import { CcuConnectionConfig, CcuDiscoveredDevice, CcuInterfaceName, CcuLogger, CcuStatusSnapshot, RegaClient, RpcClient, RpcClientFactory } from './types.js';
+import { CcuChannelInfo, CcuConnectionConfig, CcuDiscoveredDevice, CcuInterfaceName, CcuLogger, CcuStatusSnapshot, RegaClient, RpcClient, RpcClientFactory } from './types.js';
 
 const require = createRequire(import.meta.url);
 
@@ -17,6 +17,11 @@ const xmlrpc = require('homematic-xmlrpc') as RpcClientFactory;
 const binrpc = require('binrpc') as RpcClientFactory;
 
 type RpcInterfaceName = Exclude<CcuInterfaceName, 'ReGaHSS'>;
+
+interface RpcDeviceDescription {
+  ADDRESS: string;
+  TYPE: string;
+}
 
 interface RpcInterfaceDefinition {
   enabled: boolean;
@@ -128,6 +133,65 @@ export class CcuConnectionLayer extends EventEmitter {
         resolve(result);
       });
     });
+  }
+
+  /**
+   * Discover all channels from every connected RPC interface and enrich them with ReGa display names.
+   *
+   * @returns {Promise<CcuChannelInfo[]>} List of all discovered channels.
+   */
+  async discoverChannels(): Promise<CcuChannelInfo[]> {
+    const nameMap = new Map<string, string>();
+
+    if (this.regaClient && this.config.regaEnabled) {
+      try {
+        const script = `string id;foreach(id,dom.GetObject(ID_CHANNELS)){var c=dom.GetObject(id);Write(c.Address()#"\t"#c.Name()#"\n");}`;
+        const { response } = await this.executeRegaScript(script);
+
+        if (response) {
+          for (const line of response.split('\n')) {
+            const tabIndex = line.indexOf('\t');
+            if (tabIndex > 0) {
+              const address = line.slice(0, tabIndex).trim();
+              const name = line.slice(tabIndex + 1).trim();
+              if (address) nameMap.set(address, name);
+            }
+          }
+        }
+      } catch (err) {
+        this.log.warn(`ReGa channel name fetch failed: ${String(err)}`);
+      }
+    }
+
+    const channels: CcuChannelInfo[] = [];
+
+    for (const [iface] of this.clients) {
+      try {
+        const devices = (await this.callRpc(iface, 'listDevices', [])) as RpcDeviceDescription[];
+
+        for (const dev of devices) {
+          if (!dev.ADDRESS.includes(':')) continue;
+
+          const colonIndex = dev.ADDRESS.indexOf(':');
+          const deviceAddress = dev.ADDRESS.slice(0, colonIndex);
+          const channelIndex = parseInt(dev.ADDRESS.slice(colonIndex + 1), 10);
+
+          channels.push({
+            address: dev.ADDRESS,
+            deviceAddress,
+            channelIndex,
+            type: dev.TYPE,
+            interfaceName: iface,
+            name: nameMap.get(dev.ADDRESS),
+          });
+        }
+      } catch (err) {
+        this.log.warn(`RPC listDevices failed on ${iface}: ${String(err)}`);
+      }
+    }
+
+    this.log.debug(`discoverChannels: found ${channels.length} channels across ${this.clients.size} interface(s).`);
+    return channels;
   }
 
   /**
