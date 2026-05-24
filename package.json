@@ -105,6 +105,7 @@
     "softReset": "npm install --no-fund --no-audit && npm link --no-fund --no-audit matterbridge && npm run build",
     "checkDependencies": "npx npm-check-updates",
     "updateDependencies": "npx npm-check-updates -u && npm run reset",
+    "deploy": "bash deploy.sh",
     "automator": "node scripts/run-automator.mjs --plugin --enable-promise-rules",
     "runMeBeforePublish": "npm run cleanBuild && npm run format && npm run lint && npm run build && npm run typecheck && npm run test:coverage",
     "prepublishOnly": "npm run cleanBuildProduction && npm pkg delete devDependencies scripts && npx shx rm -rf node_modules/* node_modules/.[!.]* node_modules/..?* package-lock.json npm-shrinkwrap.json && npm install --omit=dev && npm shrinkwrap --omit=dev",
