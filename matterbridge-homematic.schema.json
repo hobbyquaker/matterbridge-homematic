@@ -151,6 +151,51 @@
       "default": 250,
       "minimum": 0
     },
+    "deviceEditorEnabled": {
+      "title": "Enable Device Config Page",
+      "description": "Enable the per-channel web editor.",
+      "type": "boolean",
+      "default": true
+    },
+    "deviceEditorPort": {
+      "title": "Device Config Page Port",
+      "description": "Port for the per-channel web editor (0 = random free port).",
+      "type": "integer",
+      "default": 0,
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "deviceEditorExternalUrl": {
+      "title": "Device Config External URL",
+      "description": "Optional external base URL for config links. Supports {port} placeholder.",
+      "type": "string",
+      "default": ""
+    },
+    "channelOverrides": {
+      "title": "Channel Overrides",
+      "description": "Per-channel override settings (enabled state and SWITCH matter type).",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "title": "Channel Address",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "switchMatterType": {
+            "title": "SWITCH Matter Type",
+            "type": "string",
+            "enum": ["light", "outlet", "switch"]
+          }
+        },
+        "required": ["address"]
+      },
+      "default": []
+    },
     "whiteList": {
       "title": "White List",
       "description": "Only the devices in the list will be exposed. If the list is empty, all the devices will be exposed.",

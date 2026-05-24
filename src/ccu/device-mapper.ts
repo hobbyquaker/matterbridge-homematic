@@ -4,15 +4,19 @@
  * @file device-mapper.ts
  */
 
-import { contactSensor, dimmableLight, MatterbridgeEndpoint, onOffLight } from 'matterbridge';
+import { contactSensor, dimmableLight, MatterbridgeEndpoint, onOffLight, onOffOutlet, onOffSwitch } from 'matterbridge';
 
-import { CcuChannelInfo } from './types.js';
+import { CcuChannelInfo, SwitchMatterType } from './types.js';
 
 /** Homematic channel types that are mapped to Matter devices by this plugin. */
 export const SUPPORTED_CHANNEL_TYPES = ['DIMMER', 'SWITCH', 'SHUTTER_CONTACT'] as const;
 
 /** Union of the Homematic channel type strings that this plugin supports. */
 export type SupportedChannelType = (typeof SUPPORTED_CHANNEL_TYPES)[number];
+
+export interface ChannelMappingOptions {
+  switchMatterType?: SwitchMatterType;
+}
 
 /**
  * Return whether a channel type string is handled by this plugin.
@@ -29,9 +33,10 @@ export function isSupportedChannelType(type: string): type is SupportedChannelTy
  *
  * @param {CcuChannelInfo & { type: SupportedChannelType }} channel Channel with a supported type.
  * @param {number} vendorId Matter vendor ID from the Matterbridge aggregator.
+ * @param {ChannelMappingOptions} [options] Optional mapping overrides.
  * @returns {MatterbridgeEndpoint} Fully initialized endpoint ready to register.
  */
-export function createEndpointForChannel(channel: CcuChannelInfo & { type: SupportedChannelType }, vendorId: number): MatterbridgeEndpoint {
+export function createEndpointForChannel(channel: CcuChannelInfo & { type: SupportedChannelType }, vendorId: number, options: ChannelMappingOptions = {}): MatterbridgeEndpoint {
   const displayName = channel.name ?? channel.address;
   const serialNumber = channel.address.replace(':', '-');
   const id = `hm-${serialNumber}`;
@@ -43,9 +48,21 @@ export function createEndpointForChannel(channel: CcuChannelInfo & { type: Suppo
         .addRequiredClusterServers();
 
     case 'SWITCH':
-      return new MatterbridgeEndpoint(onOffLight, { id })
-        .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Switch')
-        .addRequiredClusterServers();
+      switch (options.switchMatterType ?? 'light') {
+        case 'outlet':
+          return new MatterbridgeEndpoint(onOffOutlet, { id })
+            .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Switch Outlet')
+            .addRequiredClusterServers();
+        case 'switch':
+          return new MatterbridgeEndpoint(onOffSwitch, { id })
+            .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Switch Relay')
+            .addRequiredClusterServers();
+        case 'light':
+        default:
+          return new MatterbridgeEndpoint(onOffLight, { id })
+            .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Switch Light')
+            .addRequiredClusterServers();
+      }
 
     case 'SHUTTER_CONTACT':
       return new MatterbridgeEndpoint(contactSensor, { id })

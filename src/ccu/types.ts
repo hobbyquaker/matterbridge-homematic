@@ -79,3 +79,13 @@ export interface CcuChannelInfo {
   /** ReGa display name for the channel, if available. */
   name?: string;
 }
+
+/** Matter device type selection for Homematic SWITCH channels. */
+export type SwitchMatterType = 'light' | 'outlet' | 'switch';
+
+/** Per-channel user override stored in plugin config. */
+export interface CcuChannelOverride {
+  address: string;
+  enabled?: boolean;
+  switchMatterType?: SwitchMatterType;
+}

@@ -22,12 +22,18 @@
  * limitations under the License.
  */
 
+import { promises as fs } from 'node:fs';
+import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+
 import { MatterbridgeDynamicPlatform, PlatformConfig, PlatformMatterbridge } from 'matterbridge';
 import { AnsiLogger, LogLevel } from 'matterbridge/logger';
 
 import { parseCcuConnectionConfig } from './ccu/config.js';
 import { CcuConnectionLayer } from './ccu/connection-layer.js';
 import { createEndpointForChannel, isSupportedChannelType } from './ccu/device-mapper.js';
+import { CcuChannelInfo, CcuChannelOverride, SwitchMatterType } from './ccu/types.js';
 
 /**
  * This is the standard interface for Matterbridge plugins.
@@ -42,10 +48,31 @@ export default function initializePlugin(matterbridge: PlatformMatterbridge, log
   return new TemplatePlatform(matterbridge, log, config);
 }
 
+interface HomematicPlatformConfig extends PlatformConfig {
+  channelOverrides?: CcuChannelOverride[];
+  deviceEditorEnabled?: boolean;
+  deviceEditorPort?: number;
+  deviceEditorExternalUrl?: string;
+}
+
+interface ChannelEditorPayload {
+  channelAddress: string;
+  enabled: boolean;
+  switchMatterType?: SwitchMatterType;
+}
+
 // Here we define the TemplatePlatform class, which extends the MatterbridgeDynamicPlatform.
 // If you want to create an Accessory platform plugin, you should extend the MatterbridgeAccessoryPlatform class instead.
 export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   private ccuConnection?: CcuConnectionLayer;
+
+  private editorServer?: Server;
+
+  private editorPort = 0;
+
+  private externalHost = '';
+
+  private discoveredChannels: CcuChannelInfo[] = [];
 
   constructor(matterbridge: PlatformMatterbridge, log: AnsiLogger, config: PlatformConfig) {
     // Always call super(matterbridge, log, config)
@@ -74,6 +101,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     const ccuConfig = parseCcuConnectionConfig(this.config);
     this.ccuConnection = new CcuConnectionLayer(ccuConfig, this.log);
     await this.ccuConnection.start();
+    await this.startChannelEditorServer();
 
     const status = this.ccuConnection.getStatusSnapshot();
     this.log.info(`CCU status host=${status.host || 'not-configured'} connected=${status.connected} interfaces=${status.connectedInterfaces.join(',') || 'none'}`);
@@ -106,6 +134,12 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     // Always call super.onShutdown(reason)
     await super.onShutdown(reason);
 
+    if (this.editorServer) {
+      await new Promise<void>((resolve) => this.editorServer?.close(() => resolve()));
+      this.editorServer = undefined;
+      this.log.info('Channel editor server stopped');
+    }
+
     if (this.ccuConnection) {
       await this.ccuConnection.stop();
       this.ccuConnection = undefined;
@@ -133,20 +167,285 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     }
 
     const channels = await this.ccuConnection.discoverChannels();
+    this.discoveredChannels = channels;
     this.log.info(`Discovered ${channels.length} channels from CCU.`);
 
     for (const channel of channels) {
       if (!isSupportedChannelType(channel.type)) continue;
 
       const displayName = channel.name ?? channel.address;
-      const endpoint = createEndpointForChannel(
-        channel as Parameters<typeof createEndpointForChannel>[0],
-        this.matterbridge.aggregatorVendorId,
-      );
+      const override = this.getChannelOverride(channel.address);
+      this.setSelectDevice(channel.address, displayName, undefined, 'switch');
 
-      this.setSelectDevice(channel.address, displayName);
-      const selected = this.validateDevice([displayName, channel.address]);
-      if (selected) await this.registerDevice(endpoint);
+      if (!this.isChannelEnabled(channel, displayName, override)) {
+        this.log.debug(`Skipping disabled channel ${channel.address}`);
+        continue;
+      }
+
+      const endpoint = createEndpointForChannel(channel as Parameters<typeof createEndpointForChannel>[0], this.matterbridge.aggregatorVendorId, {
+        switchMatterType: override?.switchMatterType,
+      });
+
+      endpoint.configUrl = this.buildChannelConfigUrl(channel.address);
+      await this.registerDevice(endpoint);
     }
+  }
+
+  private getPlatformConfig(): HomematicPlatformConfig {
+    return this.config as HomematicPlatformConfig;
+  }
+
+  private getChannelOverrides(): CcuChannelOverride[] {
+    const overrides = this.getPlatformConfig().channelOverrides;
+    return Array.isArray(overrides) ? overrides : [];
+  }
+
+  private getChannelOverride(channelAddress: string): CcuChannelOverride | undefined {
+    return this.getChannelOverrides().find((item) => item.address === channelAddress);
+  }
+
+  private isChannelEnabled(channel: CcuChannelInfo, displayName: string, override?: CcuChannelOverride): boolean {
+    if (override && typeof override.enabled === 'boolean') {
+      return override.enabled;
+    }
+    return this.validateDevice([displayName, channel.address], true);
+  }
+
+  private buildChannelConfigUrl(channelAddress: string): string {
+    const pluginName = encodeURIComponent(String(this.config.name ?? 'matterbridge-homematic'));
+    const encodedAddress = encodeURIComponent(channelAddress);
+    const query = `?plugin=${pluginName}&channel=${encodedAddress}`;
+    const configuredUrl = String(this.getPlatformConfig().deviceEditorExternalUrl ?? '').trim();
+
+    if (configuredUrl) {
+      const baseUrl = configuredUrl.replace('{port}', String(this.editorPort));
+      return `${baseUrl}/homematic-config${query}`;
+    }
+    if (this.externalHost && this.editorPort > 0) {
+      return `${this.externalHost}:${this.editorPort}/homematic-config${query}`;
+    }
+    return `/homematic-config${query}`;
+  }
+
+  private async startChannelEditorServer(): Promise<void> {
+    if (this.editorServer) {
+      return;
+    }
+
+    const enabled = this.getPlatformConfig().deviceEditorEnabled !== false;
+    if (!enabled) {
+      this.log.info('Channel editor server disabled by config');
+      return;
+    }
+
+    const configuredPort = Number(this.getPlatformConfig().deviceEditorPort ?? 0);
+    const listenPort = Number.isFinite(configuredPort) && configuredPort >= 0 ? configuredPort : 0;
+
+    this.editorServer = createServer((req, res) => {
+      void this.handleChannelEditorRequest(req, res);
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      this.editorServer?.once('error', reject);
+      this.editorServer?.listen(listenPort, '0.0.0.0', () => resolve());
+    });
+
+    const address = this.editorServer.address();
+    if (address && typeof address === 'object') {
+      this.editorPort = address.port;
+      this.log.info(`Channel editor server listening on 0.0.0.0:${this.editorPort}`);
+    }
+  }
+
+  private async handleChannelEditorRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (!this.externalHost && req.headers.host) {
+      const proto = req.headers['x-forwarded-proto'] ?? 'http';
+      const host = req.headers['x-forwarded-host'] ?? req.headers.host;
+      this.externalHost = `${proto}://${host}`;
+    }
+
+    if (!req.url) {
+      this.sendTextResponse(res, 400, 'Bad Request');
+      return;
+    }
+
+    const url = new URL(req.url, 'http://127.0.0.1');
+
+    if (req.method === 'GET' && url.pathname === '/homematic-config') {
+      const channelAddress = String(url.searchParams.get('channel') ?? '');
+      const html = this.renderChannelEditorHtml(channelAddress);
+      if (!html) {
+        this.sendTextResponse(res, 404, `Unknown channel: ${channelAddress}`);
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(html);
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/homematic-config') {
+      const payload: ChannelEditorPayload = {
+        channelAddress: String(url.searchParams.get('channelAddress') ?? ''),
+        enabled: String(url.searchParams.get('enabled') ?? '').toLowerCase() === 'true',
+        switchMatterType: this.toSwitchMatterType(url.searchParams.get('switchMatterType')),
+      };
+
+      const ok = await this.saveChannelEditorPayload(payload);
+      if (!ok) {
+        this.sendJsonResponse(res, 404, { ok: false, error: `Unknown channel: ${payload.channelAddress}` });
+        return;
+      }
+
+      this.sendJsonResponse(res, 200, { ok: true });
+      return;
+    }
+
+    this.sendTextResponse(res, 404, 'Not Found');
+  }
+
+  private renderChannelEditorHtml(channelAddress: string): string | null {
+    const channel = this.discoveredChannels.find((item) => item.address === channelAddress);
+    if (!channel) return null;
+
+    const override = this.getChannelOverride(channel.address);
+    const displayName = channel.name ?? channel.address;
+    const switchMatterType = override?.switchMatterType ?? 'light';
+    const enabled = override?.enabled ?? true;
+    const showSwitchTypeSelect = channel.type === 'SWITCH';
+
+    return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Homematic Channel Config</title>
+  <style>
+    body { font-family: Segoe UI, sans-serif; margin: 0; background: #f5f7fb; color: #1a2233; }
+    .wrap { max-width: 720px; margin: 24px auto; background: #fff; border-radius: 10px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); }
+    h1 { margin: 0 0 6px 0; font-size: 24px; }
+    p { margin: 0 0 16px 0; color: #4a5a78; }
+    .field { margin-bottom: 12px; display: flex; flex-direction: column; gap: 6px; }
+    label { font-size: 13px; color: #4a5a78; }
+    select { border: 1px solid #cfd6e4; border-radius: 8px; padding: 8px 10px; font-size: 14px; }
+    .row { display: flex; align-items: center; gap: 8px; }
+    button { border: 0; border-radius: 8px; background: #1f6feb; color: #fff; padding: 10px 14px; font-weight: 600; cursor: pointer; }
+    .status { font-size: 13px; color: #4a5a78; margin-left: 10px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>${this.escapeHtml(displayName)}</h1>
+    <p>Channel ${this.escapeHtml(channel.address)} (${this.escapeHtml(channel.type)})</p>
+
+    <div class="field">
+      <label class="row"><input id="enabled" type="checkbox" ${enabled ? 'checked' : ''} /> Enabled</label>
+    </div>
+
+    ${
+      showSwitchTypeSelect
+        ? `<div class="field">
+      <label for="switchMatterType">Matter type for SWITCH channel</label>
+      <select id="switchMatterType">
+        <option value="light" ${switchMatterType === 'light' ? 'selected' : ''}>Light</option>
+        <option value="outlet" ${switchMatterType === 'outlet' ? 'selected' : ''}>Outlet</option>
+        <option value="switch" ${switchMatterType === 'switch' ? 'selected' : ''}>Switch / Relay</option>
+      </select>
+    </div>`
+        : ''
+    }
+
+    <button id="saveBtn" type="button">Save</button>
+    <span class="status" id="status">Ready</span>
+  </div>
+
+  <script>
+    const channelAddress = ${JSON.stringify(channel.address)};
+    const saveBtn = document.getElementById('saveBtn');
+    const status = document.getElementById('status');
+
+    saveBtn.addEventListener('click', async () => {
+      status.textContent = 'Saving...';
+      const params = new URLSearchParams();
+      params.set('channelAddress', channelAddress);
+      params.set('enabled', document.getElementById('enabled').checked ? 'true' : 'false');
+      const switchSelect = document.getElementById('switchMatterType');
+      if (switchSelect) params.set('switchMatterType', switchSelect.value);
+
+      try {
+        const resp = await fetch('/api/homematic-config?' + params.toString(), { method: 'GET' });
+        const data = await resp.json();
+        if (!resp.ok || !data.ok) {
+          status.textContent = 'Save failed: ' + (data.error || 'unknown error');
+          return;
+        }
+        status.textContent = 'Saved. Restart plugin to apply changes.';
+      } catch (error) {
+        status.textContent = 'Save failed: ' + error;
+      }
+    });
+  </script>
+</body>
+</html>`;
+  }
+
+  private async saveChannelEditorPayload(payload: ChannelEditorPayload): Promise<boolean> {
+    const channel = this.discoveredChannels.find((item) => item.address === payload.channelAddress);
+    if (!channel) return false;
+
+    const config = this.getPlatformConfig();
+    const overrides = this.getChannelOverrides();
+    const existing = overrides.find((item) => item.address === payload.channelAddress);
+    if (existing) {
+      existing.enabled = payload.enabled;
+      if (channel.type === 'SWITCH') {
+        existing.switchMatterType = payload.switchMatterType ?? 'light';
+      } else {
+        delete existing.switchMatterType;
+      }
+    } else {
+      const newOverride: CcuChannelOverride = {
+        address: payload.channelAddress,
+        enabled: payload.enabled,
+      };
+      if (channel.type === 'SWITCH') newOverride.switchMatterType = payload.switchMatterType ?? 'light';
+      overrides.push(newOverride);
+    }
+    config.channelOverrides = overrides;
+
+    await this.persistCurrentConfig(config);
+    return true;
+  }
+
+  private async persistCurrentConfig(config: HomematicPlatformConfig): Promise<void> {
+    const configPath = this.getConfigFilePath();
+    const existingText = await fs.readFile(configPath, 'utf8');
+    const existingConfig = JSON.parse(existingText) as Record<string, unknown>;
+    existingConfig.channelOverrides = config.channelOverrides ?? [];
+    await fs.writeFile(configPath, `${JSON.stringify(existingConfig, null, 2)}\n`, 'utf8');
+    this.log.info(`Saved channel override config to ${configPath}`);
+  }
+
+  private getConfigFilePath(): string {
+    const pluginName = String(this.config.name ?? 'matterbridge-homematic');
+    return path.join(os.homedir(), '.matterbridge', `${pluginName}.config.json`);
+  }
+
+  private toSwitchMatterType(value: string | null): SwitchMatterType | undefined {
+    if (value === 'light' || value === 'outlet' || value === 'switch') return value;
+    return undefined;
+  }
+
+  private escapeHtml(input: string): string {
+    return input.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+  }
+
+  private sendTextResponse(res: ServerResponse, status: number, text: string): void {
+    res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end(text);
+  }
+
+  private sendJsonResponse(res: ServerResponse, status: number, data: Record<string, unknown>): void {
+    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(data));
   }
 }
