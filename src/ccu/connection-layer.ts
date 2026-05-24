@@ -7,16 +7,7 @@
 import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
 
-import {
-  CcuConnectionConfig,
-  CcuDiscoveredDevice,
-  CcuInterfaceName,
-  CcuLogger,
-  CcuStatusSnapshot,
-  RegaClient,
-  RpcClient,
-  RpcClientFactory,
-} from './types.js';
+import { CcuConnectionConfig, CcuDiscoveredDevice, CcuInterfaceName, CcuLogger, CcuStatusSnapshot, RegaClient, RpcClient, RpcClientFactory } from './types.js';
 
 const require = createRequire(import.meta.url);
 
@@ -127,7 +118,7 @@ export class CcuConnectionLayer extends EventEmitter {
       throw new Error(`RPC interface ${iface} is not connected.`);
     }
 
-    return await new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       client.methodCall(method, parameters, (error, result) => {
         if (error) {
           this.emit('rpcError', iface, error);
@@ -150,7 +141,7 @@ export class CcuConnectionLayer extends EventEmitter {
       throw new Error('ReGa interface is not connected.');
     }
 
-    return await new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       this.regaClient?.exec(script, (error, response, objects) => {
         if (error) {
           this.emit('regaError', error);
@@ -269,13 +260,13 @@ export class CcuConnectionLayer extends EventEmitter {
         module: xmlrpc,
         port: this.config.tls ? 42010 : 2010,
       },
-      VirtualDevices: {
+      'VirtualDevices': {
         enabled: this.config.virtEnabled,
         module: xmlrpc,
         port: this.config.tls ? 49292 : 9292,
         path: 'groups',
       },
-      CUxD: {
+      'CUxD': {
         enabled: this.config.cuxdEnabled,
         module: binrpc,
         port: 8701,

@@ -1,6 +1,6 @@
 {
   "title": "Matterbridge test plugin",
-  "description": "matterbridge-test v. 1.0.0 by https://github.com/Luligu",
+  "description": "matterbridge-homematic v. 0.0.1 by https://github.com/hobbyquaker",
   "type": "object",
   "properties": {
     "name": {

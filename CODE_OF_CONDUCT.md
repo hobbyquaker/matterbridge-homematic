@@ -37,7 +37,7 @@ This Code of Conduct applies to Matterbridge project spaces, including:
 
 If you experience or witness behavior that violates this Code of Conduct, report it privately to the maintainers.
 
-- GitHub: contact the maintainer via [GitHub](https://github.com/Luligu).
+- GitHub: contact the maintainer via [GitHub](https://github.com/hobbyquaker).
 - Discord: contact a Matterbridge Discord moderator or maintainer directly.
 
 When possible, include:
