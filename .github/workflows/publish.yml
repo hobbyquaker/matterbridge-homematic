@@ -1,0 +1,233 @@
+# Publish to npm (plugin) v. 2.0.2
+
+name: Publish to npm
+
+on:
+  release:
+    types: [created]
+  schedule:
+    - cron: '0 0 * * *' # Run daily at 00:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # needed for npm trusted publishing (OIDC)
+  actions: read
+
+jobs:
+  publish-release:
+    name: Publish release to npm
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    # env:
+    #   PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Setup Node.js 24.x
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24.x'
+          cache: npm
+
+      - name: Verify Node.js version
+        run: node -v
+
+      - name: Verify Npm version
+        run: npm -v
+
+      - name: Clone matterbridge repo branch main
+        run: git clone --depth 1 --single-branch --no-tags -b main https://github.com/Luligu/matterbridge.git ../matterbridge
+
+      - name: Install matterbridge dependencies
+        working-directory: ../matterbridge
+        run: npm ci --no-fund --no-audit
+
+      - name: Build matterbridge
+        working-directory: ../matterbridge
+        run: npm run build
+
+      - name: Link matterbridge globally
+        working-directory: ../matterbridge
+        run: npm link --no-fund --no-audit
+
+      - name: Install plugin dependencies
+        run: npm ci --no-fund --no-audit
+
+      - name: Link matterbridge in the project
+        run: npm link matterbridge --no-fund --no-audit
+
+      - name: Build the plugin
+        run: npm run build
+
+      - name: Lint the plugin
+        run: npm run lint
+
+      - name: Test the plugin
+        run: npm run test -- --forceExit --testTimeout=30000
+
+      - name: Publish the plugin to npm with trusted publishing / OIDC
+        run: npm publish
+
+      # - name: Trigger Matterbridge Docker Build Main
+      #   if: env.PAT_TOKEN != ''
+      #   uses: actions/github-script@v8
+      #   with:
+      #     github-token: ${{ env.PAT_TOKEN }}
+      #     script: |
+      #       await github.rest.actions.createWorkflowDispatch({
+      #         owner: 'Luligu',
+      #         repo: 'matterbridge',
+      #         workflow_id: 'docker-buildx-latest.yml',
+      #         ref: 'main'
+      #       })
+
+  publish-dev:
+    name: Publish daily dev to npm and trigger matterbridge docker build dev
+    if: github.event_name != 'release'
+    runs-on: ubuntu-latest
+    env:
+      PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+
+    steps:
+      - name: Select branch dev if exists, else default branch
+        id: select_ref
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const devBranch = 'dev';
+
+            const { data: repoInfo } = await github.rest.repos.get({ owner, repo });
+            const fallbackBranch = repoInfo.default_branch;
+
+            try {
+              await github.rest.repos.getBranch({ owner, repo, branch: devBranch });
+              core.setOutput('ref', devBranch);
+              core.info(`Using branch: ${devBranch}`);
+            } catch (e) {
+              if (e.status === 404) {
+                core.setOutput('ref', fallbackBranch);
+                core.info(`Branch '${devBranch}' not found; falling back to '${fallbackBranch}'`);
+              } else {
+                throw e;
+              }
+            }
+
+      - name: Checkout selected branch ${{ steps.select_ref.outputs.ref }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.select_ref.outputs.ref }}
+
+      - name: Setup Node.js 24.x
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24.x'
+          cache: npm
+
+      - name: Verify Node.js version
+        run: node -v
+
+      - name: Verify Npm version
+        run: npm -v
+
+      - name: Clone matterbridge repo branch dev
+        run: git clone --depth 1 --single-branch --no-tags -b dev https://github.com/Luligu/matterbridge.git ../matterbridge
+
+      - name: Install matterbridge dependencies
+        working-directory: ../matterbridge
+        run: npm ci --no-fund --no-audit
+
+      - name: Build matterbridge
+        working-directory: ../matterbridge
+        run: npm run build
+
+      - name: Link matterbridge globally
+        working-directory: ../matterbridge
+        run: npm link --no-fund --no-audit
+
+      - name: Install plugin dependencies
+        run: npm ci --no-fund --no-audit
+
+      - name: Link matterbridge in the plugin
+        run: npm link matterbridge --no-fund --no-audit
+
+      - name: Build the plugin
+        run: npm run build
+
+      - name: Lint the plugin
+        run: npm run lint
+
+      - name: Test the plugin
+        run: npm run test -- --forceExit --testTimeout=30000
+
+      - name: Extract base version and date
+        id: vars
+        run: |
+          BASE=$(jq -r '.version' package.json)
+          DATE=$(date -u +'%Y%m%d')
+          SHA=$(git rev-parse --short=7 HEAD)
+          DEV_TAG="${BASE}-dev-${DATE}-${SHA}"
+          echo "dev_tag=$DEV_TAG"   >> $GITHUB_OUTPUT
+          echo "orig_sha=$SHA"      >> $GITHUB_OUTPUT
+
+      - name: Bump to version-dev-date-commit --no-git-tag-version --ignore-scripts tag ${{ steps.vars.outputs.dev_tag }}
+        run: npm version "${{ steps.vars.outputs.dev_tag }}" --no-git-tag-version --ignore-scripts
+
+      - name: Check if a new dev-publish is needed
+        id: check_new
+        run: |
+          # ensure npm can read the private or public registry
+          npm config set //registry.npmjs.org/:_authToken=$NODE_AUTH_TOKEN
+
+          # 1) grab the package name
+          PKG=$(node -p "require('./package.json').name")
+
+          # 2) fetch the currently-published 'dev' dist-tag (e.g. "3.0.0-dev-20250430-1a2b3c4")
+          PUBLISHED=$(npm view "$PKG" dist-tags.dev 2>/dev/null || echo "")
+
+          # 3) extract the SHA suffix (after the last dash)
+          PUBLISHED_SHA=${PUBLISHED##*-}
+
+          # 4) get the current commit short-SHA
+          CURRENT_SHA=${{ steps.vars.outputs.orig_sha }}
+
+          echo "Published dev tag: $PUBLISHED"
+          echo "Published SHA: $PUBLISHED_SHA"
+          echo "Current SHA: $CURRENT_SHA"
+
+          if [ "$PUBLISHED_SHA" = "$CURRENT_SHA" ]; then
+            # nothing new → skip
+            echo "✅ No new commits since last dev publish - skipping"
+            echo "should_publish=false" >> $GITHUB_OUTPUT
+          else
+            # new commit → proceed
+            echo "🚀 New commits detected - proceeding with dev publish"
+            echo "should_publish=true"  >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish the plugin to npm under dev tag with trusted publishing / OIDC
+        if: steps.check_new.outputs.should_publish  == 'true'
+        run: npm publish --tag dev
+
+      - name: Trigger Matterbridge Docker Build Dev
+        if: steps.check_new.outputs.should_publish  == 'true' && env.PAT_TOKEN != ''
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ env.PAT_TOKEN }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: 'Luligu',
+              repo: 'matterbridge',
+              workflow_id: 'docker-buildx-dev.yml',
+              ref: 'dev'
+            })
