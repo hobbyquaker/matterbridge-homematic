@@ -16,3 +16,6 @@
 - For Jest tests in this repository, use ESM-safe patterns. Prefer `jest.unstable_mockModule` over `jest.mock`.
 - When behavior changes, update the relevant tests and documentation.
 - Use dedicated instruction files under [.github/instructions](instructions/) when a rule applies only to specific file types or workflows.
+- For CCU integration work, use https://github.com/rdmtc/node-red-contrib-ccu as an example for an interface to a Homematic CCU, including RPC and ReGa communication patterns and practical usage of the related Node.js modules.
+- Always commit completed changes unless the user explicitly asks not to commit.
+- Use this commit message convention: `<type>(<scope>): <short imperative summary>` where `type` is one of `feat|fix|refactor|docs|test|chore|build|ci|perf|revert`, `scope` is short and optional, and the summary is concise (preferably <= 72 characters).
