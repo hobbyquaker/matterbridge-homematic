@@ -17,6 +17,140 @@
       "readOnly": true,
       "ui:widget": "hidden"
     },
+    "host": {
+      "title": "CCU Address",
+      "description": "IP address or hostname of the CCU.",
+      "type": "string",
+      "default": ""
+    },
+    "regaEnabled": {
+      "title": "Enable ReGaHSS",
+      "description": "Enable the ReGaHSS interface for variables and programs.",
+      "type": "boolean",
+      "default": true
+    },
+    "bcrfEnabled": {
+      "title": "Enable BidCos-RF",
+      "description": "Enable the BidCos-RF interface.",
+      "type": "boolean",
+      "default": true
+    },
+    "iprfEnabled": {
+      "title": "Enable HmIP-RF",
+      "description": "Enable the HmIP-RF interface.",
+      "type": "boolean",
+      "default": true
+    },
+    "virtEnabled": {
+      "title": "Enable VirtualDevices",
+      "description": "Enable the VirtualDevices interface.",
+      "type": "boolean",
+      "default": true
+    },
+    "bcwiEnabled": {
+      "title": "Enable BidCos-Wired",
+      "description": "Enable the BidCos-Wired interface.",
+      "type": "boolean",
+      "default": false
+    },
+    "cuxdEnabled": {
+      "title": "Enable CUxD",
+      "description": "Enable the CUxD interface.",
+      "type": "boolean",
+      "default": false
+    },
+    "regaPoll": {
+      "title": "Enable ReGa Poll",
+      "description": "Enable periodic polling of ReGa variables and programs.",
+      "type": "boolean",
+      "default": true
+    },
+    "regaInterval": {
+      "title": "ReGa Poll Interval (s)",
+      "description": "Polling interval in seconds for ReGa updates.",
+      "type": "integer",
+      "default": 30,
+      "minimum": 1
+    },
+    "rpcPingTimeout": {
+      "title": "RPC Ping Timeout (s)",
+      "description": "Timeout in seconds used for RPC ping checks.",
+      "type": "integer",
+      "default": 60,
+      "minimum": 1
+    },
+    "rpcInitAddress": {
+      "title": "RPC Init Address",
+      "description": "Address advertised to CCU for callback listeners.",
+      "type": "string",
+      "default": ""
+    },
+    "rpcServerHost": {
+      "title": "RPC Listen Address",
+      "description": "Local address used by RPC callback listeners.",
+      "type": "string",
+      "default": "0.0.0.0"
+    },
+    "rpcBinPort": {
+      "title": "BINRPC Listen Port",
+      "description": "BINRPC listener port for CCU callbacks.",
+      "type": "integer",
+      "default": 2048,
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "rpcXmlPort": {
+      "title": "XMLRPC Listen Port",
+      "description": "XMLRPC listener port for CCU callbacks.",
+      "type": "integer",
+      "default": 2049,
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "tls": {
+      "title": "Enable TLS/SSL",
+      "description": "Enable TLS/SSL for CCU communication.",
+      "type": "boolean",
+      "default": false
+    },
+    "inSecure": {
+      "title": "Ignore Invalid TLS Certificates",
+      "description": "Allow invalid certificates for TLS connections.",
+      "type": "boolean",
+      "default": false
+    },
+    "authentication": {
+      "title": "Enable Authentication",
+      "description": "Use username and password for CCU communication.",
+      "type": "boolean",
+      "default": false
+    },
+    "username": {
+      "title": "Username",
+      "description": "CCU username used when authentication is enabled.",
+      "type": "string",
+      "default": ""
+    },
+    "password": {
+      "title": "Password",
+      "description": "CCU password used when authentication is enabled.",
+      "type": "string",
+      "default": ""
+    },
+    "queueTimeout": {
+      "title": "Queue Timeout (ms)",
+      "description": "Timeout in milliseconds for queued RPC calls.",
+      "type": "integer",
+      "default": 5000,
+      "minimum": 0
+    },
+    "queuePause": {
+      "title": "Queue Pause (ms)",
+      "description": "Pause in milliseconds between queued RPC calls.",
+      "type": "integer",
+      "default": 250,
+      "minimum": 0
+    },
     "whiteList": {
       "title": "White List",
       "description": "Only the devices in the list will be exposed. If the list is empty, all the devices will be exposed.",
