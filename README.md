@@ -1,12 +1,12 @@
-# <img src="https://matterbridge.io/assets/matterbridge.svg" alt="Matterbridge Logo" width="64px" height="64px">&nbsp;&nbsp;&nbsp;Matterbridge Plugin Template
+# <img src="https://matterbridge.io/assets/matterbridge.svg" alt="Matterbridge Logo" width="64px" height="64px">&nbsp;&nbsp;&nbsp;Matterbridge Homematic Plugin
 
 [![npm version](https://img.shields.io/npm/v/matterbridge.svg)](https://www.npmjs.com/package/matterbridge)
 [![npm downloads](https://img.shields.io/npm/dt/matterbridge.svg)](https://www.npmjs.com/package/matterbridge)
 [![Docker Version](https://img.shields.io/docker/v/luligu/matterbridge/latest?label=docker%20version)](https://hub.docker.com/r/luligu/matterbridge)
 [![Docker Pulls](https://img.shields.io/docker/pulls/luligu/matterbridge?label=docker%20pulls)](https://hub.docker.com/r/luligu/matterbridge)
-![Node.js CI](https://github.com/Luligu/matterbridge-plugin-template/actions/workflows/build.yml/badge.svg)
-![CodeQL](https://github.com/Luligu/matterbridge-plugin-template/actions/workflows/codeql.yml/badge.svg)
-[![codecov](https://codecov.io/gh/Luligu/matterbridge-plugin-template/branch/main/graph/badge.svg)](https://codecov.io/gh/Luligu/matterbridge-plugin-template)
+![Node.js CI](https://github.com/hobbyquaker/matterbridge-homematic/actions/workflows/build.yml/badge.svg)
+![CodeQL](https://github.com/hobbyquaker/matterbridge-homematic/actions/workflows/codeql.yml/badge.svg)
+[![codecov](https://codecov.io/gh/hobbyquaker/matterbridge-homematic/branch/main/graph/badge.svg)](https://codecov.io/gh/hobbyquaker/matterbridge-homematic)
 [![styled with prettier](https://img.shields.io/badge/styled_with-Prettier-f8bc45.svg?logo=prettier)](https://prettier.io/)
 [![linted with eslint](https://img.shields.io/badge/linted_with-ES_Lint-4B32C3.svg?logo=eslint)](https://eslint.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -20,7 +20,7 @@
 
 This repository provides a default template for developing Matterbridge plugins.
 
-If you like this project and find it useful, please consider giving it a star on [GitHub](https://github.com/Luligu/matterbridge-plugin-template) and sponsoring it.
+If you like this project and find it useful, please consider giving it a star on [GitHub](https://github.com/hobbyquaker/matterbridge-homematic) and sponsoring it.
 
 <a href="https://www.buymeacoffee.com/luligugithub"><img src="https://matterbridge.io/assets/bmc-button.svg" alt="Buy me a coffee" width="120"></a>
 
