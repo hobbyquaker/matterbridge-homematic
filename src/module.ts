@@ -25,6 +25,9 @@
 import { MatterbridgeDynamicPlatform, MatterbridgeEndpoint, onOffOutlet, PlatformConfig, PlatformMatterbridge } from 'matterbridge';
 import { AnsiLogger, LogLevel } from 'matterbridge/logger';
 
+import { parseCcuConnectionConfig } from './ccu/config.js';
+import { CcuConnectionLayer } from './ccu/connection-layer.js';
+
 /**
  * This is the standard interface for Matterbridge plugins.
  * Each plugin should export a default function that follows this signature.
@@ -41,6 +44,8 @@ export default function initializePlugin(matterbridge: PlatformMatterbridge, log
 // Here we define the TemplatePlatform class, which extends the MatterbridgeDynamicPlatform.
 // If you want to create an Accessory platform plugin, you should extend the MatterbridgeAccessoryPlatform class instead.
 export class TemplatePlatform extends MatterbridgeDynamicPlatform {
+  private ccuConnection?: CcuConnectionLayer;
+
   constructor(matterbridge: PlatformMatterbridge, log: AnsiLogger, config: PlatformConfig) {
     // Always call super(matterbridge, log, config)
     super(matterbridge, log, config);
@@ -64,6 +69,13 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
     // Clean the selectDevice and selectEntity maps, if you want to reset the select. This is useful when you have an API that sends all the devices and you want to rediscover all of them.
     await this.clearSelect();
+
+    const ccuConfig = parseCcuConnectionConfig(this.config);
+    this.ccuConnection = new CcuConnectionLayer(ccuConfig, this.log);
+    await this.ccuConnection.start();
+
+    const status = this.ccuConnection.getStatusSnapshot();
+    this.log.info(`CCU status host=${status.host || 'not-configured'} connected=${status.connected} interfaces=${status.connectedInterfaces.join(',') || 'none'}`);
 
     // Implements your own logic there
     await this.discoverDevices();
@@ -93,8 +105,22 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     // Always call super.onShutdown(reason)
     await super.onShutdown(reason);
 
+    if (this.ccuConnection) {
+      await this.ccuConnection.stop();
+      this.ccuConnection = undefined;
+    }
+
     this.log.info(`onShutdown called with reason: ${reason ?? 'none'}`);
     if (this.config.unregisterOnShutdown) await this.unregisterAllDevices();
+  }
+
+  /**
+   * Return the initialized CCU connection layer for device mappers.
+   *
+   * @returns {CcuConnectionLayer | undefined} CCU connection layer instance.
+   */
+  getCcuConnectionLayer(): CcuConnectionLayer | undefined {
+    return this.ccuConnection;
   }
 
   private async discoverDevices(): Promise<void> {
@@ -110,10 +136,10 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       .createDefaultBridgedDeviceBasicInformationClusterServer('Outlet', 'SN123456', this.matterbridge.aggregatorVendorId, 'Matterbridge', 'Matterbridge Outlet', 10000, '1.0.0')
       .createDefaultPowerSourceWiredClusterServer()
       .addRequiredClusterServers()
-      .addCommandHandler('on', (data) => {
+      .addCommandHandler('on', (data: { cluster: string }) => {
         this.log.info(`Command on called on cluster ${data.cluster}`);
       })
-      .addCommandHandler('off', (data) => {
+      .addCommandHandler('off', (data: { cluster: string }) => {
         this.log.info(`Command off called on cluster ${data.cluster}`);
       });
 
