@@ -46,9 +46,9 @@ const mockMatterbridge: PlatformMatterbridge = {
 } as unknown as PlatformMatterbridge;
 
 const mockConfig: PlatformConfig = {
-  name: 'matterbridge-plugin-template',
+  name: 'matterbridge-homematic',
   type: 'DynamicPlatform',
-  version: '1.0.0',
+  version: '0.0.1',
   whiteList: [],
   blackList: [],
   debug: false,

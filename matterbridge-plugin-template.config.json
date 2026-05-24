@@ -1,5 +1,5 @@
 {
-  "name": "matterbridge-plugin-template",
+  "name": "matterbridge-homematic",
   "type": "DynamicPlatform",
   "whiteList": [],
   "blackList": [],
