@@ -4,12 +4,22 @@
  * @file device-mapper.ts
  */
 
-import { contactSensor, coverDevice, dimmableLight, humiditySensor, MatterbridgeEndpoint, occupancySensor, onOffLight, onOffOutlet, onOffSwitch, smokeCoAlarm, temperatureSensor } from 'matterbridge';
+import { contactSensor, coverDevice, dimmableLight, humiditySensor, MatterbridgeEndpoint, occupancySensor, onOffLight, onOffOutlet, onOffSwitch, smokeCoAlarm, temperatureSensor, thermostatDevice } from 'matterbridge';
 
 import { CcuChannelInfo, SwitchMatterType } from './types.js';
 
 /** Homematic channel types that are mapped to Matter devices by this plugin. */
-export const SUPPORTED_CHANNEL_TYPES = ['BLIND', 'DIMMER', 'MOTION_DETECTOR', 'SHUTTER_CONTACT', 'SMOKE_DETECTOR', 'SWITCH', 'TEMPERATURE_HUMIDITY_TRANSMITTER'] as const;
+export const SUPPORTED_CHANNEL_TYPES = [
+  'BLIND',
+  'DIMMER',
+  'HEATING_CLIMATECONTROL_TRANSCEIVER',
+  'MOTION_DETECTOR',
+  'SHUTTER_CONTACT',
+  'SMOKE_DETECTOR',
+  'SWITCH',
+  'TEMPERATURE_HUMIDITY_TRANSMITTER',
+  'THERMALCONTROL_TRANSMIT',
+] as const;
 
 /** Union of the Homematic channel type strings that this plugin supports. */
 export type SupportedChannelType = (typeof SUPPORTED_CHANNEL_TYPES)[number];
@@ -280,6 +290,16 @@ export function createEndpointForChannel(channel: CcuChannelInfo & { type: Suppo
           .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Smoke Detector')
           // Default: no alarm. Updated from SMOKE_DETECTOR_ALARM_STATUS RPC events.
           .createSmokeOnlySmokeCOAlarmClusterServer(),
+        { ...options, batteryPowered: channel.batteryPowered },
+      );
+
+    case 'HEATING_CLIMATECONTROL_TRANSCEIVER':
+    case 'THERMALCONTROL_TRANSMIT':
+      return finalizeEndpoint(
+        new MatterbridgeEndpoint(thermostatDevice, { id })
+          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Thermostat')
+          // localTemperature=23°C, occupiedHeatingSetpoint=21°C as defaults; updated from RPC on startup.
+          .createDefaultHeatingThermostatClusterServer(23, 21),
         { ...options, batteryPowered: channel.batteryPowered },
       );
   }

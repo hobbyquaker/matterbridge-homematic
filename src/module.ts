@@ -158,6 +158,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       void this.handleRpcEventMotion(event);
       void this.handleRpcEventTemperatureHumidity(event);
       void this.handleRpcEventSmoke(event);
+      void this.handleRpcEventThermostat(event);
     });
 
     this.ccuConnection.on('deviceBatteryHint', (hint: { deviceAddress?: string; batteryPowered?: boolean }) => {
@@ -382,6 +383,50 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       // Track SMOKE_DETECTOR channel address for inbound alarm events.
       if (channel.type === 'SMOKE_DETECTOR') {
         this.channelAddressToDevice.set(channel.address, endpoint);
+      }
+
+      // Wire Thermostat setpoint and mode for HEATING_CLIMATECONTROL_TRANSCEIVER/THERMALCONTROL_TRANSMIT channels.
+      if ((channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' || channel.type === 'THERMALCONTROL_TRANSMIT') && this.ccuConnection) {
+        const ccuConn = this.ccuConnection;
+        this.channelAddressToDevice.set(channel.address, endpoint);
+        // Subscribe to setpoint — write Homematic SET_POINT_TEMPERATURE on change.
+        try {
+          await endpoint.subscribeAttribute('Thermostat', 'occupiedHeatingSetpoint', (value: number) => {
+            const address = channel.address;
+            // Matter sends 0.01°C (hundredths); Homematic wants plain °C.
+            const setpointDegC = value / 100;
+            const suppress = this.rpcEchoSuppress.get(address + ':heatingSetpoint');
+            if (suppress !== undefined && suppress === value) {
+              this.rpcEchoSuppress.delete(address + ':heatingSetpoint');
+              return;
+            }
+            this.log.debug(`Matter Thermostat setpoint -> Homematic: channel=${address} setpoint=${setpointDegC}`);
+            ccuConn.setChannelDatapointValue(channel.interfaceName, address, 'SET_POINT_TEMPERATURE', String(setpointDegC)).catch((err: unknown) => {
+              this.log.warn(`Failed to set Homematic SET_POINT_TEMPERATURE for ${address}: ${String(err)}`);
+            });
+          });
+        } catch (err) {
+          this.log.warn(`Failed to subscribe Thermostat setpoint for ${channel.address}: ${String(err)}`);
+        }
+        // Subscribe to systemMode — Matter 0=Off maps to frost-protection setpoint (4.5°C) on the device.
+        try {
+          await endpoint.subscribeAttribute('Thermostat', 'systemMode', (value: number) => {
+            const address = channel.address;
+            const suppress = this.rpcEchoSuppress.get(address + ':thermMode');
+            if (suppress !== undefined && suppress === value) {
+              this.rpcEchoSuppress.delete(address + ':thermMode');
+              return;
+            }
+            if (value === 0) {
+              // systemMode=Off: write frost-protection temperature to suppress heating.
+              ccuConn.setChannelDatapointValue(channel.interfaceName, address, 'SET_POINT_TEMPERATURE', '4.5').catch((err: unknown) => {
+                this.log.warn(`Failed to set frost protection for ${address}: ${String(err)}`);
+              });
+            }
+          });
+        } catch (err) {
+          this.log.warn(`Failed to subscribe Thermostat mode for ${channel.address}: ${String(err)}`);
+        }
       }
 
       // Wire WindowCovering position for BLIND channels.
@@ -929,6 +974,65 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       }
     } catch (err) {
       this.log.warn(`Failed to update SmokeCoAlarm for ${channelAddress}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Handle incoming RPC event for THERMOSTAT channels (HEATING_CLIMATECONTROL_TRANSCEIVER / THERMALCONTROL_TRANSMIT).
+   * Maps ACTUAL_TEMPERATURE to Thermostat.localTemperature and SET_POINT_TEMPERATURE/SETPOINT to
+   * Thermostat.occupiedHeatingSetpoint. Derives systemMode from the setpoint level (≤4.5°C = Off).
+   *
+   * @param {object} event RPC event payload.
+   * @param {unknown} [event.channel] Channel address string.
+   * @param {string} [event.datapoint] Datapoint name ('ACTUAL_TEMPERATURE', 'SET_POINT_TEMPERATURE', or 'SETPOINT').
+   * @param {unknown} [event.value] Datapoint value (float, °C).
+   * @returns {Promise<void>} Resolves when the Matter attribute(s) have been updated.
+   */
+  private async handleRpcEventThermostat(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
+    const datapoint = typeof event.datapoint === 'string' ? event.datapoint.trim().toUpperCase() : '';
+    if (datapoint !== 'ACTUAL_TEMPERATURE' && datapoint !== 'SET_POINT_TEMPERATURE' && datapoint !== 'SETPOINT') return;
+
+    const channelAddress = typeof event.channel === 'string' ? event.channel : undefined;
+    if (!channelAddress) return;
+
+    const endpoint = this.channelAddressToDevice.get(channelAddress);
+    if (!endpoint) return;
+    if (!endpoint.hasClusterServer('Thermostat')) return;
+
+    if (datapoint === 'ACTUAL_TEMPERATURE') {
+      // Matter Thermostat.localTemperature is in units of 0.01°C.
+      const measuredValue = Math.round((typeof event.value === 'number' ? event.value : 0) * 100);
+      try {
+        const current = await endpoint.getAttribute('Thermostat', 'localTemperature');
+        if (current !== measuredValue) {
+          await endpoint.updateAttribute('Thermostat', 'localTemperature', measuredValue);
+          this.log.info(`THERMOSTAT ACTUAL_TEMPERATURE event: updated localTemperature for ${channelAddress} to ${measuredValue} (${measuredValue / 100}°C)`);
+        }
+      } catch (err) {
+        this.log.warn(`Failed to update Thermostat localTemperature for ${channelAddress}: ${String(err)}`);
+      }
+      return;
+    }
+
+    // SET_POINT_TEMPERATURE or SETPOINT.
+    const setpointDegC = typeof event.value === 'number' ? event.value : 0;
+    // Matter Thermostat.occupiedHeatingSetpoint is in units of 0.01°C.
+    const setpointValue = Math.round(setpointDegC * 100);
+    // Derive systemMode: frost-protection level (≤4.5°C) → Off (0); otherwise → Heat (4).
+    const matterMode = setpointDegC <= 4.5 ? 0 : 4;
+    try {
+      const current = await endpoint.getAttribute('Thermostat', 'occupiedHeatingSetpoint');
+      if (current !== setpointValue) {
+        this.rpcEchoSuppress.set(channelAddress + ':heatingSetpoint', setpointValue);
+        await endpoint.updateAttribute('Thermostat', 'occupiedHeatingSetpoint', setpointValue);
+        this.rpcEchoSuppress.set(channelAddress + ':thermMode', matterMode);
+        await endpoint.updateAttribute('Thermostat', 'systemMode', matterMode);
+        this.log.info(`THERMOSTAT SET_POINT_TEMPERATURE event: updated setpoint for ${channelAddress} to ${setpointValue} (${setpointDegC}°C) mode=${matterMode}`);
+      }
+    } catch (err) {
+      this.rpcEchoSuppress.delete(channelAddress + ':heatingSetpoint');
+      this.rpcEchoSuppress.delete(channelAddress + ':thermMode');
+      this.log.warn(`Failed to update Thermostat setpoint for ${channelAddress}: ${String(err)}`);
     }
   }
 
