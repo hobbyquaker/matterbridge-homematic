@@ -89,8 +89,14 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   /** Tracks DIMMER channels that are currently moving (WORKING=true). */
   private readonly dimmerWorking = new Map<string, boolean>();
 
-  /** Stores the last LEVEL received for a DIMMER channel while it was WORKING, applied when WORKING=false. */
-  private readonly dimmerPendingLevel = new Map<string, number>();
+  /** Records the last received Homematic LEVEL value and its timestamp for each DIMMER channel. */
+  private readonly dimmerLastLevel = new Map<string, { level: number; time: number }>();
+
+  /**
+   * Set of DIMMER channels waiting for the next LEVEL event after WORKING=false fired with a stale
+   * last-known value (older than 500 ms). The next arriving LEVEL will be applied immediately.
+   */
+  private readonly dimmerAwaitingFinalLevel = new Set<string>();
 
   private readonly deviceBatteryHints = new Map<string, boolean>();
 
@@ -571,11 +577,19 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     // Homematic LEVEL is 0.0–1.0; Matter currentLevel is 1–254 (0 means off).
     const hmLevel = typeof event.value === 'number' ? event.value : 0;
 
-    // Defer Matter update while the device is still moving (WORKING=true).
+    // Always record the latest level with a timestamp so WORKING=false can pick it up.
+    this.dimmerLastLevel.set(channelAddress, { level: hmLevel, time: Date.now() });
+
+    // Suppress Matter update while the device is moving.
     if (this.dimmerWorking.get(channelAddress) === true) {
-      this.dimmerPendingLevel.set(channelAddress, hmLevel);
-      this.log.debug(`DIMMER LEVEL event deferred (WORKING): channel=${channelAddress} level=${hmLevel}`);
+      this.log.debug(`DIMMER LEVEL event suppressed (WORKING=true): channel=${channelAddress} level=${hmLevel}`);
       return;
+    }
+
+    // If we're waiting for the final level after a stale WORKING=false, apply this one.
+    const wasAwaiting = this.dimmerAwaitingFinalLevel.delete(channelAddress);
+    if (wasAwaiting) {
+      this.log.debug(`DIMMER LEVEL event applied (awaited after WORKING=false): channel=${channelAddress} level=${hmLevel}`);
     }
 
     await this.applyDimmerLevel(channelAddress, endpoint, hmLevel);
@@ -613,14 +627,21 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     this.dimmerWorking.delete(channelAddress);
     this.log.debug(`DIMMER WORKING=false: channel=${channelAddress}`);
 
-    const pending = this.dimmerPendingLevel.get(channelAddress);
-    if (pending === undefined) return;
-    this.dimmerPendingLevel.delete(channelAddress);
+    const last = this.dimmerLastLevel.get(channelAddress);
+    const age = last !== undefined ? Date.now() - last.time : Infinity;
 
-    const endpoint = this.channelAddressToDevice.get(channelAddress);
-    if (!endpoint) return;
-
-    await this.applyDimmerLevel(channelAddress, endpoint, pending);
+    if (last !== undefined && age < 500) {
+      // Last known level is fresh — apply it immediately.
+      this.log.debug(`DIMMER WORKING=false: applying last known level=${last.level} age=${age}ms channel=${channelAddress}`);
+      const endpoint = this.channelAddressToDevice.get(channelAddress);
+      if (endpoint) {
+        await this.applyDimmerLevel(channelAddress, endpoint, last.level);
+      }
+    } else {
+      // Last known level is stale or absent — wait for the next LEVEL event.
+      this.log.debug(`DIMMER WORKING=false: awaiting next LEVEL (last age=${age === Infinity ? 'none' : `${age}ms`}) channel=${channelAddress}`);
+      this.dimmerAwaitingFinalLevel.add(channelAddress);
+    }
   }
 
   /**
