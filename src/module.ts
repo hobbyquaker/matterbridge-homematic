@@ -146,6 +146,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       void this.handleRpcEventAvailability(event);
       void this.handleRpcEventBattery(event);
       void this.handleRpcEventSwitchState(event);
+      void this.handleRpcEventContactState(event);
       void this.handleRpcEventDimmerWorking(event);
       void this.handleRpcEventDimmerLevel(event);
     });
@@ -353,6 +354,11 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
           this.log.warn(`Failed to subscribe OnOff (dimmer) for ${channel.address}: ${String(err)}`);
         }
       }
+
+      // Track SHUTTER_CONTACT channel address for inbound STATE events.
+      if (channel.type === 'SHUTTER_CONTACT') {
+        this.channelAddressToDevice.set(channel.address, endpoint);
+      }
     }
 
     this.log.info(
@@ -548,6 +554,44 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     } catch (err) {
       this.rpcEchoSuppress.delete(channelAddress);
       this.log.warn(`Failed to update Matter OnOff for ${channelAddress}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Handle incoming RPC event for SHUTTER_CONTACT channel STATE and update Matter BooleanState.
+   * Homematic STATE: true = closed/contact, false = open/no-contact.
+   * Matter BooleanState stateValue: true = contact (closed).
+   *
+   * @param {object} event RPC event payload.
+   * @param {string} [event.iface] Interface name.
+   * @param {string} [event.idInit] Init ID of the interface.
+   * @param {unknown} [event.channel] Channel address string.
+   * @param {string} [event.datapoint] Datapoint name (e.g. 'STATE').
+   * @param {unknown} [event.value] Datapoint value (boolean).
+   * @returns {Promise<void>} Resolves when the Matter attribute has been updated.
+   */
+  private async handleRpcEventContactState(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
+    const datapoint = typeof event.datapoint === 'string' ? event.datapoint.trim().toUpperCase() : '';
+    if (datapoint !== 'STATE') return;
+
+    const channelAddress = typeof event.channel === 'string' ? event.channel : undefined;
+    if (!channelAddress) return;
+
+    const endpoint = this.channelAddressToDevice.get(channelAddress);
+    if (!endpoint) return;
+
+    if (!endpoint.hasClusterServer('BooleanState')) return;
+
+    // Homematic true = closed (contact present); Matter stateValue true = contact (closed).
+    const closed = event.value === true || event.value === 1 || event.value === '1';
+    try {
+      const current = await endpoint.getAttribute('BooleanState', 'stateValue');
+      if (current !== closed) {
+        await endpoint.updateAttribute('BooleanState', 'stateValue', closed);
+        this.log.info(`SHUTTER_CONTACT STATE event: updated Matter stateValue for ${channelAddress} to ${closed}`);
+      }
+    } catch (err) {
+      this.log.warn(`Failed to update Matter BooleanState for ${channelAddress}: ${String(err)}`);
     }
   }
 
