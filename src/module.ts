@@ -32,6 +32,7 @@ import { AnsiLogger, LogLevel } from 'matterbridge/logger';
 
 import { parseCcuConnectionConfig } from './ccu/config.js';
 import { CcuConnectionLayer } from './ccu/connection-layer.js';
+import { isAlwaysMainsPoweredDeviceType } from './ccu/device-power.js';
 import { createEndpointForChannel, isSupportedChannelType } from './ccu/device-mapper.js';
 import { CcuChannelInfo, CcuChannelOverride, SwitchMatterType } from './ccu/types.js';
 
@@ -79,6 +80,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   private readonly deviceBatteryHints = new Map<string, boolean>();
 
   private readonly deviceBatteryLowState = new Map<string, boolean>();
+
+  private readonly mainsPoweredDevices = new Set<string>();
 
   private batteryRediscoveryTimer?: NodeJS.Timeout;
 
@@ -199,6 +202,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     }
 
     const channels = await this.ccuConnection.discoverChannels();
+    this.updateMainsPoweredDeviceSet(channels);
     await this.primeBatteryHintsFromRpc(channels);
     this.discoveredChannels = channels;
     const channelsWithNames = channels.filter((c) => c.name).length;
@@ -261,6 +265,10 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     const candidates = new Map<string, Exclude<CcuChannelInfo['interfaceName'], 'ReGaHSS'>>();
     for (const channel of channels) {
       if (channel.channelIndex !== 0) continue;
+      if (isAlwaysMainsPoweredDeviceType(channel.type)) {
+        this.deviceBatteryHints.set(channel.deviceAddress, false);
+        continue;
+      }
       if (this.deviceBatteryHints.has(channel.deviceAddress)) continue;
       if (channel.interfaceName !== 'BidCos-RF' && channel.interfaceName !== 'HmIP-RF') continue;
       candidates.set(channel.deviceAddress, channel.interfaceName);
@@ -291,6 +299,18 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
     if (detectedCount > 0) {
       this.log.info(`Detected ${detectedCount} battery-powered devices from RPC paramset descriptions`);
+    }
+  }
+
+  private updateMainsPoweredDeviceSet(channels: CcuChannelInfo[]): void {
+    this.mainsPoweredDevices.clear();
+
+    for (const channel of channels) {
+      if (channel.channelIndex !== 0) continue;
+      if (!isAlwaysMainsPoweredDeviceType(channel.type)) continue;
+
+      this.mainsPoweredDevices.add(channel.deviceAddress);
+      this.deviceBatteryHints.set(channel.deviceAddress, false);
     }
   }
 
@@ -366,6 +386,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
     const deviceAddress = this.extractDeviceAddressFromRpcChannel(event.channel);
     if (!deviceAddress) return;
+    if (this.mainsPoweredDevices.has(deviceAddress)) return;
 
     const batteryLow = event.value === true || event.value === 1 || event.value === '1';
     await this.setDeviceBatteryLowState(deviceAddress, batteryLow, 'RPC event');
@@ -486,6 +507,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   }
 
   private async setDeviceBatteryLowState(deviceAddress: string, batteryLow: boolean, source: string): Promise<void> {
+    if (this.mainsPoweredDevices.has(deviceAddress)) return;
+
     const previous = this.deviceBatteryLowState.get(deviceAddress);
     if (previous === batteryLow) return;
 
