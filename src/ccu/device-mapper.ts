@@ -30,6 +30,7 @@ export const SUPPORTED_CHANNEL_TYPES = [
   'DIMMER',
   'HEATING_CLIMATECONTROL_TRANSCEIVER',
   'MOTION_DETECTOR',
+  'ROTARY_HANDLE_SENSOR',
   'SHUTTER_CONTACT',
   'SMOKE_DETECTOR',
   'SWITCH',
@@ -286,6 +287,15 @@ export function createEndpointForChannel(channel: CcuChannelInfo & { type: Suppo
       return finalizeEndpoint(
         new MatterbridgeEndpoint(contactSensor, { id })
           .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Shutter Contact')
+          .createDefaultBooleanStateClusterServer(true),
+        { ...options, batteryPowered: channel.batteryPowered },
+      );
+
+    case 'ROTARY_HANDLE_SENSOR':
+      return finalizeEndpoint(
+        new MatterbridgeEndpoint(contactSensor, { id })
+          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Rotary Handle Sensor')
+          // Default: closed (0). STATE 0=closed→stateValue=true, 1=tilted or 2=open→stateValue=false.
           .createDefaultBooleanStateClusterServer(true),
         { ...options, batteryPowered: channel.batteryPowered },
       );
