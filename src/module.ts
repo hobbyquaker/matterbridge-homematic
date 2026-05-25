@@ -86,6 +86,12 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    */
   private readonly rpcEchoSuppress = new Map<string, boolean | number>();
 
+  /** Tracks DIMMER channels that are currently moving (WORKING=true). */
+  private readonly dimmerWorking = new Map<string, boolean>();
+
+  /** Stores the last LEVEL received for a DIMMER channel while it was WORKING, applied when WORKING=false. */
+  private readonly dimmerPendingLevel = new Map<string, number>();
+
   private readonly deviceBatteryHints = new Map<string, boolean>();
 
   private readonly deviceBatteryLowState = new Map<string, boolean>();
@@ -134,6 +140,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       void this.handleRpcEventAvailability(event);
       void this.handleRpcEventBattery(event);
       void this.handleRpcEventSwitchState(event);
+      void this.handleRpcEventDimmerWorking(event);
       void this.handleRpcEventDimmerLevel(event);
     });
 
@@ -563,6 +570,68 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
     // Homematic LEVEL is 0.0–1.0; Matter currentLevel is 1–254 (0 means off).
     const hmLevel = typeof event.value === 'number' ? event.value : 0;
+
+    // Defer Matter update while the device is still moving (WORKING=true).
+    if (this.dimmerWorking.get(channelAddress) === true) {
+      this.dimmerPendingLevel.set(channelAddress, hmLevel);
+      this.log.debug(`DIMMER LEVEL event deferred (WORKING): channel=${channelAddress} level=${hmLevel}`);
+      return;
+    }
+
+    await this.applyDimmerLevel(channelAddress, endpoint, hmLevel);
+  }
+
+  /**
+   * Handle incoming RPC event for the DIMMER WORKING datapoint.
+   * Defers Matter updates while the device is moving; applies the last pending level when WORKING=false.
+   *
+   * @param {object} event RPC event payload.
+   * @param {string} [event.iface] Interface name.
+   * @param {string} [event.idInit] Init ID of the interface.
+   * @param {unknown} [event.channel] Channel address string.
+   * @param {string} [event.datapoint] Datapoint name (e.g. 'WORKING').
+   * @param {unknown} [event.value] Datapoint value (boolean).
+   * @returns {Promise<void>} Resolves when any pending update has been applied.
+   */
+  private async handleRpcEventDimmerWorking(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
+    const datapoint = typeof event.datapoint === 'string' ? event.datapoint.trim().toUpperCase() : '';
+    if (datapoint !== 'WORKING') return;
+
+    const channelAddress = typeof event.channel === 'string' ? event.channel : undefined;
+    if (!channelAddress) return;
+
+    // Only relevant for DIMMER channels.
+    if (!this.channelAddressToDevice.has(channelAddress)) return;
+
+    const isWorking = event.value === true || event.value === 1 || event.value === '1';
+    if (isWorking) {
+      this.dimmerWorking.set(channelAddress, true);
+      this.log.debug(`DIMMER WORKING=true: channel=${channelAddress}`);
+      return;
+    }
+
+    this.dimmerWorking.delete(channelAddress);
+    this.log.debug(`DIMMER WORKING=false: channel=${channelAddress}`);
+
+    const pending = this.dimmerPendingLevel.get(channelAddress);
+    if (pending === undefined) return;
+    this.dimmerPendingLevel.delete(channelAddress);
+
+    const endpoint = this.channelAddressToDevice.get(channelAddress);
+    if (!endpoint) return;
+
+    await this.applyDimmerLevel(channelAddress, endpoint, pending);
+  }
+
+  /**
+   * Apply a Homematic LEVEL value to the corresponding Matter LevelControl and OnOff attributes.
+   *
+   * @param {string} channelAddress Full channel address (e.g. 'DEVICE:3').
+   * @param {MatterbridgeEndpoint} endpoint The Matter endpoint to update.
+   * @param {number} hmLevel Homematic LEVEL value in the range 0.0–1.0.
+   * @returns {Promise<void>} Resolves when the attributes have been updated.
+   */
+  private async applyDimmerLevel(channelAddress: string, endpoint: MatterbridgeEndpoint, hmLevel: number): Promise<void> {
     const matterLevel = hmLevel > 0 ? Math.max(1, Math.round(hmLevel * 254)) : 0;
     const onOff = matterLevel > 0;
     // The level value the subscribeAttribute callback will see (round-tripped back from matterLevel).
