@@ -33,7 +33,7 @@ import { AnsiLogger, LogLevel } from 'matterbridge/logger';
 import { parseCcuConnectionConfig } from './ccu/config.js';
 import { CcuConnectionLayer } from './ccu/connection-layer.js';
 import { createEndpointForChannel, inferSwitchMatterTypeFromName, isSupportedChannelType, resolveChannelsForMatter } from './ccu/device-mapper.js';
-import { getMatchingMainsPoweredPrefix, isAlwaysMainsPoweredDeviceType, MAINS_POWERED_DEVICE_TYPE_PREFIXES } from './ccu/device-power.js';
+import { getBatteryVoltageRange, getMatchingMainsPoweredPrefix, isAlwaysMainsPoweredDeviceType, MAINS_POWERED_DEVICE_TYPE_PREFIXES } from './ccu/device-power.js';
 import { CcuChannelInfo, CcuChannelOverride, SwitchMatterType } from './ccu/types.js';
 
 /**
@@ -148,6 +148,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     this.ccuConnection.on('rpcEvent', (event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }) => {
       void this.handleRpcEventAvailability(event);
       void this.handleRpcEventBattery(event);
+      void this.handleRpcEventOperatingVoltage(event);
       void this.handleRpcEventSwitchState(event);
       void this.handleRpcEventContactState(event);
       void this.handleRpcEventDimmerWorking(event);
@@ -644,6 +645,48 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   }
 
   /**
+   * Handle incoming RPC event for OPERATING_VOLTAGE datapoint and update Matter batPercentRemaining.
+   *
+   * @param {object} event RPC event payload.
+   * @param {string} [event.iface] Interface name (e.g. 'HmIP-RF').
+   * @param {string} [event.idInit] Init ID of the interface.
+   * @param {unknown} [event.channel] Channel address string (always device channel 0).
+   * @param {string} [event.datapoint] Datapoint name (e.g. 'OPERATING_VOLTAGE').
+   * @param {unknown} [event.value] Voltage value in volts.
+   * @returns {Promise<void>} Resolves when the Matter attribute has been updated.
+   */
+  private async handleRpcEventOperatingVoltage(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
+    const datapoint = typeof event.datapoint === 'string' ? event.datapoint.trim().toUpperCase() : '';
+    if (datapoint !== 'OPERATING_VOLTAGE') return;
+
+    const deviceAddress = this.extractDeviceAddressFromRpcChannel(event.channel);
+    if (!deviceAddress) return;
+    if (this.mainsPoweredDevices.has(deviceAddress)) {
+      this.log.debug(`OPERATING_VOLTAGE event ignored for mains-powered device=${deviceAddress}`);
+      return;
+    }
+
+    const endpoint = this.deviceAddressToDevice.get(deviceAddress);
+    if (!endpoint?.hasClusterServer('PowerSource')) return;
+
+    const voltage = typeof event.value === 'number' ? event.value : 0;
+    const ch0 = this.discoveredChannels.find((ch) => ch.deviceAddress === deviceAddress && ch.channelIndex === 0);
+    const range = getBatteryVoltageRange(ch0?.deviceType);
+    const pct = Math.max(0, Math.min(100, Math.round(((voltage - range.min) / (range.max - range.min)) * 100)));
+    const batPercentRemaining = pct * 2;
+
+    try {
+      const current = await endpoint.getAttribute('PowerSource', 'batPercentRemaining');
+      if (current !== batPercentRemaining) {
+        await endpoint.updateAttribute('PowerSource', 'batPercentRemaining', batPercentRemaining);
+        this.log.info(`Battery voltage updated: ${deviceAddress} voltage=${voltage}V pct=${pct}% batPercentRemaining=${batPercentRemaining}`);
+      }
+    } catch (err) {
+      this.log.debug(`Failed to update batPercentRemaining for ${deviceAddress}: ${String(err)}`);
+    }
+  }
+
+  /**
    * Handle incoming RPC event for SWITCH channel STATE and update Matter endpoint.
    *
    * @param {object} event RPC event payload.
@@ -855,6 +898,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    * Maps to the Matter OccupancySensing cluster.
    *
    * @param {object} event RPC event payload.
+   * @param event.iface
+   * @param event.idInit
    * @param {unknown} [event.channel] Channel address string.
    * @param {string} [event.datapoint] Datapoint name (e.g. 'MOTION').
    * @param {unknown} [event.value] Datapoint value (boolean; true = motion detected).
@@ -889,6 +934,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    * Maps ACTUAL_TEMPERATURE to TemperatureMeasurement and HUMIDITY to RelativeHumidityMeasurement.
    *
    * @param {object} event RPC event payload.
+   * @param event.iface
+   * @param event.idInit
    * @param {unknown} [event.channel] Channel address string.
    * @param {string} [event.datapoint] Datapoint name ('ACTUAL_TEMPERATURE' or 'HUMIDITY').
    * @param {unknown} [event.value] Datapoint value (float; temperature in °C, humidity in %).
@@ -940,6 +987,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    * Maps SMOKE_DETECTOR_ALARM_STATUS (numeric) or STATE (boolean) to the Matter SmokeCoAlarm cluster.
    *
    * @param {object} event RPC event payload.
+   * @param event.iface
+   * @param event.idInit
    * @param {unknown} [event.channel] Channel address string.
    * @param {string} [event.datapoint] Datapoint name ('SMOKE_DETECTOR_ALARM_STATUS' or 'STATE').
    * @param {unknown} [event.value] Datapoint value (numeric alarm code or boolean).
@@ -957,12 +1006,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     if (!endpoint.hasClusterServer('SmokeCoAlarm')) return;
 
     // SMOKE_DETECTOR_ALARM_STATUS: 0 = normal, >0 = alarm.  STATE (boolean): true = alarm.
-    const alarmActive =
-      datapoint === 'STATE'
-        ? event.value === true || event.value === 1 || event.value === '1'
-        : typeof event.value === 'number'
-          ? event.value > 0
-          : false;
+    const alarmActive = datapoint === 'STATE' ? event.value === true || event.value === 1 || event.value === '1' : typeof event.value === 'number' ? event.value > 0 : false;
 
     // Matter SmokeCoAlarm.smokeState: 0=Normal, 1=Warning, 2=Critical.
     const smokeState = alarmActive ? 2 : 0;
@@ -983,6 +1027,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    * Thermostat.occupiedHeatingSetpoint. Derives systemMode from the setpoint level (≤4.5°C = Off).
    *
    * @param {object} event RPC event payload.
+   * @param event.iface
+   * @param event.idInit
    * @param {unknown} [event.channel] Channel address string.
    * @param {string} [event.datapoint] Datapoint name ('ACTUAL_TEMPERATURE', 'SET_POINT_TEMPERATURE', or 'SETPOINT').
    * @param {unknown} [event.value] Datapoint value (float, °C).
@@ -1041,6 +1087,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    * Only applies to venetian blind channels that support tilt (BLIND_VIRTUAL_RECEIVER).
    *
    * @param {object} event RPC event payload.
+   * @param event.iface
+   * @param event.idInit
    * @param {unknown} [event.channel] Channel address string.
    * @param {string} [event.datapoint] Datapoint name (e.g. 'LEVEL_2').
    * @param {unknown} [event.value] Datapoint value (0.0–1.0 float; 0=closed tilt, 1=open tilt).
@@ -1127,6 +1175,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    * Maps the movement direction to the Matter WindowCovering operationalStatus.
    *
    * @param {object} event RPC event payload.
+   * @param event.iface
+   * @param event.idInit
    * @param {unknown} [event.channel] Channel address string.
    * @param {string} [event.datapoint] Datapoint name ('ACTIVITY_STATE' or 'DIRECTION').
    * @param {unknown} [event.value] Datapoint value (integer: 0=stopped, 1=opening, 2=closing).
