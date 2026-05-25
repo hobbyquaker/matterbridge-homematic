@@ -17,16 +17,6 @@ This plugin bridges your Homematic CCU's devices to the Matter ecosystem
 
 # WORK IN PROGRESS. NOT YET PUBLISHED ON NPM.
 
-## Features
-
-- 🏠 **Full Homematic CCU Integration** - Connect to CCU3 or RaspberryMatic via RPC and ReGaHSS interfaces
-- 🔄 **Bidirectional Communication** - Subscribe to device changes via RPC callbacks
-- ⚡ **Smart Discovery Caching** - Fast startup with persistent cache of discovered devices
-- 🎛️ **Per-Channel Configuration** - Enable/disable devices and customize Matter device types per channel
-- 🔌 **Multiple RPC Interfaces** - Support for BidCos-RF, BidCos-Wired, HmIP-RF, VirtualDevices, and CUxD interfaces
-- 🌐 **Web Configuration UI** - Easy-to-use web interface for device management
-- 📱 **HomeKit Integration** - Full Matter protocol support for HomeKit compatibility
-
 ## Supported Device Types
 
 - **Contact Sensors** - Window/door open/close sensors

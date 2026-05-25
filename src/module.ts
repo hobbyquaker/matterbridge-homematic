@@ -27,7 +27,7 @@ import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http
 import os from 'node:os';
 import path from 'node:path';
 
-import { MatterbridgeDynamicPlatform, PlatformConfig, PlatformMatterbridge } from 'matterbridge';
+import { MatterbridgeDynamicPlatform, MatterbridgeEndpoint, PlatformConfig, PlatformMatterbridge } from 'matterbridge';
 import { AnsiLogger, LogLevel } from 'matterbridge/logger';
 
 import { parseCcuConnectionConfig } from './ccu/config.js';
@@ -74,6 +74,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
   private discoveredChannels: CcuChannelInfo[] = [];
 
+  private deviceAddressToDevice = new Map<string, MatterbridgeEndpoint>();
+
   constructor(matterbridge: PlatformMatterbridge, log: AnsiLogger, config: PlatformConfig) {
     // Always call super(matterbridge, log, config)
     super(matterbridge, log, config);
@@ -102,6 +104,18 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     const cacheDir = path.join(os.homedir(), '.matterbridge');
     this.ccuConnection = new CcuConnectionLayer(ccuConfig, this.log, cacheDir);
     await this.ccuConnection.start();
+
+    // Listen for channel updates and refresh device names when ReGa names arrive
+    this.ccuConnection.on('channelsUpdated', (updatedChannels: CcuChannelInfo[]) => {
+      this.log.debug(`Channels updated event received with ${updatedChannels.length} channels`);
+      this.refreshDeviceNames(updatedChannels);
+    });
+
+    // Listen for RPC events to track device availability via UNREACH datapoint
+    this.ccuConnection.on('rpcEvent', (event: { iface?: string; idInit?: string; channel?: number; datapoint?: string; value?: unknown }) => {
+      void this.handleRpcEventAvailability(event);
+    });
+
     await this.startChannelEditorServer();
 
     const status = this.ccuConnection.getStatusSnapshot();
@@ -169,7 +183,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
     const channels = await this.ccuConnection.discoverChannels();
     this.discoveredChannels = channels;
-    this.log.info(`Discovered ${channels.length} channels from CCU.`);
+    const channelsWithNames = channels.filter((c) => c.name).length;
+    this.log.info(`Discovered ${channels.length} channels from CCU (${channelsWithNames} have ReGa names).`);
 
     for (const channel of channels) {
       if (!isSupportedChannelType(channel.type)) continue;
@@ -189,6 +204,55 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
       endpoint.configUrl = this.buildChannelConfigUrl(channel.address);
       await this.registerDevice(endpoint);
+
+      // Track device for availability monitoring
+      this.deviceAddressToDevice.set(channel.deviceAddress, endpoint);
+    }
+  }
+
+  private async handleRpcEventAvailability(event: { iface?: string; idInit?: string; channel?: number; datapoint?: string; value?: unknown }): Promise<void> {
+    // We only care about UNREACH on channel 0 (device level)
+    if (event.channel !== 0 || event.datapoint !== 'UNREACH') return;
+
+    const unreachValue = event.value === true;
+    this.log.debug(`UNREACH event: iface=${String(event.iface ?? 'unknown')} unreachable=${unreachValue}`);
+
+    // Update all devices on the affected interface
+    for (const [deviceAddress, device] of this.deviceAddressToDevice) {
+      try {
+        // The reachable attribute is the inverse of UNREACH
+        const reachable = !unreachValue;
+        const currentReachable = await device.getAttribute('BridgedDeviceBasicInformation', 'reachable');
+
+        if (currentReachable !== reachable) {
+          this.log.info(`Device reachability changed: ${deviceAddress} reachable=${reachable}`);
+          await device.updateAttribute('BridgedDeviceBasicInformation', 'reachable', reachable);
+        }
+      } catch (err) {
+        this.log.debug(`Failed to update reachability for ${deviceAddress}: ${String(err)}`);
+      }
+    }
+  }
+
+  private refreshDeviceNames(updatedChannels: CcuChannelInfo[]): void {
+    const channelMap = new Map<string, CcuChannelInfo>(updatedChannels.map((c) => [c.address, c]));
+
+    for (const device of this.getDevices()) {
+      const channelAddress = device.originalId;
+      if (typeof channelAddress !== 'string') continue;
+
+      const updatedChannel = channelMap.get(channelAddress);
+
+      if (!updatedChannel) continue;
+
+      const newName = this.getChannelDisplayName(updatedChannel);
+      const oldName = device.deviceName;
+
+      if (newName && newName !== oldName && newName !== channelAddress) {
+        this.log.info(`Updating device name for ${channelAddress}: "${oldName}" -> "${newName}"`);
+        device.deviceName = newName;
+        this.setSelectDevice(channelAddress, newName, undefined, 'switch');
+      }
     }
   }
 
@@ -215,6 +279,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
   private getChannelDisplayName(channel: CcuChannelInfo): string {
     const regaName = channel.name?.trim();
+    this.log.debug(`getChannelDisplayName <- address=${channel.address} regaName=${regaName ? `"${regaName}"` : 'empty'} fallbacks=${channel.address}`);
     if (regaName && regaName.length > 0) return regaName;
     return channel.address;
   }

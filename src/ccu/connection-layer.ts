@@ -210,6 +210,7 @@ export class CcuConnectionLayer extends EventEmitter {
    * @returns {Promise<void>} Promise that resolves when refresh is complete.
    */
   private async refreshChannelsCache(): Promise<void> {
+    this.log.debug('refreshChannelsCache: started');
     const nameMap = await this.getRegaChannelNameMap();
     const channelLists = await Promise.all(
       [...this.clients.keys()].map(async (iface): Promise<CcuChannelInfo[]> => {
@@ -253,12 +254,16 @@ export class CcuConnectionLayer extends EventEmitter {
 
     await this.saveCache();
     this.log.debug(`discoverChannels cache: refreshed ${channels.length} channels and saved to disk`);
+    this.emit('channelsUpdated', channels);
   }
 
   private async getRegaChannelNameMap(): Promise<Map<string, string>> {
     const nameMap = new Map<string, string>();
 
+    this.log.debug(`getRegaChannelNameMap check <- regaClient=${this.regaClient ? 'initialized' : 'null'} regaEnabled=${this.config.regaEnabled}`);
+
     if (!this.regaClient || !this.config.regaEnabled) {
+      this.log.debug(`getRegaChannelNameMap early return <- reason=${!this.regaClient ? 'regaClient not initialized' : 'regaEnabled is false'}`);
       return nameMap;
     }
 
@@ -279,18 +284,32 @@ export class CcuConnectionLayer extends EventEmitter {
             reject(error);
             return;
           }
-          resolve(Array.isArray(result) ? result : []);
+          const resultArray = Array.isArray(result) ? result : [];
+          this.log.debug(`ReGa raw result <- method=getChannels type=${typeof result} isArray=${Array.isArray(result)} length=${resultArray.length}`);
+          resolve(resultArray);
         });
       });
       this.log.debug(`ReGa result <- method=getChannels durationMs=${Date.now() - started} channels=${channels.length}`);
 
       for (const channel of channels) {
-        if (typeof channel.address !== 'string' || !channel.address.includes(':')) continue;
-        const name = typeof channel.name === 'string' ? channel.name.trim() : '';
-        if (name) {
-          nameMap.set(channel.address, name);
+        const hasValidAddress = typeof channel.address === 'string' && channel.address.includes(':');
+
+        if (!hasValidAddress) {
+          this.log.debug(`ReGa channel skipped <- invalid address: ${JSON.stringify(channel)}`);
+          continue;
+        }
+
+        const trimmedName = typeof channel.name === 'string' ? channel.name.trim() : '';
+
+        if (trimmedName) {
+          nameMap.set(channel.address, trimmedName);
+          this.log.debug(`ReGa channel name added <- address=${channel.address} name=${trimmedName}`);
+        } else {
+          this.log.debug(`ReGa channel has no name <- address=${channel.address} rawName=${JSON.stringify(channel.name)}`);
         }
       }
+
+      this.log.debug(`ReGa channel names summary <- total=${nameMap.size} entries=${JSON.stringify(Object.fromEntries(nameMap))}`);
     } catch (err) {
       this.log.warn(`ReGa channel name fetch via getChannels failed: ${String(err)}`);
     }
@@ -393,7 +412,12 @@ export class CcuConnectionLayer extends EventEmitter {
   }
 
   private createRpcCallbackServer(protocol: 'xmlrpc' | 'binrpc', moduleFactory: RpcClientFactory, host: string, port: number): RpcServer | undefined {
-    if (typeof moduleFactory.createServer !== 'function') return undefined;
+    if (typeof moduleFactory.createServer !== 'function') {
+      this.log.warn(`RPC callback server create failed protocol=${protocol} host=${host} port=${port} reason=createServer unavailable`);
+      return undefined;
+    }
+
+    this.log.info(`RPC callback server create -> protocol=${protocol} host=${host} port=${port}`);
 
     const server = moduleFactory.createServer({ host, port }, () => {
       this.log.info(`RPC callback server listening protocol=${protocol} host=${host} port=${port}`);
@@ -431,11 +455,19 @@ export class CcuConnectionLayer extends EventEmitter {
 
     if (xmlIfaces.length > 0 && !this.callbackServers.has('xmlrpc')) {
       const server = this.createRpcCallbackServer('xmlrpc', xmlrpc, this.config.rpcServerHost, this.config.rpcXmlPort);
-      if (server) this.callbackServers.set('xmlrpc', server);
+      if (server) {
+        this.callbackServers.set('xmlrpc', server);
+      } else {
+        this.log.warn(`RPC callback server not created protocol=xmlrpc host=${this.config.rpcServerHost} port=${this.config.rpcXmlPort}`);
+      }
     }
     if (binIfaces.length > 0 && !this.callbackServers.has('binrpc')) {
       const server = this.createRpcCallbackServer('binrpc', binrpc, this.config.rpcServerHost, this.config.rpcBinPort);
-      if (server) this.callbackServers.set('binrpc', server);
+      if (server) {
+        this.callbackServers.set('binrpc', server);
+      } else {
+        this.log.warn(`RPC callback server not created protocol=binrpc host=${this.config.rpcServerHost} port=${this.config.rpcBinPort}`);
+      }
     }
 
     await Promise.all(
