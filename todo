@@ -1,0 +1,54 @@
+What we can learn and adapt from RedMatic-HomeKit + paramsets.json
+
+A. BLIND: only bidcos (channeltype BLIND) is working, hmip BLIND_VIRTUAL_TRANSCEIVER device isnt generated.
+
+B. Auto choose matter device type by channel rega name
+if channel name contains "licht" or "light" or "lampe" choose matter light for SWITCH channels
+if channel name contains "standby" or "plug" or "steckdose" choose matter outlet for SWITCH channel
+
+1. BLIND: ACTIVITY_STATE / DIRECTION → WindowCovering.operationalStatus
+RedMatic subscribes to a separate datapoint (ACTIVITY_STATE on HmIP, DIRECTION on classic BidCos) and maps it to the WindowCovering position state (increasing / decreasing / stopped). We currently ignore this. It should be subscribed and applied to the WindowCovering cluster's operational status so controllers show a "moving" indicator.
+
+Values:
+
+ACTIVITY_STATE / DIRECTION: 0 = stopped, 1 = opening (INCREASING), 2 = closing (DECREASING)
+2. Venetian blinds (BLIND_VIRTUAL_RECEIVER) — tilt via LEVEL_2
+BLIND_VIRTUAL_RECEIVER channels have a second level datapoint LEVEL_2 (0.0–1.0) for slat tilt. SHUTTER_VIRTUAL_RECEIVER channels do not. RedMatic uses putParamset({LEVEL, LEVEL_2}) to set both atomically and maps LEVEL_2 to HomeKit's TargetVerticalTiltAngle ((value * 180) - 90 → °). Matter's WindowCovering cluster has a matching tilt lift attribute.
+
+We need to: detect BLIND_VIRTUAL_RECEIVER type vs SHUTTER_VIRTUAL_RECEIVER in resolveChannelsForMatter and flag tilt support accordingly; subscribe and write LEVEL_2; use putParamset instead of individual setValue for blind actuators.
+
+3. New channel types to add
+Homematic channel type	Datapoint(s)	Matter cluster	Notes
+MOTION_DETECTOR	MOTION (bool)	occupancySensor	widely deployed; HM-Sec-MDIR, HmIP-SMI/SMO
+MOTION_DETECTOR	ILLUMINATION (float, lux)	lightSensor	optional alongside motion
+TEMPERATURE_HUMIDITY_TRANSMITTER	ACTUAL_TEMPERATURE, HUMIDITY	temperatureSensor + humiditySensor	HM-WDS40-TH-I, HmIP-STH/STHD
+THERMALCONTROL_TRANSMIT / CLIMATECONTROL_RT_TRANSCEIVER	ACTUAL_TEMPERATURE, SET_POINT_TEMPERATURE, CONTROL_MODE, LEVEL	thermostat	TRV and wall thermostats; complex bidirectional
+SMOKE_DETECTOR	SMOKE_DETECTOR_ALARM_STATUS	smokeCOAlarm	HmIP-SWSD; SMOKE_DETECTOR_TEST_RESULT for fault state
+ALARMSTATE devices (flood/water)	ALARMSTATE	waterFreeze / WaterLeak cluster	HmIP-SWD
+POWERMETER	POWER, ENERGY_COUNTER, STATE	onOffOutlet + power measurement	HM-ES-PMSw1, HmIP-PSM
+WEATHER	TEMPERATURE, HUMIDITY, WIND_SPEED, BRIGHTNESS, RAIN_COUNTER	Multiple sensors	HM-WDS100-C6-O; expose sub-sensors per datapoint
+4. Channel address conventions confirmed
+Status/battery datapoints always on channel :0: LOW_BAT, UNREACH, OPERATING_VOLTAGE, SABOTAGE, ERROR_CODE
+Classic BidCos uses LOWBAT (no underscore); HmIP uses LOW_BAT
+OPERATING_VOLTAGE on HmIP channel :0 can be mapped to a percentage (battery level)
+We should extend the UNREACH/battery logic in discoverDevices to also subscribe to OPERATING_VOLTAGE on HmIP devices and map it to the battery percentage (RedMatic converts: value - 2.0) / (3.0 - 2.0) * 100).
+
+5. putParamset vs setValue for blinds
+RedMatic always uses putParamset (not setValue) when writing LEVEL+LEVEL_2 atomically for blind channels. We currently use setValue for LEVEL alone. For venetian blinds this is required; for simple shutters it might also be safer.
+
+6. Power meter SWITCH — Outlet service with power measurement
+The HM-ES-PMSw1 / HMIP-PSM devices expose POWER on a separate channel. RedMatic assigns OutletInUse to POWER > 0. We could expose a Matter onOffOutlet device and additionally surface a ElectricalEnergyMeasurement or ElectricalPowerMeasurement cluster.
+
+7. HM-Sec-RHS / HmIP-SRH (window handle sensor) — 3-state contact
+STATE = 0 (closed), 1 (tilted), 2 (open). No direct Matter equivalent. Can be exposed as a contact sensor (0 = closed, else open)
+
+
+
+Priority order for next implementations
+BLIND HMIP
+BLIND ACTIVITY_STATE subscription → operationalStatus (low effort, high correctness)
+Venetian blind tilt (LEVEL_2, BLIND_VIRTUAL_RECEIVER detection, putParamset)
+MOTION_DETECTOR → occupancySensor (very common hardware, straightforward)
+TEMPERATURE_HUMIDITY_TRANSMITTER → temperatureSensor + humiditySensor (very common)
+SMOKE_DETECTOR → smokeCOAlarm
+THERMOSTAT (complex, needs CONTROL_MODE, SET_POINT_TEMPERATURE, LEVEL for valve state)

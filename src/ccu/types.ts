@@ -95,6 +95,8 @@ export interface CcuChannelInfo {
   name?: string;
   /** Whether the parent device is battery powered, inferred from channel 0 datapoints. */
   batteryPowered?: boolean;
+  /** Whether this BLIND channel supports slat tilt control via the LEVEL_2 datapoint (venetian blinds). */
+  tiltSupported?: boolean;
 }
 
 /** Matter device type selection for Homematic SWITCH channels. */

@@ -16,14 +16,23 @@ export type SupportedChannelType = (typeof SUPPORTED_CHANNEL_TYPES)[number];
 
 /**
  * HmIP transmitter/virtual-receiver channel type pairs.
- * For each TRANSMITTER channel found on a device, the first VIRTUAL_RECEIVER channel
+ * For each TRANSMITTER channel found on a device, the first matching VIRTUAL_RECEIVER channel
  * with a higher channel index is selected and remapped to the canonical Matter-ready type.
  */
-const HMIP_CHANNEL_PAIRS: Array<{ transmitter: string; receiver: string; matterType: SupportedChannelType }> = [
-  { transmitter: 'SWITCH_TRANSMITTER', receiver: 'SWITCH_VIRTUAL_RECEIVER', matterType: 'SWITCH' },
-  { transmitter: 'DIMMER_TRANSMITTER', receiver: 'DIMMER_VIRTUAL_RECEIVER', matterType: 'DIMMER' },
-  { transmitter: 'BLIND_TRANSMITTER', receiver: 'BLIND_VIRTUAL_TRANSCEIVER', matterType: 'BLIND' },
+const HMIP_CHANNEL_PAIRS: Array<{ transmitter: string; receivers: string[]; matterType: SupportedChannelType }> = [
+  { transmitter: 'SWITCH_TRANSMITTER', receivers: ['SWITCH_VIRTUAL_RECEIVER'], matterType: 'SWITCH' },
+  { transmitter: 'DIMMER_TRANSMITTER', receivers: ['DIMMER_VIRTUAL_RECEIVER'], matterType: 'DIMMER' },
+  {
+    transmitter: 'BLIND_TRANSMITTER',
+    // HmIP uses BLIND_VIRTUAL_RECEIVER (venetian) or SHUTTER_VIRTUAL_RECEIVER (simple shutter).
+    // Some CCU firmware variants report BLIND_VIRTUAL_TRANSCEIVER instead.
+    receivers: ['BLIND_VIRTUAL_RECEIVER', 'BLIND_VIRTUAL_TRANSCEIVER', 'SHUTTER_VIRTUAL_RECEIVER'],
+    matterType: 'BLIND',
+  },
 ];
+
+/** HmIP virtual-receiver channel types that should be exposed as BLIND even without a BLIND_TRANSMITTER companion. */
+const STANDALONE_BLIND_VIRTUAL_TYPES = ['BLIND_VIRTUAL_RECEIVER', 'BLIND_VIRTUAL_TRANSCEIVER', 'SHUTTER_VIRTUAL_RECEIVER'] as const;
 
 /**
  * Select the channels that should be exposed as Matter devices from the full CCU channel list.
@@ -64,18 +73,35 @@ export function resolveChannelsForMatter(allChannels: CcuChannelInfo[]): CcuChan
 
       // Mark all transmitter and receiver channels as handled.
       for (const ch of deviceChannels) {
-        if (ch.type === pair.transmitter || ch.type === pair.receiver) {
+        if (ch.type === pair.transmitter || pair.receivers.includes(ch.type)) {
           hmipHandled.add(ch.address);
         }
       }
 
       for (const tx of transmitters) {
-        // The first receiver channel whose index is greater than the transmitter's.
-        const rx = deviceChannels.find((c) => c.type === pair.receiver && c.channelIndex > tx.channelIndex);
+        // The first receiver channel whose type is in the accepted list and index > transmitter.
+        const rx = deviceChannels.find((c) => pair.receivers.includes(c.type) && c.channelIndex > tx.channelIndex);
         if (!rx) continue;
-        // Return a copy with the type remapped to the canonical Matter-ready type.
-        hmipSelected.push({ ...rx, type: pair.matterType });
+        // BLIND_VIRTUAL_RECEIVER indicates venetian blind with tilt (LEVEL_2) support.
+        const tiltSupported = pair.matterType === 'BLIND' && rx.type === 'BLIND_VIRTUAL_RECEIVER';
+        hmipSelected.push({ ...rx, type: pair.matterType, tiltSupported });
       }
+    }
+
+    // Handle standalone HmIP blind virtual channels (devices with no BLIND_TRANSMITTER).
+    // HmIP exposes 3 virtual channels per physical output; take the first of each block of 3.
+    const unhandledBlinds = deviceChannels
+      .filter((c) => (STANDALONE_BLIND_VIRTUAL_TYPES as readonly string[]).includes(c.type) && !hmipHandled.has(c.address))
+      .sort((a, b) => a.channelIndex - b.channelIndex);
+
+    let blindSlot = 0;
+    for (const ch of unhandledBlinds) {
+      hmipHandled.add(ch.address);
+      if (blindSlot === 0) {
+        const tiltSupported = ch.type === 'BLIND_VIRTUAL_RECEIVER';
+        hmipSelected.push({ ...ch, type: 'BLIND' as SupportedChannelType, tiltSupported });
+      }
+      blindSlot = (blindSlot + 1) % 3;
     }
 
     // Pass through all non-HmIP-handled channels unchanged.
