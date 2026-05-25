@@ -8,6 +8,7 @@ import {
   contactSensor,
   coverDevice,
   dimmableLight,
+  electricalSensor,
   humiditySensor,
   lightSensor,
   MatterbridgeEndpoint,
@@ -30,6 +31,7 @@ export const SUPPORTED_CHANNEL_TYPES = [
   'DIMMER',
   'HEATING_CLIMATECONTROL_TRANSCEIVER',
   'MOTION_DETECTOR',
+  'POWERMETER',
   'ROTARY_HANDLE_SENSOR',
   'SHUTTER_CONTACT',
   'SMOKE_DETECTOR',
@@ -308,6 +310,15 @@ export function createEndpointForChannel(channel: CcuChannelInfo & { type: Suppo
           .createDefaultOccupancySensingClusterServer(false)
           // Default: null illuminance. Updated from ILLUMINATION RPC events.
           .createDefaultIlluminanceMeasurementClusterServer(),
+        { ...options, batteryPowered: channel.batteryPowered },
+      );
+
+    case 'POWERMETER':
+      return finalizeEndpoint(
+        new MatterbridgeEndpoint(electricalSensor, { id })
+          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Power Meter')
+          // Defaults: null power/current/voltage. Updated from POWER/CURRENT/VOLTAGE RPC events.
+          .createDefaultElectricalPowerMeasurementClusterServer(),
         { ...options, batteryPowered: channel.batteryPowered },
       );
 

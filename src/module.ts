@@ -168,6 +168,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       void this.handleRpcEventSmoke(event);
       void this.handleRpcEventAlarmState(event);
       void this.handleRpcEventRotaryHandle(event);
+      void this.handleRpcEventPowerMeter(event);
       void this.handleRpcEventThermostat(event);
     });
 
@@ -404,6 +405,11 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       // Track ROTARY_HANDLE_SENSOR channel address in its own map to avoid STATE conflicts with SHUTTER_CONTACT.
       if (channel.type === 'ROTARY_HANDLE_SENSOR') {
         this.rotaryHandleChannels.set(channel.address, endpoint);
+      }
+
+      // Track POWERMETER channel address for inbound POWER/CURRENT/VOLTAGE events.
+      if (channel.type === 'POWERMETER') {
+        this.channelAddressToDevice.set(channel.address, endpoint);
       }
 
       // Wire Thermostat setpoint and mode for HEATING_CLIMATECONTROL_TRANSCEIVER/THERMALCONTROL_TRANSMIT channels.
@@ -1151,6 +1157,49 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       }
     } catch (err) {
       this.log.warn(`Failed to update BooleanState for rotary handle ${channelAddress}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Handle incoming RPC event for POWERMETER channel datapoints.
+   * Maps POWER (W), CURRENT (A), and VOLTAGE (V) to Matter ElectricalPowerMeasurement cluster attributes.
+   * Values are converted to milliwatts/milliamps/millivolts as required by the cluster.
+   *
+   * @param {object} event RPC event payload.
+   * @param event.iface
+   * @param event.idInit
+   * @param {unknown} [event.channel] Channel address string.
+   * @param {string} [event.datapoint] Datapoint name ('POWER', 'CURRENT', or 'VOLTAGE').
+   * @param {unknown} [event.value] Datapoint value (float).
+   * @returns {Promise<void>} Resolves when the Matter attribute has been updated.
+   */
+  private async handleRpcEventPowerMeter(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
+    const datapoint = typeof event.datapoint === 'string' ? event.datapoint.trim().toUpperCase() : '';
+    if (datapoint !== 'POWER' && datapoint !== 'CURRENT' && datapoint !== 'VOLTAGE') return;
+
+    const channelAddress = typeof event.channel === 'string' ? event.channel : undefined;
+    if (!channelAddress) return;
+
+    const endpoint = this.channelAddressToDevice.get(channelAddress);
+    if (!endpoint) return;
+    if (!endpoint.hasClusterServer('ElectricalPowerMeasurement')) return;
+
+    const raw = typeof event.value === 'number' ? event.value : 0;
+
+    // ElectricalPowerMeasurement uses milliwatts/milliamps/millivolts.
+    const attrMap: Record<string, string> = { POWER: 'activePower', CURRENT: 'activeCurrent', VOLTAGE: 'voltage' };
+    const attr = attrMap[datapoint];
+    if (!attr) return;
+
+    const milliValue = Math.round(raw * 1000);
+    try {
+      const current = await endpoint.getAttribute('ElectricalPowerMeasurement', attr);
+      if (current !== milliValue) {
+        await endpoint.updateAttribute('ElectricalPowerMeasurement', attr, milliValue);
+        this.log.info(`POWERMETER ${datapoint} event: updated ${attr} for ${channelAddress} to ${milliValue} (${raw} raw)`);
+      }
+    } catch (err) {
+      this.log.warn(`Failed to update ElectricalPowerMeasurement.${attr} for ${channelAddress}: ${String(err)}`);
     }
   }
 
