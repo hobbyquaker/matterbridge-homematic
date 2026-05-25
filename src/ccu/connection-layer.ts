@@ -99,14 +99,14 @@ export class CcuConnectionLayer extends EventEmitter {
    * @param {RpcInterfaceName} iface Interface name (e.g. 'BidCos-RF', 'HmIP-RF').
    * @param {string} channelAddress Full channel address (e.g. 'OEQ0854602:1').
    * @param {string} datapoint Datapoint name (e.g. 'STATE').
-   * @param {boolean|number} value Value to set (boolean or number).
+   * @param {boolean|number|string} value Value to set (boolean, number, or string).
    * @param {number} [timeoutMs] Optional timeout in milliseconds for the RPC call.
    */
   public async setChannelDatapointValue(
     iface: RpcInterfaceName,
     channelAddress: string,
     datapoint: string,
-    value: boolean | number,
+    value: boolean | number | string,
     timeoutMs = this.getRequestTimeoutMs(),
   ): Promise<void> {
     await this.callRpc(iface, 'setValue', [channelAddress, datapoint, value], timeoutMs);

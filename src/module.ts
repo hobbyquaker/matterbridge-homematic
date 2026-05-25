@@ -318,7 +318,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
               return;
             }
             this.log.debug(`Matter currentLevel -> Homematic setValue: iface=${iface} channel=${address} level=${level}`);
-            ccuConn.setChannelDatapointValue(iface, address, 'LEVEL', level).catch((err: unknown) => {
+            ccuConn.setChannelDatapointValue(iface, address, 'LEVEL', String(level)).catch((err: unknown) => {
               this.log.warn(`Failed to set Homematic LEVEL for ${address}: ${String(err)}`);
             });
           });
@@ -339,7 +339,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
             // 1.005 is the Homematic special LEVEL value that restores the last active level.
             const level = value ? 1.005 : 0;
             this.log.debug(`Matter OnOff -> Homematic LEVEL: iface=${iface} channel=${address} onOff=${value} level=${level}`);
-            ccuConn.setChannelDatapointValue(iface, address, 'LEVEL', level).catch((err: unknown) => {
+            ccuConn.setChannelDatapointValue(iface, address, 'LEVEL', String(level)).catch((err: unknown) => {
               this.log.warn(`Failed to set Homematic LEVEL for ${address}: ${String(err)}`);
             });
           });
