@@ -160,6 +160,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       void this.handleRpcEventIlluminance(event);
       void this.handleRpcEventTemperatureHumidity(event);
       void this.handleRpcEventSmoke(event);
+      void this.handleRpcEventAlarmState(event);
       void this.handleRpcEventThermostat(event);
     });
 
@@ -384,6 +385,11 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
       // Track SMOKE_DETECTOR channel address for inbound alarm events.
       if (channel.type === 'SMOKE_DETECTOR') {
+        this.channelAddressToDevice.set(channel.address, endpoint);
+      }
+
+      // Track ALARMSTATE channel address for inbound water-leak alarm events.
+      if (channel.type === 'ALARMSTATE') {
         this.channelAddressToDevice.set(channel.address, endpoint);
       }
 
@@ -1056,6 +1062,43 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       }
     } catch (err) {
       this.log.warn(`Failed to update SmokeCoAlarm for ${channelAddress}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Handle incoming RPC event for ALARMSTATE channel water-leak alarm datapoint.
+   * Maps ALARMSTATE (numeric/boolean) to the Matter BooleanState cluster on a waterLeakDetector endpoint.
+   *
+   * @param {object} event RPC event payload.
+   * @param event.iface
+   * @param event.idInit
+   * @param {unknown} [event.channel] Channel address string.
+   * @param {string} [event.datapoint] Datapoint name (e.g. 'ALARMSTATE').
+   * @param {unknown} [event.value] Alarm state value (numeric >0 = alarm, 0 = normal; or boolean).
+   * @returns {Promise<void>} Resolves when the Matter attribute has been updated.
+   */
+  private async handleRpcEventAlarmState(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
+    const datapoint = typeof event.datapoint === 'string' ? event.datapoint.trim().toUpperCase() : '';
+    if (datapoint !== 'ALARMSTATE') return;
+
+    const channelAddress = typeof event.channel === 'string' ? event.channel : undefined;
+    if (!channelAddress) return;
+
+    const endpoint = this.channelAddressToDevice.get(channelAddress);
+    if (!endpoint) return;
+    if (!endpoint.hasClusterServer('BooleanState')) return;
+
+    // ALARMSTATE: 0 = no alarm, >0 = alarm active. Boolean true = alarm.
+    const leakDetected = typeof event.value === 'number' ? event.value > 0 : event.value === true || event.value === 1 || event.value === '1';
+
+    try {
+      const current = await endpoint.getAttribute('BooleanState', 'stateValue');
+      if (current !== leakDetected) {
+        await endpoint.updateAttribute('BooleanState', 'stateValue', leakDetected);
+        this.log.info(`ALARMSTATE event: updated water-leak stateValue for ${channelAddress} to ${leakDetected}`);
+      }
+    } catch (err) {
+      this.log.warn(`Failed to update BooleanState for ${channelAddress}: ${String(err)}`);
     }
   }
 

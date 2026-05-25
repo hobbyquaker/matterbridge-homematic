@@ -18,12 +18,14 @@ import {
   smokeCoAlarm,
   temperatureSensor,
   thermostatDevice,
+  waterLeakDetector,
 } from 'matterbridge';
 
 import { CcuChannelInfo, SwitchMatterType } from './types.js';
 
 /** Homematic channel types that are mapped to Matter devices by this plugin. */
 export const SUPPORTED_CHANNEL_TYPES = [
+  'ALARMSTATE',
   'BLIND',
   'DIMMER',
   'HEATING_CLIMATECONTROL_TRANSCEIVER',
@@ -203,6 +205,15 @@ export function createEndpointForChannel(channel: CcuChannelInfo & { type: Suppo
   const id = `hm-${channel.address.replace(':', '-')}`;
 
   switch (channel.type) {
+    case 'ALARMSTATE':
+      return finalizeEndpoint(
+        new MatterbridgeEndpoint(waterLeakDetector, { id })
+          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Water Leak Detector')
+          // Default: no leak. stateValue=false=no leak, stateValue=true=leak detected.
+          .createDefaultBooleanStateClusterServer(false),
+        { ...options, batteryPowered: channel.batteryPowered },
+      );
+
     case 'BLIND':
       if (channel.tiltSupported) {
         return finalizeEndpoint(
