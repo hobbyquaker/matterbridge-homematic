@@ -318,6 +318,27 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         } catch (err) {
           this.log.warn(`Failed to subscribe LevelControl for ${channel.address}: ${String(err)}`);
         }
+        // Wire OnOff for DIMMER: on -> LEVEL 1.005 (restore last level), off -> LEVEL 0.0.
+        try {
+          await endpoint.subscribeAttribute('OnOff', 'onOff', (value: boolean) => {
+            const iface = channel.interfaceName;
+            const address = channel.address;
+            // Suppress setValue when this change was triggered by an incoming RPC event.
+            const suppress = this.rpcEchoSuppress.get(address + ':onoff');
+            if (suppress !== undefined && suppress === value) {
+              this.rpcEchoSuppress.delete(address + ':onoff');
+              return;
+            }
+            // 1.005 is the Homematic special LEVEL value that restores the last active level.
+            const level = value ? 1.005 : 0;
+            this.log.debug(`Matter OnOff -> Homematic LEVEL: iface=${iface} channel=${address} onOff=${value} level=${level}`);
+            ccuConn.setChannelDatapointValue(iface, address, 'LEVEL', level).catch((err: unknown) => {
+              this.log.warn(`Failed to set Homematic LEVEL for ${address}: ${String(err)}`);
+            });
+          });
+        } catch (err) {
+          this.log.warn(`Failed to subscribe OnOff (dimmer) for ${channel.address}: ${String(err)}`);
+        }
       }
     }
 
@@ -554,12 +575,14 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       if (endpoint.hasClusterServer('OnOff')) {
         const currentOnOff = await endpoint.getAttribute('OnOff', 'onOff');
         if (currentOnOff !== onOff) {
+          this.rpcEchoSuppress.set(channelAddress + ':onoff', onOff);
           await endpoint.updateAttribute('OnOff', 'onOff', onOff);
         }
       }
       this.log.info(`DIMMER LEVEL event: updated Matter level for ${channelAddress} to ${matterLevel} (onOff=${onOff})`);
     } catch (err) {
       this.rpcEchoSuppress.delete(channelAddress);
+      this.rpcEchoSuppress.delete(channelAddress + ':onoff');
       this.log.warn(`Failed to update Matter LevelControl for ${channelAddress}: ${String(err)}`);
     }
   }
