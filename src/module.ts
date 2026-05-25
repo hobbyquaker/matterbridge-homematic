@@ -99,9 +99,6 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     // Wait for the platform to fully load the select if you use them.
     await this.ready;
 
-    // Clean the selectDevice and selectEntity maps, if you want to reset the select. This is useful when you have an API that sends all the devices and you want to rediscover all of them.
-    await this.clearSelect();
-
     const ccuConfig = parseCcuConnectionConfig(this.config);
     const cacheDir = path.join(os.homedir(), '.matterbridge');
     this.ccuConnection = new CcuConnectionLayer(ccuConfig, this.log, cacheDir);
@@ -203,9 +200,12 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
       const displayName = this.getChannelDisplayName(channel);
       const override = this.getChannelOverride(channel.address);
+
+      // Read current persisted selection before updating visible metadata.
+      const wasSelected = this.getSelectDevice(channel.address) !== undefined;
       this.setSelectDevice(channel.address, displayName, undefined, 'switch');
 
-      if (!this.isChannelEnabled(channel, displayName, override)) {
+      if (!this.isChannelEnabled(channel, override, wasSelected)) {
         this.log.debug(`Skipping disabled channel ${channel.address}`);
         continue;
       }
@@ -225,7 +225,9 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       this.deviceAddressToDevice.set(channel.deviceAddress, endpoint);
     }
 
-    this.log.info(`Channel registration summary: enabled=${enabledCount} registered=${registeredCount} totalSupported=${channels.filter((c) => isSupportedChannelType(c.type)).length}`);
+    this.log.info(
+      `Channel registration summary: enabled=${enabledCount} registered=${registeredCount} totalSupported=${channels.filter((c) => isSupportedChannelType(c.type)).length}`,
+    );
   }
 
   private async loadPersistedChannelOverrides(): Promise<void> {
@@ -304,12 +306,12 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     return this.getChannelOverrides().find((item) => item.address === channelAddress);
   }
 
-  private isChannelEnabled(channel: CcuChannelInfo, displayName: string, override?: CcuChannelOverride): boolean {
+  private isChannelEnabled(channel: CcuChannelInfo, override: CcuChannelOverride | undefined, wasSelected: boolean): boolean {
     if (override && typeof override.enabled === 'boolean') {
       return override.enabled;
     }
-    // New default: channels are opt-in and stay disabled until explicitly enabled.
-    return false;
+    // Fallback to Matterbridge persisted selection checkboxes when no explicit override exists.
+    return wasSelected;
   }
 
   private getChannelDisplayName(channel: CcuChannelInfo): string {
