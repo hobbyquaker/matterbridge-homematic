@@ -48,6 +48,15 @@ interface RpcInterfaceDefinition {
 }
 
 export class CcuConnectionLayer extends EventEmitter {
+  /**
+   * Set a datapoint value on a Homematic channel via RPC.
+   *
+   * @param iface Interface name (e.g. 'BidCos-RF', 'HmIP-RF').
+   * @param channelAddress Full channel address (e.g. 'OEQ0854602:1').
+   * @param datapoint Datapoint name (e.g. 'STATE').
+   * @param value Value to set (boolean or number).
+   * @param timeoutMs
+   */
   private readonly clients = new Map<RpcInterfaceName, RpcClient>();
 
   private readonly callbackServers = new Map<'xmlrpc' | 'binrpc', RpcServer>();
@@ -82,6 +91,26 @@ export class CcuConnectionLayer extends EventEmitter {
   ) {
     super();
     this.cacheFilePath = path.join(cacheDir ?? process.cwd(), 'matterbridge-homematic-discovery.cache.json');
+  }
+
+  /**
+   * Set a datapoint value on a Homematic channel via RPC.
+   *
+   * @param iface Interface name (e.g. 'BidCos-RF', 'HmIP-RF').
+   * @param channelAddress Full channel address (e.g. 'OEQ0854602:1').
+   * @param datapoint Datapoint name (e.g. 'STATE').
+   * @param value Value to set (boolean or number).
+   * @param timeoutMs
+   */
+  public async setChannelDatapointValue(
+    iface: RpcInterfaceName,
+    channelAddress: string,
+    datapoint: string,
+    value: boolean | number,
+    timeoutMs = this.getRequestTimeoutMs(),
+  ): Promise<void> {
+    await this.callRpc(iface, 'setValue', [channelAddress, datapoint, value], timeoutMs);
+    this.log.debug(`setChannelDatapointValue -> iface=${iface} channel=${channelAddress} datapoint=${datapoint} value=${value}`);
   }
 
   /**

@@ -1,3 +1,34 @@
+
+  /**
+   * Handle incoming RPC event for SWITCH channel STATE and update Matter endpoint.
+   */
+  private async handleRpcEventSwitchState(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
+    const datapoint = typeof event.datapoint === 'string' ? event.datapoint.trim().toUpperCase() : '';
+    if (datapoint !== 'STATE') return;
+
+    const channelAddress = typeof event.channel === 'string' ? event.channel : undefined;
+    if (!channelAddress) return;
+
+    // Find endpoint for this channel
+    const endpoint = Array.from(this.deviceAddressToDevice.values()).find(
+      (ep) => typeof ep.originalId === 'string' && ep.originalId.replace(/^hm-/, '') === channelAddress.replace(':', '-')
+    );
+    if (!endpoint) return;
+
+    // Only update if endpoint has OnOff cluster
+    if (!endpoint.hasClusterServer('OnOff')) return;
+
+    const newValue = event.value === true || event.value === 1 || event.value === '1';
+    try {
+      const current = await endpoint.getAttribute('OnOff', 'onOff');
+      if (current !== newValue) {
+        await endpoint.updateAttribute('OnOff', 'onOff', newValue);
+        this.log.info(`SWITCH STATE event: Updated Matter OnOff for ${channelAddress} to ${newValue}`);
+      }
+    } catch (err) {
+      this.log.warn(`Failed to update Matter OnOff for ${channelAddress}: ${String(err)}`);
+    }
+  }
 /**
  * This file contains the plugin template.
  *
@@ -120,9 +151,11 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     });
 
     // Listen for RPC events to track device availability via UNREACH datapoint
+
     this.ccuConnection.on('rpcEvent', (event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }) => {
       void this.handleRpcEventAvailability(event);
       void this.handleRpcEventBattery(event);
+      void this.handleRpcEventSwitchState(event);
     });
 
     this.ccuConnection.on('deviceBatteryHint', (hint: { deviceAddress?: string; batteryPowered?: boolean }) => {
@@ -220,6 +253,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     let enabledCount = 0;
     let registeredCount = 0;
 
+
     for (const channel of channels) {
       if (!isSupportedChannelType(channel.type)) continue;
 
@@ -253,7 +287,57 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
       // Track device for availability monitoring
       this.deviceAddressToDevice.set(channel.deviceAddress, endpoint);
+
+      // Wire OnOff attribute for SWITCH channels
+      if (channel.type === 'SWITCH' && this.ccuConnection) {
+        try {
+          endpoint.subscribeAttribute('OnOff', 'onOff', async (value: boolean) => {
+            // Find the correct interface for this channel
+            const iface = channel.interfaceName;
+            const address = channel.address;
+            this.log.debug(`Matter OnOff -> Homematic setValue: iface=${iface} channel=${address} value=${value}`);
+            try {
+              await this.ccuConnection!.setChannelDatapointValue(iface, address, 'STATE', value);
+            } catch (err) {
+              this.log.warn(`Failed to set Homematic STATE for ${address}: ${String(err)}`);
+            }
+          });
+        } catch (err) {
+          this.log.warn(`Failed to subscribe OnOff for ${channel.address}: ${String(err)}`);
+        }
+      }
     }
+
+  /**
+   * Handle incoming RPC event for SWITCH channel STATE and update Matter endpoint.
+   */
+  private async handleRpcEventSwitchState(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
+    const datapoint = typeof event.datapoint === 'string' ? event.datapoint.trim().toUpperCase() : '';
+    if (datapoint !== 'STATE') return;
+
+    const channelAddress = typeof event.channel === 'string' ? event.channel : undefined;
+    if (!channelAddress) return;
+
+    // Find endpoint for this channel
+    const endpoint = Array.from(this.deviceAddressToDevice.values()).find(
+      (ep) => typeof ep.originalId === 'string' && ep.originalId.replace(/^hm-/, '') === channelAddress.replace(':', '-')
+    );
+    if (!endpoint) return;
+
+    // Only update if endpoint has OnOff cluster
+    if (!endpoint.hasClusterServer('OnOff')) return;
+
+    const newValue = event.value === true || event.value === 1 || event.value === '1';
+    try {
+      const current = await endpoint.getAttribute('OnOff', 'onOff');
+      if (current !== newValue) {
+        await endpoint.updateAttribute('OnOff', 'onOff', newValue);
+        this.log.info(`SWITCH STATE event: Updated Matter OnOff for ${channelAddress} to ${newValue}`);
+      }
+    } catch (err) {
+      this.log.warn(`Failed to update Matter OnOff for ${channelAddress}: ${String(err)}`);
+    }
+  }
 
     this.log.info(
       `Channel registration summary: enabled=${enabledCount} registered=${registeredCount} totalSupported=${channels.filter((c) => isSupportedChannelType(c.type)).length}`,
