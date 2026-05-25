@@ -17,7 +17,7 @@ This plugin bridges your Homematic CCU's devices to the Matter ecosystem
 
 ## Supported Device Types
 
-Until now only a few device resp. channel types are supported. This is _work in progress_, as soon as I think it's "production ready" and device support is more comprehensive I will bump the version to 1.0.0
+Until now only a few device resp. channel types are supported and this thing is full of bugs. This is _work in progress_, far away from being "done". As soon as I think it's "production ready" and device support is more comprehensive I will bump the version to 1.0.0
 
 ## Installation
 
