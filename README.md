@@ -24,7 +24,8 @@ Until now only a few device resp. channel types are supported. This is _work in 
 1. Install Matterbridge and this plugin via npm or the Matterbridge frontend
 2. Configure your CCU host address and connection settings
 3. Enable desired RPC interfaces (BidCos-RF, BidCos-Wired, HmIP-RF, etc.)
-4. Access the web configuration at the provided editor URL
+4. Restart Bridge
+5. Access the web configuration at the provided editor URL
 
 ## Configuration
 
