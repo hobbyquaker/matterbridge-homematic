@@ -200,10 +200,17 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
       const displayName = this.getChannelDisplayName(channel);
       const override = this.getChannelOverride(channel.address);
+      const selectSerial = this.getChannelSelectSerial(channel.address);
 
       // Read current persisted selection before updating visible metadata.
-      const wasSelected = this.getSelectDevice(channel.address) !== undefined;
-      this.setSelectDevice(channel.address, displayName, undefined, 'switch');
+      const wasSelected = this.getSelectDevice(selectSerial) !== undefined || this.getSelectDevice(channel.address) !== undefined;
+
+      // Remove legacy select rows keyed by channel address with ':' to avoid duplicate UI entries.
+      if (selectSerial !== channel.address && this.getSelectDevice(channel.address) !== undefined) {
+        await this.clearDeviceSelect(channel.address);
+      }
+
+      this.setSelectDevice(selectSerial, displayName, undefined, 'switch');
 
       if (!this.isChannelEnabled(channel, override, wasSelected)) {
         this.log.debug(`Skipping disabled channel ${channel.address}`);
@@ -288,9 +295,13 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       if (newName && newName !== oldName && newName !== channelAddress) {
         this.log.info(`Updating device name for ${channelAddress}: "${oldName}" -> "${newName}"`);
         device.deviceName = newName;
-        this.setSelectDevice(channelAddress, newName, undefined, 'switch');
+        this.setSelectDevice(this.getChannelSelectSerial(channelAddress), newName, undefined, 'switch');
       }
     }
+  }
+
+  private getChannelSelectSerial(channelAddress: string): string {
+    return channelAddress.replace(':', '-');
   }
 
   private getPlatformConfig(): HomematicPlatformConfig {
