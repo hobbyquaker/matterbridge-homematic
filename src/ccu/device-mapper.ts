@@ -180,6 +180,15 @@ export function createEndpointForChannel(channel: CcuChannelInfo & { type: Suppo
 
   switch (channel.type) {
     case 'BLIND':
+      if (channel.tiltSupported) {
+        return finalizeEndpoint(
+          new MatterbridgeEndpoint(coverDevice, { id })
+            .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Venetian Blind')
+            // Default: fully closed position (10000), neutral tilt (5000). Updated from RPC on startup.
+            .createDefaultLiftTiltWindowCoveringClusterServer(10000, 5000),
+          { ...options, batteryPowered: channel.batteryPowered },
+        );
+      }
       return finalizeEndpoint(
         new MatterbridgeEndpoint(coverDevice, { id })
           .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Blind')

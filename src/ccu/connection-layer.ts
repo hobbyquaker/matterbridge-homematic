@@ -114,6 +114,25 @@ export class CcuConnectionLayer extends EventEmitter {
   }
 
   /**
+   * Set multiple VALUES paramset entries on a Homematic channel atomically via putParamset.
+   * Used for blind actuators that require LEVEL and LEVEL_2 to be written together.
+   *
+   * @param {RpcInterfaceName} iface Interface name.
+   * @param {string} channelAddress Full channel address (e.g. 'OEQ0854602:1').
+   * @param {Record<string, unknown>} values Key/value pairs to write into the VALUES paramset.
+   * @param {number} [timeoutMs] Optional timeout in milliseconds.
+   */
+  public async putChannelParamsetValues(
+    iface: RpcInterfaceName,
+    channelAddress: string,
+    values: Record<string, unknown>,
+    timeoutMs = this.getRequestTimeoutMs(),
+  ): Promise<void> {
+    await this.callRpc(iface, 'putParamset', [channelAddress, 'VALUES', values], timeoutMs);
+    this.log.debug(`putChannelParamsetValues -> iface=${iface} channel=${channelAddress} values=${JSON.stringify(values)}`);
+  }
+
+  /**
    * Start discovery and initialize configured CCU interfaces.
    *
    * @returns {Promise<void>} Promise that resolves when initialization is complete.

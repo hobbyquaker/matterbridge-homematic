@@ -92,6 +92,9 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   /** Records the last received Homematic LEVEL value and its timestamp for each DIMMER channel. */
   private readonly dimmerLastLevel = new Map<string, { level: number; time: number }>();
 
+  /** Records the last received Homematic LEVEL_2 (tilt) value for each venetian blind channel. */
+  private readonly blindLastTilt = new Map<string, number>();
+
   /**
    * Set of DIMMER channels waiting for the next LEVEL event after WORKING=false fired with a stale
    * last-known value (older than 500 ms). The next arriving LEVEL will be applied immediately.
@@ -150,6 +153,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       void this.handleRpcEventDimmerWorking(event);
       void this.handleRpcEventDimmerLevel(event);
       void this.handleRpcEventBlindLevel(event);
+      void this.handleRpcEventBlindTilt(event);
       void this.handleRpcEventBlindActivity(event);
     });
 
@@ -367,26 +371,54 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       // Homematic LEVEL: 0.0 = fully closed, 1.0 = fully open.
       if (channel.type === 'BLIND' && this.ccuConnection) {
         const ccuConn = this.ccuConnection;
+        const isTiltSupported = channel.tiltSupported === true;
         this.channelAddressToDevice.set(channel.address, endpoint);
         try {
           await endpoint.subscribeAttribute('WindowCovering', 'targetPositionLiftPercent100ths', (value: number | null) => {
             const iface = channel.interfaceName;
             const address = channel.address;
-            // Matter 0 = open → hmLevel 1.0; Matter 10000 = closed → hmLevel 0.0.
             const hmLevel = value != null ? Math.round((1 - value / 10000) * 100) / 100 : 0;
-            // Suppress echo when this target change was triggered by an inbound RPC event.
             const suppress = this.rpcEchoSuppress.get(address + ':blindTarget');
             if (suppress !== undefined && suppress === value) {
               this.rpcEchoSuppress.delete(address + ':blindTarget');
               return;
             }
             this.log.debug(`Matter WindowCovering target -> Homematic LEVEL: iface=${iface} channel=${address} target=${value?.toString() ?? 'null'} hmLevel=${hmLevel}`);
-            ccuConn.setChannelDatapointValue(iface, address, 'LEVEL', String(hmLevel)).catch((err: unknown) => {
-              this.log.warn(`Failed to set Homematic LEVEL for ${address}: ${String(err)}`);
-            });
+            if (isTiltSupported) {
+              const tilt = this.blindLastTilt.get(address) ?? 0.5;
+              ccuConn.putChannelParamsetValues(iface, address, { LEVEL: hmLevel, LEVEL_2: tilt }).catch((err: unknown) => {
+                this.log.warn(`Failed to putParamset LEVEL for ${address}: ${String(err)}`);
+              });
+            } else {
+              ccuConn.setChannelDatapointValue(iface, address, 'LEVEL', String(hmLevel)).catch((err: unknown) => {
+                this.log.warn(`Failed to set Homematic LEVEL for ${address}: ${String(err)}`);
+              });
+            }
           });
         } catch (err) {
-          this.log.warn(`Failed to subscribe WindowCovering for ${channel.address}: ${String(err)}`);
+          this.log.warn(`Failed to subscribe WindowCovering lift for ${channel.address}: ${String(err)}`);
+        }
+        if (isTiltSupported) {
+          try {
+            await endpoint.subscribeAttribute('WindowCovering', 'targetPositionTiltPercent100ths', (value: number | null) => {
+              const iface = channel.interfaceName;
+              const address = channel.address;
+              // Matter 0 = open tilt, 10000 = closed tilt → Homematic LEVEL_2: 0=closed, 1=open.
+              const hmTilt = value != null ? Math.round((1 - value / 10000) * 100) / 100 : 0.5;
+              const suppress = this.rpcEchoSuppress.get(address + ':blindTilt');
+              if (suppress !== undefined && suppress === value) {
+                this.rpcEchoSuppress.delete(address + ':blindTilt');
+                return;
+              }
+              this.log.debug(`Matter WindowCovering tilt -> Homematic LEVEL_2: iface=${iface} channel=${address} tilt=${value?.toString() ?? 'null'} hmTilt=${hmTilt}`);
+              const lastLevel = this.dimmerLastLevel.get(address)?.level ?? 0;
+              ccuConn.putChannelParamsetValues(iface, address, { LEVEL: lastLevel, LEVEL_2: hmTilt }).catch((err: unknown) => {
+                this.log.warn(`Failed to putParamset LEVEL_2 for ${address}: ${String(err)}`);
+              });
+            });
+          } catch (err) {
+            this.log.warn(`Failed to subscribe WindowCovering tilt for ${channel.address}: ${String(err)}`);
+          }
         }
       }
     }
@@ -752,6 +784,50 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       this.rpcEchoSuppress.delete(channelAddress);
       this.rpcEchoSuppress.delete(channelAddress + ':onoff');
       this.log.warn(`Failed to update Matter LevelControl for ${channelAddress}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Handle incoming RPC event for the BLIND channel LEVEL_2 (slat tilt) datapoint.
+   * Only applies to venetian blind channels that support tilt (BLIND_VIRTUAL_RECEIVER).
+   *
+   * @param {object} event RPC event payload.
+   * @param {unknown} [event.channel] Channel address string.
+   * @param {string} [event.datapoint] Datapoint name (e.g. 'LEVEL_2').
+   * @param {unknown} [event.value] Datapoint value (0.0–1.0 float; 0=closed tilt, 1=open tilt).
+   * @returns {Promise<void>} Resolves when the Matter tilt attribute has been updated.
+   */
+  private async handleRpcEventBlindTilt(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
+    const datapoint = typeof event.datapoint === 'string' ? event.datapoint.trim().toUpperCase() : '';
+    if (datapoint !== 'LEVEL_2') return;
+
+    const channelAddress = typeof event.channel === 'string' ? event.channel : undefined;
+    if (!channelAddress) return;
+
+    const endpoint = this.channelAddressToDevice.get(channelAddress);
+    if (!endpoint) return;
+    if (!endpoint.hasClusterServer('WindowCovering')) return;
+
+    const hmTilt = typeof event.value === 'number' ? event.value : 0.5;
+    this.blindLastTilt.set(channelAddress, hmTilt);
+
+    // Matter tilt Percent100ths: 0 = fully open, 10000 = fully closed.
+    // Homematic LEVEL_2: 0.0 = closed, 1.0 = open → same inversion as lift LEVEL.
+    const matterTilt = Math.round((1 - hmTilt) * 10000);
+
+    try {
+      const suppress = this.rpcEchoSuppress.get(channelAddress + ':blindTilt');
+      if (suppress !== undefined && suppress === matterTilt) {
+        this.rpcEchoSuppress.delete(channelAddress + ':blindTilt');
+        return;
+      }
+      this.rpcEchoSuppress.set(channelAddress + ':blindTilt', matterTilt);
+      await endpoint.updateAttribute('WindowCovering', 'currentPositionTiltPercent100ths', matterTilt);
+      await endpoint.updateAttribute('WindowCovering', 'targetPositionTiltPercent100ths', matterTilt);
+      this.log.info(`BLIND LEVEL_2 event: updated tilt for ${channelAddress} to ${matterTilt}/10000 (hmTilt=${hmTilt})`);
+    } catch (err) {
+      this.rpcEchoSuppress.delete(channelAddress + ':blindTilt');
+      this.log.warn(`Failed to update Matter WindowCovering tilt for ${channelAddress}: ${String(err)}`);
     }
   }
 
