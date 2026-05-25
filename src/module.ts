@@ -157,6 +157,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       void this.handleRpcEventBlindActivity(event);
       void this.handleRpcEventMotion(event);
       void this.handleRpcEventTemperatureHumidity(event);
+      void this.handleRpcEventSmoke(event);
     });
 
     this.ccuConnection.on('deviceBatteryHint', (hint: { deviceAddress?: string; batteryPowered?: boolean }) => {
@@ -375,6 +376,11 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
       // Track TEMPERATURE_HUMIDITY_TRANSMITTER channel address for inbound sensor events.
       if (channel.type === 'TEMPERATURE_HUMIDITY_TRANSMITTER') {
+        this.channelAddressToDevice.set(channel.address, endpoint);
+      }
+
+      // Track SMOKE_DETECTOR channel address for inbound alarm events.
+      if (channel.type === 'SMOKE_DETECTOR') {
         this.channelAddressToDevice.set(channel.address, endpoint);
       }
 
@@ -881,6 +887,48 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       }
     } catch (err) {
       this.log.warn(`Failed to update RelativeHumidityMeasurement for ${channelAddress}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Handle incoming RPC event for SMOKE_DETECTOR channel alarm datapoints.
+   * Maps SMOKE_DETECTOR_ALARM_STATUS (numeric) or STATE (boolean) to the Matter SmokeCoAlarm cluster.
+   *
+   * @param {object} event RPC event payload.
+   * @param {unknown} [event.channel] Channel address string.
+   * @param {string} [event.datapoint] Datapoint name ('SMOKE_DETECTOR_ALARM_STATUS' or 'STATE').
+   * @param {unknown} [event.value] Datapoint value (numeric alarm code or boolean).
+   * @returns {Promise<void>} Resolves when the Matter attribute has been updated.
+   */
+  private async handleRpcEventSmoke(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
+    const datapoint = typeof event.datapoint === 'string' ? event.datapoint.trim().toUpperCase() : '';
+    if (datapoint !== 'SMOKE_DETECTOR_ALARM_STATUS' && datapoint !== 'STATE') return;
+
+    const channelAddress = typeof event.channel === 'string' ? event.channel : undefined;
+    if (!channelAddress) return;
+
+    const endpoint = this.channelAddressToDevice.get(channelAddress);
+    if (!endpoint) return;
+    if (!endpoint.hasClusterServer('SmokeCoAlarm')) return;
+
+    // SMOKE_DETECTOR_ALARM_STATUS: 0 = normal, >0 = alarm.  STATE (boolean): true = alarm.
+    const alarmActive =
+      datapoint === 'STATE'
+        ? event.value === true || event.value === 1 || event.value === '1'
+        : typeof event.value === 'number'
+          ? event.value > 0
+          : false;
+
+    // Matter SmokeCoAlarm.smokeState: 0=Normal, 1=Warning, 2=Critical.
+    const smokeState = alarmActive ? 2 : 0;
+    try {
+      const current = await endpoint.getAttribute('SmokeCoAlarm', 'smokeState');
+      if (current !== smokeState) {
+        await endpoint.updateAttribute('SmokeCoAlarm', 'smokeState', smokeState);
+        this.log.info(`SMOKE_DETECTOR alarm event: updated smokeState for ${channelAddress} to ${smokeState} (alarm=${alarmActive})`);
+      }
+    } catch (err) {
+      this.log.warn(`Failed to update SmokeCoAlarm for ${channelAddress}: ${String(err)}`);
     }
   }
 
