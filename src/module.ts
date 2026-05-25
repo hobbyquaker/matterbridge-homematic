@@ -199,6 +199,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     }
 
     const channels = await this.ccuConnection.discoverChannels();
+    await this.primeBatteryHintsFromRpc(channels);
     this.discoveredChannels = channels;
     const channelsWithNames = channels.filter((c) => c.name).length;
     this.log.info(`Discovered ${channels.length} channels from CCU (${channelsWithNames} have ReGa names).`);
@@ -252,6 +253,70 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     this.log.info(
       `Channel registration summary: enabled=${enabledCount} registered=${registeredCount} totalSupported=${channels.filter((c) => isSupportedChannelType(c.type)).length}`,
     );
+  }
+
+  private async primeBatteryHintsFromRpc(channels: CcuChannelInfo[]): Promise<void> {
+    if (!this.ccuConnection || channels.length === 0) return;
+
+    const candidates = new Map<string, Exclude<CcuChannelInfo['interfaceName'], 'ReGaHSS'>>();
+    for (const channel of channels) {
+      if (channel.channelIndex !== 0) continue;
+      if (this.deviceBatteryHints.has(channel.deviceAddress)) continue;
+      if (channel.interfaceName !== 'BidCos-RF' && channel.interfaceName !== 'HmIP-RF') continue;
+      candidates.set(channel.deviceAddress, channel.interfaceName);
+    }
+
+    if (candidates.size === 0) return;
+
+    let detectedCount = 0;
+    await Promise.all(
+      [...candidates.entries()].map(async ([deviceAddress, iface]) => {
+        const address = `${deviceAddress}:0`;
+        const valuesDescription = await this.getParamsetDescriptionSafe(iface, address, 'VALUES');
+        const masterDescription = valuesDescription ? undefined : await this.getParamsetDescriptionSafe(iface, address, 'MASTER');
+        const description = valuesDescription ?? masterDescription;
+
+        if (!description || !this.hasLowBatKey(description)) return;
+
+        this.deviceBatteryHints.set(deviceAddress, true);
+        detectedCount++;
+
+        for (const channel of channels) {
+          if (channel.deviceAddress === deviceAddress) {
+            channel.batteryPowered = true;
+          }
+        }
+      }),
+    );
+
+    if (detectedCount > 0) {
+      this.log.info(`Detected ${detectedCount} battery-powered devices from RPC paramset descriptions`);
+    }
+  }
+
+  private async getParamsetDescriptionSafe(
+    iface: 'BidCos-RF' | 'BidCos-Wired' | 'HmIP-RF' | 'VirtualDevices' | 'CUxD',
+    address: string,
+    paramsetKey: 'VALUES' | 'MASTER',
+  ): Promise<Record<string, unknown> | undefined> {
+    if (!this.ccuConnection) return undefined;
+
+    try {
+      const response = await this.ccuConnection.callRpc(iface, 'getParamsetDescription', [address, paramsetKey]);
+      return response && typeof response === 'object' ? (response as Record<string, unknown>) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private hasLowBatKey(description: Record<string, unknown>): boolean {
+    for (const key of Object.keys(description)) {
+      const marker = key.trim().toUpperCase();
+      if (marker === 'LOWBAT' || marker === 'LOW_BAT') {
+        return true;
+      }
+    }
+    return false;
   }
 
   private async loadPersistedChannelOverrides(): Promise<void> {
@@ -320,9 +385,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         const result = await this.ccuConnection.callRpc(iface, 'getServiceMessages', []);
         hasSuccess = true;
         this.collectServiceMessages(result, unreachableDevices, lowBatteryDevices);
-        this.log.debug(
-          `Startup getServiceMessages <- iface=${iface} unreachable=${unreachableDevices.size} lowBattery=${lowBatteryDevices.size}`,
-        );
+        this.log.debug(`Startup getServiceMessages <- iface=${iface} unreachable=${unreachableDevices.size} lowBattery=${lowBatteryDevices.size}`);
       } catch (err) {
         hasFailure = true;
         this.log.debug(`Startup getServiceMessages failed for ${iface}: ${String(err)}`);
