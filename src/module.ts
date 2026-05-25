@@ -415,60 +415,62 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     const entries = Array.isArray(payload) ? payload : [payload];
 
     for (const entry of entries) {
-      const strings: string[] = [];
-      this.collectStrings(entry, strings);
-      if (strings.length === 0) continue;
-
-      let deviceAddress: string | undefined;
-      let hasUnreach = false;
-      let hasLowBat = false;
-
-      for (const raw of strings) {
-        const value = raw.trim();
-        const normalized = value.toUpperCase();
-
-        if (normalized === 'UNREACH') {
-          hasUnreach = true;
-          continue;
-        }
-        if (normalized === 'LOWBAT' || normalized === 'LOW_BAT') {
-          hasLowBat = true;
-          continue;
-        }
-
-        const parsedAddress = this.extractDeviceAddressFromServiceMessageValue(value);
-        if (parsedAddress) {
-          deviceAddress = parsedAddress;
-        }
-      }
-
+      const parsed = this.parseServiceMessageEntry(entry);
+      const deviceAddress = parsed?.deviceAddress;
       if (!deviceAddress) continue;
-      if (hasUnreach) unreachableDevices.add(deviceAddress);
-      if (hasLowBat) lowBatteryDevices.add(deviceAddress);
+      if (parsed.hasUnreach) unreachableDevices.add(deviceAddress);
+      if (parsed.hasLowBat) lowBatteryDevices.add(deviceAddress);
     }
   }
 
-  private collectStrings(value: unknown, target: string[], depth = 0): void {
-    if (depth > 8) return;
+  private parseServiceMessageEntry(entry: unknown): { deviceAddress?: string; hasUnreach: boolean; hasLowBat: boolean } | undefined {
+    let addressCandidate: string | undefined;
+    const datapoints = new Set<string>();
 
-    if (typeof value === 'string') {
-      target.push(value);
-      return;
-    }
+    const tryConsumeString = (value: unknown): void => {
+      if (typeof value !== 'string') return;
+      const trimmed = value.trim();
+      if (trimmed.length === 0) return;
 
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        this.collectStrings(item, target, depth + 1);
+      const normalized = trimmed.toUpperCase();
+      if (normalized === 'UNREACH' || normalized === 'LOWBAT' || normalized === 'LOW_BAT') {
+        datapoints.add(normalized);
+        return;
       }
-      return;
+
+      const parsedAddress = this.extractDeviceAddressFromServiceMessageValue(trimmed);
+      if (parsedAddress) {
+        addressCandidate = parsedAddress;
+      }
+    };
+
+    if (Array.isArray(entry)) {
+      for (const item of entry) {
+        tryConsumeString(item);
+      }
+    } else if (entry && typeof entry === 'object') {
+      const record = entry as Record<string, unknown>;
+      for (const [key, value] of Object.entries(record)) {
+        const keyName = key.trim().toUpperCase();
+        if (keyName === 'ADDRESS' || keyName === 'CHANNEL' || keyName === 'ID') {
+          tryConsumeString(value);
+          continue;
+        }
+        if (keyName === 'DATAPOINT' || keyName === 'NAME' || keyName === 'MESSAGE' || keyName === 'VALUE') {
+          tryConsumeString(value);
+        }
+      }
+    } else {
+      tryConsumeString(entry);
     }
 
-    if (!value || typeof value !== 'object') return;
+    if (!addressCandidate) return undefined;
 
-    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
-      target.push(key);
-      this.collectStrings(nested, target, depth + 1);
-    }
+    return {
+      deviceAddress: addressCandidate,
+      hasUnreach: datapoints.has('UNREACH'),
+      hasLowBat: datapoints.has('LOWBAT') || datapoints.has('LOW_BAT'),
+    };
   }
 
   private extractDeviceAddressFromServiceMessageValue(value: string): string | undefined {
@@ -488,13 +490,17 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     if (previous === batteryLow) return;
 
     this.deviceBatteryLowState.set(deviceAddress, batteryLow);
-    this.deviceBatteryHints.set(deviceAddress, true);
+    if (batteryLow) {
+      this.deviceBatteryHints.set(deviceAddress, true);
+    }
 
     const endpoint = this.deviceAddressToDevice.get(deviceAddress);
     if (!endpoint) return;
     if (!endpoint.hasClusterServer('PowerSource')) {
       this.log.debug(`Battery state from ${source} for ${deviceAddress} without PowerSource cluster`);
-      this.scheduleBatteryRediscovery(`${source} for ${deviceAddress}`);
+      if (batteryLow) {
+        this.scheduleBatteryRediscovery(`${source} for ${deviceAddress}`);
+      }
       return;
     }
 

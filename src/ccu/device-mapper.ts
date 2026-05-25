@@ -19,9 +19,16 @@ export interface ChannelMappingOptions {
   batteryPowered?: boolean;
 }
 
+/**
+ *
+ * @param endpoint
+ * @param options
+ */
 function finalizeEndpoint(endpoint: MatterbridgeEndpoint, options: ChannelMappingOptions): MatterbridgeEndpoint {
   if (options.batteryPowered) {
     endpoint.createDefaultPowerSourceReplaceableBatteryClusterServer(100);
+  } else {
+    endpoint.createDefaultPowerSourceWiredClusterServer();
   }
   return endpoint.addRequiredClusterServers();
 }
@@ -46,8 +53,9 @@ export function isSupportedChannelType(type: string): type is SupportedChannelTy
  */
 export function createEndpointForChannel(channel: CcuChannelInfo & { type: SupportedChannelType }, vendorId: number, options: ChannelMappingOptions = {}): MatterbridgeEndpoint {
   const displayName = channel.name ?? channel.address;
-  const serialNumber = channel.address.replace(':', '-');
-  const id = `hm-${serialNumber}`;
+  const serialNumber = channel.address;
+  // Keep endpoint id stable and filesystem-safe independent of serial format.
+  const id = `hm-${channel.address.replace(':', '-')}`;
 
   switch (channel.type) {
     case 'DIMMER':
