@@ -16,6 +16,8 @@
 - For Jest tests in this repository, use ESM-safe patterns. Prefer `jest.unstable_mockModule` over `jest.mock`.
 - When behavior changes, update the relevant tests and documentation.
 - For CCU integration work, use https://github.com/rdmtc/node-red-contrib-ccu as an example for an interface to a Homematic CCU, including RPC and ReGa communication patterns and practical usage of the related Node.js modules.
+- For Homematic channel type → HomeKit service mapping reference (channel types, datapoint names, value conversions, tilt support, battery handling), use https://github.com/rdmtc/RedMatic-HomeKit/tree/master/homematic-devices — it is the authoritative prior-art implementation and directly maps many of the same Homematic devices we expose to Matter.
+- For Homematic device paramset definitions (datapoint names, ranges, types per channel type), use https://raw.githubusercontent.com/rdmtc/node-red-contrib-ccu/refs/heads/master/paramsets.json as a machine-readable reference when adding support for a new channel type or datapoint.
 - Use these repositories as the source of truth for platform patterns, lifecycle usage, and supported device semantics:
   - https://github.com/Luligu/matterbridge
   - https://github.com/Luligu/matterbridge-plugin-template
