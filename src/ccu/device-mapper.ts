@@ -4,7 +4,21 @@
  * @file device-mapper.ts
  */
 
-import { contactSensor, coverDevice, dimmableLight, humiditySensor, MatterbridgeEndpoint, occupancySensor, onOffLight, onOffOutlet, onOffSwitch, smokeCoAlarm, temperatureSensor, thermostatDevice } from 'matterbridge';
+import {
+  contactSensor,
+  coverDevice,
+  dimmableLight,
+  humiditySensor,
+  lightSensor,
+  MatterbridgeEndpoint,
+  occupancySensor,
+  onOffLight,
+  onOffOutlet,
+  onOffSwitch,
+  smokeCoAlarm,
+  temperatureSensor,
+  thermostatDevice,
+} from 'matterbridge';
 
 import { CcuChannelInfo, SwitchMatterType } from './types.js';
 
@@ -267,10 +281,12 @@ export function createEndpointForChannel(channel: CcuChannelInfo & { type: Suppo
 
     case 'MOTION_DETECTOR':
       return finalizeEndpoint(
-        new MatterbridgeEndpoint(occupancySensor, { id })
+        new MatterbridgeEndpoint([occupancySensor, lightSensor], { id })
           .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Motion Detector')
           // Default: unoccupied. Updated from RPC events.
-          .createDefaultOccupancySensingClusterServer(false),
+          .createDefaultOccupancySensingClusterServer(false)
+          // Default: null illuminance. Updated from ILLUMINATION RPC events.
+          .createDefaultIlluminanceMeasurementClusterServer(),
         { ...options, batteryPowered: channel.batteryPowered },
       );
 

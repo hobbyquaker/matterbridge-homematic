@@ -157,6 +157,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       void this.handleRpcEventBlindTilt(event);
       void this.handleRpcEventBlindActivity(event);
       void this.handleRpcEventMotion(event);
+      void this.handleRpcEventIlluminance(event);
       void this.handleRpcEventTemperatureHumidity(event);
       void this.handleRpcEventSmoke(event);
       void this.handleRpcEventThermostat(event);
@@ -926,6 +927,43 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       }
     } catch (err) {
       this.log.warn(`Failed to update Matter OccupancySensing for ${channelAddress}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Handle incoming RPC event for MOTION_DETECTOR channel ILLUMINATION datapoint.
+   * Maps to the Matter IlluminanceMeasurement cluster (measuredValue = 10000 * log10(lux) + 1).
+   *
+   * @param {object} event RPC event payload.
+   * @param event.iface
+   * @param event.idInit
+   * @param {unknown} [event.channel] Channel address string.
+   * @param {string} [event.datapoint] Datapoint name (e.g. 'ILLUMINATION').
+   * @param {unknown} [event.value] Illuminance value in lux.
+   * @returns {Promise<void>} Resolves when the Matter attribute has been updated.
+   */
+  private async handleRpcEventIlluminance(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
+    const datapoint = typeof event.datapoint === 'string' ? event.datapoint.trim().toUpperCase() : '';
+    if (datapoint !== 'ILLUMINATION') return;
+
+    const channelAddress = typeof event.channel === 'string' ? event.channel : undefined;
+    if (!channelAddress) return;
+
+    const endpoint = this.channelAddressToDevice.get(channelAddress);
+    if (!endpoint) return;
+    if (!endpoint.hasClusterServer('IlluminanceMeasurement')) return;
+
+    const lux = typeof event.value === 'number' ? event.value : 0;
+    // Matter IlluminanceMeasurement.measuredValue = 10000 * log10(lux) + 1 for lux > 0; 0 otherwise.
+    const measuredValue = lux > 0 ? Math.round(10000 * Math.log10(lux) + 1) : 0;
+    try {
+      const current = await endpoint.getAttribute('IlluminanceMeasurement', 'measuredValue');
+      if (current !== measuredValue) {
+        await endpoint.updateAttribute('IlluminanceMeasurement', 'measuredValue', measuredValue);
+        this.log.info(`MOTION_DETECTOR ILLUMINATION event: updated illuminance for ${channelAddress} to ${measuredValue} (${lux} lux)`);
+      }
+    } catch (err) {
+      this.log.warn(`Failed to update IlluminanceMeasurement for ${channelAddress}: ${String(err)}`);
     }
   }
 
