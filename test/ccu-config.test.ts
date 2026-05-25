@@ -51,7 +51,7 @@ describe('CCU config parser', () => {
       password: 'pass',
       queueTimeout: 7000,
       queuePause: 300,
-    } as PlatformConfig;
+    } as unknown as PlatformConfig;
 
     const parsed = parseCcuConnectionConfig(config);
 

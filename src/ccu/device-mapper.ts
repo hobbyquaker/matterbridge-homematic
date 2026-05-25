@@ -20,9 +20,11 @@ export interface ChannelMappingOptions {
 }
 
 /**
+ * Example function to map a device endpoint with options.
  *
- * @param endpoint
- * @param options
+ * @param {MatterbridgeEndpoint} endpoint The Matterbridge endpoint instance to map.
+ * @param {object} options Options for mapping the endpoint.
+ * @returns {void} Returns nothing.
  */
 function finalizeEndpoint(endpoint: MatterbridgeEndpoint, options: ChannelMappingOptions): MatterbridgeEndpoint {
   if (options.batteryPowered) {

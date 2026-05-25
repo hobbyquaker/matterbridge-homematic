@@ -51,11 +51,11 @@ export class CcuConnectionLayer extends EventEmitter {
   /**
    * Set a datapoint value on a Homematic channel via RPC.
    *
-   * @param iface Interface name (e.g. 'BidCos-RF', 'HmIP-RF').
-   * @param channelAddress Full channel address (e.g. 'OEQ0854602:1').
-   * @param datapoint Datapoint name (e.g. 'STATE').
-   * @param value Value to set (boolean or number).
-   * @param timeoutMs
+   * @param {RpcInterfaceName} iface Interface name (e.g. 'BidCos-RF', 'HmIP-RF').
+   * @param {string} channelAddress Full channel address (e.g. 'OEQ0854602:1').
+   * @param {string} datapoint Datapoint name (e.g. 'STATE').
+   * @param {boolean|number} value Value to set (boolean or number).
+   * @param {number} [timeoutMs] Optional timeout in milliseconds for the RPC call.
    */
   private readonly clients = new Map<RpcInterfaceName, RpcClient>();
 
@@ -94,13 +94,13 @@ export class CcuConnectionLayer extends EventEmitter {
   }
 
   /**
-   * Set a datapoint value on a Homematic channel via RPC.
+   * Set a datapoint value on a Homematic channel via setValue RPC.
    *
-   * @param iface Interface name (e.g. 'BidCos-RF', 'HmIP-RF').
-   * @param channelAddress Full channel address (e.g. 'OEQ0854602:1').
-   * @param datapoint Datapoint name (e.g. 'STATE').
-   * @param value Value to set (boolean or number).
-   * @param timeoutMs
+   * @param {RpcInterfaceName} iface Interface name (e.g. 'BidCos-RF', 'HmIP-RF').
+   * @param {string} channelAddress Full channel address (e.g. 'OEQ0854602:1').
+   * @param {string} datapoint Datapoint name (e.g. 'STATE').
+   * @param {boolean|number} value Value to set (boolean or number).
+   * @param {number} [timeoutMs] Optional timeout in milliseconds for the RPC call.
    */
   public async setChannelDatapointValue(
     iface: RpcInterfaceName,
