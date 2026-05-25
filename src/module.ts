@@ -582,8 +582,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
     if (!endpoint.hasClusterServer('BooleanState')) return;
 
-    // Homematic true = closed (contact present); Matter stateValue true = contact (closed).
-    const closed = event.value === true || event.value === 1 || event.value === '1';
+    // Homematic STATE: true = open (reed triggered), false = closed. Matter stateValue: true = contact (closed).
+    const closed = !(event.value === true || event.value === 1 || event.value === '1');
     try {
       const current = await endpoint.getAttribute('BooleanState', 'stateValue');
       if (current !== closed) {

@@ -191,7 +191,7 @@ export function createEndpointForChannel(channel: CcuChannelInfo & { type: Suppo
       return finalizeEndpoint(
         new MatterbridgeEndpoint(contactSensor, { id })
           .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Shutter Contact')
-          .createDefaultBooleanStateClusterServer(false),
+          .createDefaultBooleanStateClusterServer(true),
         { ...options, batteryPowered: channel.batteryPowered },
       );
   }
