@@ -32,8 +32,8 @@ import { AnsiLogger, LogLevel } from 'matterbridge/logger';
 
 import { parseCcuConnectionConfig } from './ccu/config.js';
 import { CcuConnectionLayer } from './ccu/connection-layer.js';
-import { isAlwaysMainsPoweredDeviceType } from './ccu/device-power.js';
 import { createEndpointForChannel, isSupportedChannelType } from './ccu/device-mapper.js';
+import { getMatchingMainsPoweredPrefix, isAlwaysMainsPoweredDeviceType, MAINS_POWERED_DEVICE_TYPE_PREFIXES } from './ccu/device-power.js';
 import { CcuChannelInfo, CcuChannelOverride, SwitchMatterType } from './ccu/types.js';
 
 /**
@@ -102,6 +102,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
   override async onStart(reason?: string): Promise<void> {
     this.log.info(`onStart called with reason: ${reason ?? 'none'}`);
+    this.log.debug(`Mains-powered type prefixes: ${MAINS_POWERED_DEVICE_TYPE_PREFIXES.join(', ')}`);
 
     // Wait for the platform to fully load the select if you use them.
     await this.ready;
@@ -265,7 +266,12 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     const candidates = new Map<string, Exclude<CcuChannelInfo['interfaceName'], 'ReGaHSS'>>();
     for (const channel of channels) {
       if (channel.channelIndex !== 0) continue;
-      if (isAlwaysMainsPoweredDeviceType(channel.type)) {
+      const classifierType = channel.deviceType ?? channel.type;
+      if (isAlwaysMainsPoweredDeviceType(classifierType)) {
+        const prefix = getMatchingMainsPoweredPrefix(classifierType);
+        this.log.debug(
+          `Battery classify startup <- device=${channel.deviceAddress} channelType=${channel.type} deviceType=${channel.deviceType ?? 'unknown'} classifierType=${classifierType} mainsPrefix=${prefix ?? 'none'} batteryHint=false (forced mains)`,
+        );
         this.deviceBatteryHints.set(channel.deviceAddress, false);
         continue;
       }
@@ -287,6 +293,10 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         if (!description || !this.hasLowBatKey(description)) return;
 
         this.deviceBatteryHints.set(deviceAddress, true);
+        const rootChannel = channels.find((c) => c.deviceAddress === deviceAddress && c.channelIndex === 0);
+        this.log.debug(
+          `Battery classify startup <- device=${deviceAddress} channelType=${rootChannel?.type ?? 'unknown'} deviceType=${rootChannel?.deviceType ?? 'unknown'} classifierType=${rootChannel?.deviceType ?? rootChannel?.type ?? 'unknown'} mainsPrefix=none batteryHint=true source=getParamsetDescription`,
+        );
         detectedCount++;
 
         for (const channel of channels) {
@@ -307,11 +317,18 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
     for (const channel of channels) {
       if (channel.channelIndex !== 0) continue;
-      if (!isAlwaysMainsPoweredDeviceType(channel.type)) continue;
+      const classifierType = channel.deviceType ?? channel.type;
+      if (!isAlwaysMainsPoweredDeviceType(classifierType)) continue;
 
+      const prefix = getMatchingMainsPoweredPrefix(classifierType);
+      this.log.debug(
+        `Mains classification <- device=${channel.deviceAddress} channelType=${channel.type} deviceType=${channel.deviceType ?? 'unknown'} classifierType=${classifierType} matchedPrefix=${prefix ?? 'none'}`,
+      );
       this.mainsPoweredDevices.add(channel.deviceAddress);
       this.deviceBatteryHints.set(channel.deviceAddress, false);
     }
+
+    this.log.debug(`Mains classification summary <- mainsDevices=${this.mainsPoweredDevices.size}`);
   }
 
   private async getParamsetDescriptionSafe(
@@ -386,7 +403,10 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
     const deviceAddress = this.extractDeviceAddressFromRpcChannel(event.channel);
     if (!deviceAddress) return;
-    if (this.mainsPoweredDevices.has(deviceAddress)) return;
+    if (this.mainsPoweredDevices.has(deviceAddress)) {
+      this.log.debug(`LOWBAT event ignored for mains-powered device=${deviceAddress}`);
+      return;
+    }
 
     const batteryLow = event.value === true || event.value === 1 || event.value === '1';
     await this.setDeviceBatteryLowState(deviceAddress, batteryLow, 'RPC event');
@@ -507,7 +527,10 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   }
 
   private async setDeviceBatteryLowState(deviceAddress: string, batteryLow: boolean, source: string): Promise<void> {
-    if (this.mainsPoweredDevices.has(deviceAddress)) return;
+    if (this.mainsPoweredDevices.has(deviceAddress)) {
+      this.log.debug(`Battery state update ignored for mains-powered device=${deviceAddress} source=${source}`);
+      return;
+    }
 
     const previous = this.deviceBatteryLowState.get(deviceAddress);
     if (previous === batteryLow) return;

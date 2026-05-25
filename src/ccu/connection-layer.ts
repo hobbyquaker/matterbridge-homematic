@@ -9,7 +9,7 @@ import { promises as fs } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
-import { isAlwaysMainsPoweredDeviceType } from './device-power.js';
+import { getMatchingMainsPoweredPrefix, isAlwaysMainsPoweredDeviceType } from './device-power.js';
 import {
   CcuChannelInfo,
   CcuConnectionConfig,
@@ -220,6 +220,14 @@ export class CcuConnectionLayer extends EventEmitter {
       [...this.clients.keys()].map(async (iface): Promise<CcuChannelInfo[]> => {
         try {
           const devices = (await this.callRpc(iface, 'listDevices', [])) as RpcDeviceDescription[];
+          const deviceTypeByAddress = new Map<string, string>();
+
+          for (const dev of devices) {
+            if (typeof dev.ADDRESS !== 'string' || dev.ADDRESS.includes(':')) continue;
+            if (typeof dev.TYPE !== 'string') continue;
+            deviceTypeByAddress.set(dev.ADDRESS, dev.TYPE);
+          }
+
           const channels: CcuChannelInfo[] = [];
 
           for (const dev of devices) {
@@ -234,6 +242,7 @@ export class CcuConnectionLayer extends EventEmitter {
               deviceAddress,
               channelIndex,
               type: dev.TYPE,
+              deviceType: deviceTypeByAddress.get(deviceAddress),
               interfaceName: iface,
               name: nameMap.get(dev.ADDRESS),
               batteryPowered: this.deviceBatteryHints.get(deviceAddress),
@@ -424,6 +433,16 @@ export class CcuConnectionLayer extends EventEmitter {
   private processNewDevicesCallback(parameters: unknown[]): void {
     const iface = this.getIfaceFromInitId(parameters[0]);
     const payload = Array.isArray(parameters[1]) ? parameters[1] : [];
+    const deviceTypeByAddress = new Map<string, string>();
+
+    for (const entry of payload) {
+      if (!entry || typeof entry !== 'object') continue;
+      const addressValue = (entry as Record<string, unknown>).ADDRESS;
+      const typeValue = (entry as Record<string, unknown>).TYPE;
+      if (typeof addressValue !== 'string' || addressValue.includes(':')) continue;
+      if (typeof typeValue !== 'string') continue;
+      deviceTypeByAddress.set(addressValue, typeValue);
+    }
 
     for (const entry of payload) {
       if (!entry || typeof entry !== 'object') continue;
@@ -432,9 +451,16 @@ export class CcuConnectionLayer extends EventEmitter {
 
       const deviceAddress = addressValue.slice(0, addressValue.indexOf(':'));
       const typeValue = (entry as Record<string, unknown>).TYPE;
-      const deviceType = typeof typeValue === 'string' ? typeValue : undefined;
-      const batteryPowered = !isAlwaysMainsPoweredDeviceType(deviceType) && this.containsLowBatMarker(entry);
+      const channelType = typeof typeValue === 'string' ? typeValue : undefined;
+      const deviceType = deviceTypeByAddress.get(deviceAddress) ?? channelType;
+      const mainsMatchPrefix = getMatchingMainsPoweredPrefix(deviceType);
+      const hasLowBatMarker = this.containsLowBatMarker(entry);
+      const batteryPowered = !isAlwaysMainsPoweredDeviceType(deviceType) && hasLowBatMarker;
       const previous = this.deviceBatteryHints.get(deviceAddress);
+
+      this.log.debug(
+        `RPC newDevices classify <- iface=${iface ?? 'unknown'} device=${deviceAddress} channelType=${channelType ?? 'unknown'} deviceType=${deviceType ?? 'unknown'} mainsPrefix=${mainsMatchPrefix ?? 'none'} hasLowBatMarker=${hasLowBatMarker} batteryPowered=${batteryPowered} previous=${String(previous)}`,
+      );
 
       if (previous !== batteryPowered) {
         this.deviceBatteryHints.set(deviceAddress, batteryPowered);

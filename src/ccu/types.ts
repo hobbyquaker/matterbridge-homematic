@@ -87,6 +87,8 @@ export interface CcuChannelInfo {
   channelIndex: number;
   /** Homematic channel type string, e.g. `'DIMMER'`. */
   type: string;
+  /** Homematic root device model/type string, e.g. `'HM-LC-Sw1-Pl-2'`. */
+  deviceType?: string;
   /** RPC interface on which this channel was discovered. */
   interfaceName: Exclude<CcuInterfaceName, 'ReGaHSS'>;
   /** ReGa display name for the channel, if available. */
