@@ -38,6 +38,7 @@ export const SUPPORTED_CHANNEL_TYPES = [
   'SWITCH',
   'TEMPERATURE_HUMIDITY_TRANSMITTER',
   'THERMALCONTROL_TRANSMIT',
+  'WEATHER',
 ] as const;
 
 /** Union of the Homematic channel type strings that this plugin supports. */
@@ -329,6 +330,17 @@ export function createEndpointForChannel(channel: CcuChannelInfo & { type: Suppo
           // null defaults: values are updated from RPC events on startup.
           .createDefaultTemperatureMeasurementClusterServer()
           .createDefaultRelativeHumidityMeasurementClusterServer(),
+        { ...options, batteryPowered: channel.batteryPowered },
+      );
+
+    case 'WEATHER':
+      return finalizeEndpoint(
+        new MatterbridgeEndpoint([temperatureSensor, humiditySensor, lightSensor], { id })
+          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Weather Station')
+          // Defaults null: values are updated from TEMPERATURE/HUMIDITY/BRIGHTNESS RPC events.
+          .createDefaultTemperatureMeasurementClusterServer()
+          .createDefaultRelativeHumidityMeasurementClusterServer()
+          .createDefaultIlluminanceMeasurementClusterServer(),
         { ...options, batteryPowered: channel.batteryPowered },
       );
 

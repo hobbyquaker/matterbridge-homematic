@@ -392,6 +392,11 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         this.channelAddressToDevice.set(channel.address, endpoint);
       }
 
+      // Track WEATHER channel address for inbound sensor events.
+      if (channel.type === 'WEATHER') {
+        this.channelAddressToDevice.set(channel.address, endpoint);
+      }
+
       // Track SMOKE_DETECTOR channel address for inbound alarm events.
       if (channel.type === 'SMOKE_DETECTOR') {
         this.channelAddressToDevice.set(channel.address, endpoint);
@@ -1000,13 +1005,13 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    * @param event.iface
    * @param event.idInit
    * @param {unknown} [event.channel] Channel address string.
-   * @param {string} [event.datapoint] Datapoint name ('ACTUAL_TEMPERATURE' or 'HUMIDITY').
-   * @param {unknown} [event.value] Datapoint value (float; temperature in °C, humidity in %).
+   * @param {string} [event.datapoint] Datapoint name ('ACTUAL_TEMPERATURE', 'TEMPERATURE', 'HUMIDITY', or 'BRIGHTNESS').
+   * @param {unknown} [event.value] Datapoint value (float; temperature in °C, humidity in %, brightness in lux).
    * @returns {Promise<void>} Resolves when the Matter attribute has been updated.
    */
   private async handleRpcEventTemperatureHumidity(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
     const datapoint = typeof event.datapoint === 'string' ? event.datapoint.trim().toUpperCase() : '';
-    if (datapoint !== 'ACTUAL_TEMPERATURE' && datapoint !== 'HUMIDITY') return;
+    if (datapoint !== 'ACTUAL_TEMPERATURE' && datapoint !== 'TEMPERATURE' && datapoint !== 'HUMIDITY' && datapoint !== 'BRIGHTNESS') return;
 
     const channelAddress = typeof event.channel === 'string' ? event.channel : undefined;
     if (!channelAddress) return;
@@ -1014,7 +1019,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     const endpoint = this.channelAddressToDevice.get(channelAddress);
     if (!endpoint) return;
 
-    if (datapoint === 'ACTUAL_TEMPERATURE') {
+    if (datapoint === 'ACTUAL_TEMPERATURE' || datapoint === 'TEMPERATURE') {
       if (!endpoint.hasClusterServer('TemperatureMeasurement')) return;
       // Matter TemperatureMeasurement.measuredValue is in units of 0.01°C.
       const measuredValue = Math.round((typeof event.value === 'number' ? event.value : 0) * 100);
@@ -1026,6 +1031,23 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         }
       } catch (err) {
         this.log.warn(`Failed to update TemperatureMeasurement for ${channelAddress}: ${String(err)}`);
+      }
+      return;
+    }
+
+    if (datapoint === 'BRIGHTNESS') {
+      if (!endpoint.hasClusterServer('IlluminanceMeasurement')) return;
+      // Matter IlluminanceMeasurement.measuredValue = 10000 * log10(lux) + 1 for lux > 0; 0 otherwise.
+      const lux = typeof event.value === 'number' ? event.value : 0;
+      const measuredValue = lux > 0 ? Math.round(10000 * Math.log10(lux) + 1) : 0;
+      try {
+        const current = await endpoint.getAttribute('IlluminanceMeasurement', 'measuredValue');
+        if (current !== measuredValue) {
+          await endpoint.updateAttribute('IlluminanceMeasurement', 'measuredValue', measuredValue);
+          this.log.info(`BRIGHTNESS event: updated illuminance for ${channelAddress} to ${measuredValue} (${lux} lux)`);
+        }
+      } catch (err) {
+        this.log.warn(`Failed to update IlluminanceMeasurement for ${channelAddress}: ${String(err)}`);
       }
       return;
     }
