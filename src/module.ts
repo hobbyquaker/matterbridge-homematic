@@ -150,6 +150,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       void this.handleRpcEventDimmerWorking(event);
       void this.handleRpcEventDimmerLevel(event);
       void this.handleRpcEventBlindLevel(event);
+      void this.handleRpcEventBlindActivity(event);
     });
 
     this.ccuConnection.on('deviceBatteryHint', (hint: { deviceAddress?: string; batteryPowered?: boolean }) => {
@@ -794,6 +795,39 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     }
 
     await this.applyBlindLevel(channelAddress, endpoint, hmLevel);
+  }
+
+  /**
+   * Handle incoming RPC event for the BLIND channel ACTIVITY_STATE or DIRECTION datapoint.
+   * Maps the movement direction to the Matter WindowCovering operationalStatus.
+   *
+   * @param {object} event RPC event payload.
+   * @param {unknown} [event.channel] Channel address string.
+   * @param {string} [event.datapoint] Datapoint name ('ACTIVITY_STATE' or 'DIRECTION').
+   * @param {unknown} [event.value] Datapoint value (integer: 0=stopped, 1=opening, 2=closing).
+   * @returns {Promise<void>} Resolves when the Matter attribute has been updated.
+   */
+  private async handleRpcEventBlindActivity(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
+    const datapoint = typeof event.datapoint === 'string' ? event.datapoint.trim().toUpperCase() : '';
+    if (datapoint !== 'ACTIVITY_STATE' && datapoint !== 'DIRECTION') return;
+
+    const channelAddress = typeof event.channel === 'string' ? event.channel : undefined;
+    if (!channelAddress) return;
+
+    const endpoint = this.channelAddressToDevice.get(channelAddress);
+    if (!endpoint) return;
+    if (!endpoint.hasClusterServer('WindowCovering')) return;
+
+    // Homematic: 0=stopped, 1=opening (INCREASING), 2=closing (DECREASING).
+    const value = typeof event.value === 'number' ? event.value : 0;
+    const status = value === 1 ? 1 : value === 2 ? 2 : 0;
+
+    try {
+      await endpoint.setWindowCoveringStatus(status);
+      this.log.debug(`BLIND ACTIVITY_STATE event: operationalStatus=${status} for ${channelAddress}`);
+    } catch (err) {
+      this.log.warn(`Failed to update WindowCovering operationalStatus for ${channelAddress}: ${String(err)}`);
+    }
   }
 
   /**
