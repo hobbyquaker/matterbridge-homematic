@@ -258,17 +258,16 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
       // Wire OnOff attribute for SWITCH channels
       if (channel.type === 'SWITCH' && this.ccuConnection) {
+        const ccuConn = this.ccuConnection;
         try {
-          endpoint.subscribeAttribute('OnOff', 'onOff', async (value: boolean) => {
+          await endpoint.subscribeAttribute('OnOff', 'onOff', (value: boolean) => {
             // Find the correct interface for this channel
             const iface = channel.interfaceName;
             const address = channel.address;
             this.log.debug(`Matter OnOff -> Homematic setValue: iface=${iface} channel=${address} value=${value}`);
-            try {
-              await this.ccuConnection!.setChannelDatapointValue(iface, address, 'STATE', value);
-            } catch (err) {
+            ccuConn.setChannelDatapointValue(iface, address, 'STATE', value).catch((err: unknown) => {
               this.log.warn(`Failed to set Homematic STATE for ${address}: ${String(err)}`);
-            }
+            });
           });
         } catch (err) {
           this.log.warn(`Failed to subscribe OnOff for ${channel.address}: ${String(err)}`);
@@ -437,11 +436,11 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    * Handle incoming RPC event for SWITCH channel STATE and update Matter endpoint.
    *
    * @param {object} event RPC event payload.
-   * @param event.iface
-   * @param event.idInit
-   * @param event.channel
-   * @param event.datapoint
-   * @param event.value
+   * @param {string} [event.iface] Interface name (e.g. 'BidCos-RF').
+   * @param {string} [event.idInit] Init ID of the interface.
+   * @param {unknown} [event.channel] Channel address string.
+   * @param {string} [event.datapoint] Datapoint name (e.g. 'STATE').
+   * @param {unknown} [event.value] Datapoint value.
    * @returns {Promise<void>} Resolves when the Matter attribute has been updated.
    */
   private async handleRpcEventSwitchState(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
