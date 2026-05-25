@@ -106,6 +106,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     const cacheDir = path.join(os.homedir(), '.matterbridge');
     this.ccuConnection = new CcuConnectionLayer(ccuConfig, this.log, cacheDir);
     await this.ccuConnection.start();
+    await this.loadPersistedChannelOverrides();
 
     // Listen for channel updates and refresh device names when ReGa names arrive
     this.ccuConnection.on('channelsUpdated', (updatedChannels: CcuChannelInfo[]) => {
@@ -194,6 +195,9 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     const channelsWithNames = channels.filter((c) => c.name).length;
     this.log.info(`Discovered ${channels.length} channels from CCU (${channelsWithNames} have ReGa names).`);
 
+    let enabledCount = 0;
+    let registeredCount = 0;
+
     for (const channel of channels) {
       if (!isSupportedChannelType(channel.type)) continue;
 
@@ -206,6 +210,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         continue;
       }
 
+      enabledCount++;
+
       const endpoint = createEndpointForChannel(channel as Parameters<typeof createEndpointForChannel>[0], this.matterbridge.aggregatorVendorId, {
         switchMatterType: override?.switchMatterType,
         batteryPowered: this.deviceBatteryHints.get(channel.deviceAddress) ?? channel.batteryPowered,
@@ -213,9 +219,29 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
       endpoint.configUrl = this.buildChannelConfigUrl(channel.address);
       await this.registerDevice(endpoint);
+      registeredCount++;
 
       // Track device for availability monitoring
       this.deviceAddressToDevice.set(channel.deviceAddress, endpoint);
+    }
+
+    this.log.info(`Channel registration summary: enabled=${enabledCount} registered=${registeredCount} totalSupported=${channels.filter((c) => isSupportedChannelType(c.type)).length}`);
+  }
+
+  private async loadPersistedChannelOverrides(): Promise<void> {
+    try {
+      const configPath = this.getConfigFilePath();
+      const content = await fs.readFile(configPath, 'utf8');
+      const persisted = JSON.parse(content) as HomematicPlatformConfig;
+      const persistedOverrides = Array.isArray(persisted.channelOverrides) ? persisted.channelOverrides : [];
+
+      if (persistedOverrides.length > 0) {
+        this.getPlatformConfig().channelOverrides = persistedOverrides;
+      }
+
+      this.log.info(`Loaded persisted channel overrides: ${persistedOverrides.length}`);
+    } catch (err) {
+      this.log.debug(`No persisted channel overrides loaded: ${String(err)}`);
     }
   }
 
