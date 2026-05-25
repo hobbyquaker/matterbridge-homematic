@@ -929,8 +929,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    * Maps to the Matter OccupancySensing cluster.
    *
    * @param {object} event RPC event payload.
-   * @param event.iface
-   * @param event.idInit
+   * @param {string} [event.iface] RPC interface name.
+   * @param {string} [event.idInit] Device init ID.
    * @param {unknown} [event.channel] Channel address string.
    * @param {string} [event.datapoint] Datapoint name (e.g. 'MOTION').
    * @param {unknown} [event.value] Datapoint value (boolean; true = motion detected).
@@ -965,8 +965,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    * Maps to the Matter IlluminanceMeasurement cluster (measuredValue = 10000 * log10(lux) + 1).
    *
    * @param {object} event RPC event payload.
-   * @param event.iface
-   * @param event.idInit
+   * @param {string} [event.iface] RPC interface name.
+   * @param {string} [event.idInit] Device init ID.
    * @param {unknown} [event.channel] Channel address string.
    * @param {string} [event.datapoint] Datapoint name (e.g. 'ILLUMINATION').
    * @param {unknown} [event.value] Illuminance value in lux.
@@ -1002,8 +1002,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    * Maps ACTUAL_TEMPERATURE to TemperatureMeasurement and HUMIDITY to RelativeHumidityMeasurement.
    *
    * @param {object} event RPC event payload.
-   * @param event.iface
-   * @param event.idInit
+   * @param {string} [event.iface] RPC interface name.
+   * @param {string} [event.idInit] Device init ID.
    * @param {unknown} [event.channel] Channel address string.
    * @param {string} [event.datapoint] Datapoint name ('ACTUAL_TEMPERATURE', 'TEMPERATURE', 'HUMIDITY', or 'BRIGHTNESS').
    * @param {unknown} [event.value] Datapoint value (float; temperature in °C, humidity in %, brightness in lux).
@@ -1072,8 +1072,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    * Maps SMOKE_DETECTOR_ALARM_STATUS (numeric) or STATE (boolean) to the Matter SmokeCoAlarm cluster.
    *
    * @param {object} event RPC event payload.
-   * @param event.iface
-   * @param event.idInit
+   * @param {string} [event.iface] RPC interface name.
+   * @param {string} [event.idInit] Device init ID.
    * @param {unknown} [event.channel] Channel address string.
    * @param {string} [event.datapoint] Datapoint name ('SMOKE_DETECTOR_ALARM_STATUS' or 'STATE').
    * @param {unknown} [event.value] Datapoint value (numeric alarm code or boolean).
@@ -1111,8 +1111,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    * Maps ALARMSTATE (numeric/boolean) to the Matter BooleanState cluster on a waterLeakDetector endpoint.
    *
    * @param {object} event RPC event payload.
-   * @param event.iface
-   * @param event.idInit
+   * @param {string} [event.iface] RPC interface name.
+   * @param {string} [event.idInit] Device init ID.
    * @param {unknown} [event.channel] Channel address string.
    * @param {string} [event.datapoint] Datapoint name (e.g. 'ALARMSTATE').
    * @param {unknown} [event.value] Alarm state value (numeric >0 = alarm, 0 = normal; or boolean).
@@ -1149,8 +1149,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    * STATE 0 = closed (stateValue=true), STATE 1 (tilted) or 2 (open) = not closed (stateValue=false).
    *
    * @param {object} event RPC event payload.
-   * @param event.iface
-   * @param event.idInit
+   * @param {string} [event.iface] RPC interface name.
+   * @param {string} [event.idInit] Device init ID.
    * @param {unknown} [event.channel] Channel address string.
    * @param {string} [event.datapoint] Datapoint name (e.g. 'STATE').
    * @param {unknown} [event.value] Integer state value: 0=closed, 1=tilted, 2=open.
@@ -1188,8 +1188,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    * Values are converted to milliwatts/milliamps/millivolts as required by the cluster.
    *
    * @param {object} event RPC event payload.
-   * @param event.iface
-   * @param event.idInit
+   * @param {string} [event.iface] RPC interface name.
+   * @param {string} [event.idInit] Device init ID.
    * @param {unknown} [event.channel] Channel address string.
    * @param {string} [event.datapoint] Datapoint name ('POWER', 'CURRENT', or 'VOLTAGE').
    * @param {unknown} [event.value] Datapoint value (float).
@@ -1231,8 +1231,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    * Thermostat.occupiedHeatingSetpoint. Derives systemMode from the setpoint level (≤4.5°C = Off).
    *
    * @param {object} event RPC event payload.
-   * @param event.iface
-   * @param event.idInit
+   * @param {string} [event.iface] RPC interface name.
+   * @param {string} [event.idInit] Device init ID.
    * @param {unknown} [event.channel] Channel address string.
    * @param {string} [event.datapoint] Datapoint name ('ACTUAL_TEMPERATURE', 'SET_POINT_TEMPERATURE', or 'SETPOINT').
    * @param {unknown} [event.value] Datapoint value (float, °C).
@@ -1291,8 +1291,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    * Only applies to venetian blind channels that support tilt (BLIND_VIRTUAL_RECEIVER).
    *
    * @param {object} event RPC event payload.
-   * @param event.iface
-   * @param event.idInit
+   * @param {string} [event.iface] RPC interface name.
+   * @param {string} [event.idInit] Device init ID.
    * @param {unknown} [event.channel] Channel address string.
    * @param {string} [event.datapoint] Datapoint name (e.g. 'LEVEL_2').
    * @param {unknown} [event.value] Datapoint value (0.0–1.0 float; 0=closed tilt, 1=open tilt).
@@ -1379,8 +1379,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    * Maps the movement direction to the Matter WindowCovering operationalStatus.
    *
    * @param {object} event RPC event payload.
-   * @param event.iface
-   * @param event.idInit
+   * @param {string} [event.iface] RPC interface name.
+   * @param {string} [event.idInit] Device init ID.
    * @param {unknown} [event.channel] Channel address string.
    * @param {string} [event.datapoint] Datapoint name ('ACTIVITY_STATE' or 'DIRECTION').
    * @param {unknown} [event.value] Datapoint value (integer: 0=stopped, 1=opening, 2=closing).
