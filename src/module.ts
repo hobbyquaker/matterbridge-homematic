@@ -80,6 +80,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
   private readonly deviceBatteryLowState = new Map<string, boolean>();
 
+  private batteryRediscoveryTimer?: NodeJS.Timeout;
+
   constructor(matterbridge: PlatformMatterbridge, log: AnsiLogger, config: PlatformConfig) {
     // Always call super(matterbridge, log, config)
     super(matterbridge, log, config);
@@ -123,6 +125,11 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       if (typeof hint.deviceAddress !== 'string' || typeof hint.batteryPowered !== 'boolean') return;
       this.deviceBatteryHints.set(hint.deviceAddress, hint.batteryPowered);
       this.log.debug(`Device battery hint updated: ${hint.deviceAddress} batteryPowered=${hint.batteryPowered}`);
+
+      const endpoint = this.deviceAddressToDevice.get(hint.deviceAddress);
+      if (hint.batteryPowered && endpoint && !endpoint.hasClusterServer('PowerSource')) {
+        this.scheduleBatteryRediscovery(`battery hint for ${hint.deviceAddress}`);
+      }
     });
 
     await this.startChannelEditorServer();
@@ -304,7 +311,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     const endpoint = this.deviceAddressToDevice.get(deviceAddress);
     if (!endpoint) return;
     if (!endpoint.hasClusterServer('PowerSource')) {
-      this.log.debug(`LOWBAT event ignored for ${deviceAddress}: endpoint has no PowerSource cluster`);
+      this.log.debug(`LOWBAT event received for ${deviceAddress} without PowerSource cluster`);
+      this.scheduleBatteryRediscovery(`LOWBAT event for ${deviceAddress}`);
       return;
     }
 
@@ -341,6 +349,16 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     const suffix = channel.slice(separatorIndex + 1);
     if (suffix !== '0') return undefined;
     return channel.slice(0, separatorIndex);
+  }
+
+  private scheduleBatteryRediscovery(reason: string): void {
+    if (this.batteryRediscoveryTimer) return;
+
+    this.log.info(`Scheduling device rediscovery to apply battery metadata (${reason})`);
+    this.batteryRediscoveryTimer = setTimeout(() => {
+      this.batteryRediscoveryTimer = undefined;
+      void this.discoverDevices().catch((err) => this.log.warn(`Battery rediscovery failed: ${String(err)}`));
+    }, 1000);
   }
 
   private refreshDeviceNames(updatedChannels: CcuChannelInfo[]): void {
