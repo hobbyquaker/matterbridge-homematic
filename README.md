@@ -19,13 +19,7 @@ This plugin bridges your Homematic CCU's devices to the Matter ecosystem
 
 ## Supported Device Types
 
-- **Contact Sensors** - Window/door open/close sensors
-- **Motion Sensors** - Homematic motion detectors
-- **Temperature Sensors** - Climate control and outdoor temperature
-- **Dimmer Switches** - Brightness control for lighting
-- **Binary Switches** - On/off switches and outlets
-- **Thermostats** - Radiator valve controllers and thermostat devices
-- **More devices** - Continuously expanding device support
+Until now only a few device resp. channel types are supported. This is a work in progress, as soon as i think it's "production ready" and device support is more comprehensive I will bump the version to 1.0.0
 
 ## Installation
 

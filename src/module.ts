@@ -80,6 +80,12 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   /** Maps full channel address (e.g. 'DEVICE:3') to its Matter endpoint for SWITCH/DIMMER channels. */
   private channelAddressToDevice = new Map<string, MatterbridgeEndpoint>();
 
+  /**
+   * Tracks the last value written to a Matter attribute from an incoming RPC event.
+   * Used to suppress the echo setValue that the subscribeAttribute callback would otherwise send back.
+   */
+  private readonly rpcEchoSuppress = new Map<string, boolean | number>();
+
   private readonly deviceBatteryHints = new Map<string, boolean>();
 
   private readonly deviceBatteryLowState = new Map<string, boolean>();
@@ -271,6 +277,12 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
           await endpoint.subscribeAttribute('OnOff', 'onOff', (value: boolean) => {
             const iface = channel.interfaceName;
             const address = channel.address;
+            // Suppress setValue when this change was triggered by an incoming RPC event.
+            const suppress = this.rpcEchoSuppress.get(address);
+            if (suppress !== undefined && suppress === value) {
+              this.rpcEchoSuppress.delete(address);
+              return;
+            }
             this.log.debug(`Matter OnOff -> Homematic setValue: iface=${iface} channel=${address} value=${value}`);
             ccuConn.setChannelDatapointValue(iface, address, 'STATE', value).catch((err: unknown) => {
               this.log.warn(`Failed to set Homematic STATE for ${address}: ${String(err)}`);
@@ -292,6 +304,12 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
             const iface = channel.interfaceName;
             const address = channel.address;
             const level = value != null ? Math.round((value / 254) * 100) / 100 : 0;
+            // Suppress setValue when this change was triggered by an incoming RPC event.
+            const suppress = this.rpcEchoSuppress.get(address);
+            if (suppress !== undefined && suppress === level) {
+              this.rpcEchoSuppress.delete(address);
+              return;
+            }
             this.log.debug(`Matter currentLevel -> Homematic setValue: iface=${iface} channel=${address} level=${level}`);
             ccuConn.setChannelDatapointValue(iface, address, 'LEVEL', level).catch((err: unknown) => {
               this.log.warn(`Failed to set Homematic LEVEL for ${address}: ${String(err)}`);
@@ -488,10 +506,13 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     try {
       const current = await endpoint.getAttribute('OnOff', 'onOff');
       if (current !== newValue) {
+        // Suppress the echo setValue that subscribeAttribute would send back.
+        this.rpcEchoSuppress.set(channelAddress, newValue);
         await endpoint.updateAttribute('OnOff', 'onOff', newValue);
         this.log.info(`SWITCH STATE event: updated Matter OnOff for ${channelAddress} to ${newValue}`);
       }
     } catch (err) {
+      this.rpcEchoSuppress.delete(channelAddress);
       this.log.warn(`Failed to update Matter OnOff for ${channelAddress}: ${String(err)}`);
     }
   }
@@ -523,8 +544,12 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     const hmLevel = typeof event.value === 'number' ? event.value : 0;
     const matterLevel = hmLevel > 0 ? Math.max(1, Math.round(hmLevel * 254)) : 0;
     const onOff = matterLevel > 0;
+    // The level value the subscribeAttribute callback will see (round-tripped back from matterLevel).
+    const suppressLevel = matterLevel > 0 ? Math.round((matterLevel / 254) * 100) / 100 : 0;
 
     try {
+      // Suppress the echo setValue that subscribeAttribute would send back.
+      this.rpcEchoSuppress.set(channelAddress, suppressLevel);
       await endpoint.updateAttribute('LevelControl', 'currentLevel', matterLevel > 0 ? matterLevel : 1);
       if (endpoint.hasClusterServer('OnOff')) {
         const currentOnOff = await endpoint.getAttribute('OnOff', 'onOff');
@@ -534,6 +559,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       }
       this.log.info(`DIMMER LEVEL event: updated Matter level for ${channelAddress} to ${matterLevel} (onOff=${onOff})`);
     } catch (err) {
+      this.rpcEchoSuppress.delete(channelAddress);
       this.log.warn(`Failed to update Matter LevelControl for ${channelAddress}: ${String(err)}`);
     }
   }
