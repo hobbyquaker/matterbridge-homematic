@@ -139,6 +139,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
     // Implements your own logic there
     await this.discoverDevices();
+    await this.applyStartupServiceMessages();
   }
 
   override async onConfigure(): Promise<void> {
@@ -302,6 +303,124 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     if (!deviceAddress) return;
 
     const batteryLow = event.value === true || event.value === 1 || event.value === '1';
+    await this.setDeviceBatteryLowState(deviceAddress, batteryLow, 'RPC event');
+  }
+
+  private async applyStartupServiceMessages(): Promise<void> {
+    if (!this.ccuConnection || this.deviceAddressToDevice.size === 0) return;
+
+    const unreachableDevices = new Set<string>();
+    const lowBatteryDevices = new Set<string>();
+    const rpcIfaces = ['BidCos-RF', 'HmIP-RF'] as const;
+    let hasSuccess = false;
+    let hasFailure = false;
+
+    for (const iface of rpcIfaces) {
+      try {
+        const result = await this.ccuConnection.callRpc(iface, 'getServiceMessages', []);
+        hasSuccess = true;
+        this.collectServiceMessages(result, unreachableDevices, lowBatteryDevices);
+        this.log.debug(
+          `Startup getServiceMessages <- iface=${iface} unreachable=${unreachableDevices.size} lowBattery=${lowBatteryDevices.size}`,
+        );
+      } catch (err) {
+        hasFailure = true;
+        this.log.debug(`Startup getServiceMessages failed for ${iface}: ${String(err)}`);
+      }
+    }
+
+    if (!hasSuccess) return;
+
+    for (const [deviceAddress, endpoint] of this.deviceAddressToDevice) {
+      if (unreachableDevices.has(deviceAddress)) {
+        await this.updateDeviceReachable(deviceAddress, endpoint, false);
+      } else if (!hasFailure) {
+        // Only clear UNREACH when all startup calls succeeded.
+        await this.updateDeviceReachable(deviceAddress, endpoint, true);
+      }
+
+      if (lowBatteryDevices.has(deviceAddress)) {
+        await this.setDeviceBatteryLowState(deviceAddress, true, 'startup service message');
+      } else if (!hasFailure && endpoint.hasClusterServer('PowerSource')) {
+        // Only clear LOWBAT when all startup calls succeeded.
+        await this.setDeviceBatteryLowState(deviceAddress, false, 'startup service message');
+      }
+    }
+  }
+
+  private collectServiceMessages(payload: unknown, unreachableDevices: Set<string>, lowBatteryDevices: Set<string>): void {
+    const entries = Array.isArray(payload) ? payload : [payload];
+
+    for (const entry of entries) {
+      const strings: string[] = [];
+      this.collectStrings(entry, strings);
+      if (strings.length === 0) continue;
+
+      let deviceAddress: string | undefined;
+      let hasUnreach = false;
+      let hasLowBat = false;
+
+      for (const raw of strings) {
+        const value = raw.trim();
+        const normalized = value.toUpperCase();
+
+        if (normalized === 'UNREACH') {
+          hasUnreach = true;
+          continue;
+        }
+        if (normalized === 'LOWBAT' || normalized === 'LOW_BAT') {
+          hasLowBat = true;
+          continue;
+        }
+
+        const parsedAddress = this.extractDeviceAddressFromServiceMessageValue(value);
+        if (parsedAddress) {
+          deviceAddress = parsedAddress;
+        }
+      }
+
+      if (!deviceAddress) continue;
+      if (hasUnreach) unreachableDevices.add(deviceAddress);
+      if (hasLowBat) lowBatteryDevices.add(deviceAddress);
+    }
+  }
+
+  private collectStrings(value: unknown, target: string[], depth = 0): void {
+    if (depth > 8) return;
+
+    if (typeof value === 'string') {
+      target.push(value);
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        this.collectStrings(item, target, depth + 1);
+      }
+      return;
+    }
+
+    if (!value || typeof value !== 'object') return;
+
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      target.push(key);
+      this.collectStrings(nested, target, depth + 1);
+    }
+  }
+
+  private extractDeviceAddressFromServiceMessageValue(value: string): string | undefined {
+    const trimmed = value.trim();
+    if (trimmed.length === 0 || /\s/.test(trimmed)) return undefined;
+
+    if (trimmed.includes(':')) {
+      return trimmed.split(':', 1)[0];
+    }
+
+    const looksLikeAddress = /^[A-Za-z0-9_-]{6,}$/.test(trimmed);
+    return looksLikeAddress ? trimmed : undefined;
+  }
+
+  private async setDeviceBatteryLowState(deviceAddress: string, batteryLow: boolean, source: string): Promise<void> {
     const previous = this.deviceBatteryLowState.get(deviceAddress);
     if (previous === batteryLow) return;
 
@@ -311,8 +430,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     const endpoint = this.deviceAddressToDevice.get(deviceAddress);
     if (!endpoint) return;
     if (!endpoint.hasClusterServer('PowerSource')) {
-      this.log.debug(`LOWBAT event received for ${deviceAddress} without PowerSource cluster`);
-      this.scheduleBatteryRediscovery(`LOWBAT event for ${deviceAddress}`);
+      this.log.debug(`Battery state from ${source} for ${deviceAddress} without PowerSource cluster`);
+      this.scheduleBatteryRediscovery(`${source} for ${deviceAddress}`);
       return;
     }
 
@@ -323,7 +442,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const currentChargeLevel = await endpoint.getAttribute('PowerSource', 'batChargeLevel');
       if (currentChargeLevel !== chargeLevel) {
         await endpoint.updateAttribute('PowerSource', 'batChargeLevel', chargeLevel);
-        this.log.info(`Battery state changed: ${deviceAddress} low=${batteryLow} batChargeLevel=${chargeLevel}`);
+        this.log.info(`Battery state changed from ${source}: ${deviceAddress} low=${batteryLow} batChargeLevel=${chargeLevel}`);
       }
     } catch (err) {
       this.log.debug(`Failed to update battery charge level for ${deviceAddress}: ${String(err)}`);
