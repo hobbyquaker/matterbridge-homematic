@@ -99,7 +99,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     await this.clearSelect();
 
     const ccuConfig = parseCcuConnectionConfig(this.config);
-    this.ccuConnection = new CcuConnectionLayer(ccuConfig, this.log);
+    const cacheDir = path.join(os.homedir(), '.matterbridge');
+    this.ccuConnection = new CcuConnectionLayer(ccuConfig, this.log, cacheDir);
     await this.ccuConnection.start();
     await this.startChannelEditorServer();
 
@@ -173,7 +174,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     for (const channel of channels) {
       if (!isSupportedChannelType(channel.type)) continue;
 
-      const displayName = channel.name ?? channel.address;
+      const displayName = this.getChannelDisplayName(channel);
       const override = this.getChannelOverride(channel.address);
       this.setSelectDevice(channel.address, displayName, undefined, 'switch');
 
@@ -208,7 +209,14 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     if (override && typeof override.enabled === 'boolean') {
       return override.enabled;
     }
-    return this.validateDevice([displayName, channel.address], true);
+    // New default: channels are opt-in and stay disabled until explicitly enabled.
+    return false;
+  }
+
+  private getChannelDisplayName(channel: CcuChannelInfo): string {
+    const regaName = channel.name?.trim();
+    if (regaName && regaName.length > 0) return regaName;
+    return channel.address;
   }
 
   private buildChannelConfigUrl(channelAddress: string): string {
@@ -308,9 +316,9 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     if (!channel) return null;
 
     const override = this.getChannelOverride(channel.address);
-    const displayName = channel.name ?? channel.address;
+    const displayName = this.getChannelDisplayName(channel);
     const switchMatterType = override?.switchMatterType ?? 'light';
-    const enabled = override?.enabled ?? true;
+    const enabled = override?.enabled ?? false;
     const showSwitchTypeSelect = channel.type === 'SWITCH';
 
     return `<!doctype html>

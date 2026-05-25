@@ -5,9 +5,24 @@
  */
 
 import { EventEmitter } from 'node:events';
+import { promises as fs } from 'node:fs';
 import { createRequire } from 'node:module';
+import path from 'node:path';
 
-import { CcuChannelInfo, CcuConnectionConfig, CcuDiscoveredDevice, CcuInterfaceName, CcuLogger, CcuStatusSnapshot, RegaClient, RpcClient, RpcClientFactory } from './types.js';
+import {
+  CcuChannelInfo,
+  CcuConnectionConfig,
+  CcuDiscoveredDevice,
+  CcuDiscoveryCache,
+  CcuInterfaceName,
+  CcuLogger,
+  CcuStatusSnapshot,
+  RegaChannel,
+  RegaClient,
+  RpcClient,
+  RpcClientFactory,
+  RpcServer,
+} from './types.js';
 
 const require = createRequire(import.meta.url);
 
@@ -26,19 +41,25 @@ interface RpcDeviceDescription {
 interface RpcInterfaceDefinition {
   enabled: boolean;
   module: RpcClientFactory;
+  protocol: 'xmlrpc' | 'binrpc';
   port: number;
   path?: string;
 }
 
-/**
- * High-level CCU connection layer for the platform lifecycle.
- */
 export class CcuConnectionLayer extends EventEmitter {
   private readonly clients = new Map<RpcInterfaceName, RpcClient>();
+
+  private readonly callbackServers = new Map<'xmlrpc' | 'binrpc', RpcServer>();
+
+  private readonly initIdToInterface = new Map<string, RpcInterfaceName>();
 
   private readonly connectedInterfaces = new Set<CcuInterfaceName>();
 
   private readonly discoveredHosts = new Set<string>();
+
+  private readonly cacheFilePath: string;
+
+  private cache: CcuDiscoveryCache = { channels: [], nameMap: {}, timestamp: 0 };
 
   private regaClient?: RegaClient;
 
@@ -49,12 +70,15 @@ export class CcuConnectionLayer extends EventEmitter {
    *
    * @param {CcuConnectionConfig} config Parsed CCU connection config.
    * @param {CcuLogger} log Logger from the platform.
+   * @param {string} cacheDir Directory to store cache files (optional).
    */
   constructor(
     private readonly config: CcuConnectionConfig,
     private readonly log: CcuLogger,
+    cacheDir?: string,
   ) {
     super();
+    this.cacheFilePath = path.join(cacheDir ?? process.cwd(), 'matterbridge-homematic-discovery.cache.json');
   }
 
   /**
@@ -70,10 +94,15 @@ export class CcuConnectionLayer extends EventEmitter {
       return;
     }
 
+    await this.loadCache();
+
     await this.discoverNetwork();
 
     this.initRegaClient();
     this.initRpcClients();
+    await this.initRpcCallbackServersAndSubscribe();
+
+    this.log.debug(`RPC event listener setup complete: xmlrpc=${this.callbackServers.has('xmlrpc')} binrpc=${this.callbackServers.has('binrpc')}`);
 
     this.started = true;
     this.log.info(`CCU connection layer started for ${this.config.host}.`);
@@ -86,7 +115,10 @@ export class CcuConnectionLayer extends EventEmitter {
   async stop(): Promise<void> {
     if (!this.started) return;
 
+    await this.deinitRpcCallbacksAndCloseServers();
+
     this.clients.clear();
+    this.initIdToInterface.clear();
     this.connectedInterfaces.clear();
     this.regaClient = undefined;
     this.started = false;
@@ -115,21 +147,36 @@ export class CcuConnectionLayer extends EventEmitter {
    * @param {RpcInterfaceName} iface Interface name.
    * @param {string} method RPC method name.
    * @param {unknown[]} parameters RPC method parameters.
+   * @param {number} timeoutMs Request timeout in milliseconds.
    * @returns {Promise<unknown>} Method response.
    */
-  async callRpc(iface: RpcInterfaceName, method: string, parameters: unknown[] = []): Promise<unknown> {
+  async callRpc(iface: RpcInterfaceName, method: string, parameters: unknown[] = [], timeoutMs = this.getRequestTimeoutMs()): Promise<unknown> {
     const client = this.clients.get(iface);
     if (!client) {
       throw new Error(`RPC interface ${iface} is not connected.`);
     }
 
+    const started = Date.now();
+    this.log.debug(`RPC call -> iface=${iface} method=${method} timeoutMs=${timeoutMs} params=${JSON.stringify(parameters)}`);
+
     return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const duration = Date.now() - started;
+        const error = new Error(`RPC ${iface}.${method} timed out after ${timeoutMs} ms`);
+        this.log.warn(`RPC timeout <- iface=${iface} method=${method} durationMs=${duration}`);
+        reject(error);
+      }, timeoutMs);
+
       client.methodCall(method, parameters, (error, result) => {
+        clearTimeout(timer);
+        const duration = Date.now() - started;
         if (error) {
+          this.log.warn(`RPC error <- iface=${iface} method=${method} durationMs=${duration} error=${String(error)}`);
           this.emit('rpcError', iface, error);
           reject(error);
           return;
         }
+        this.log.debug(`RPC result <- iface=${iface} method=${method} durationMs=${duration} result=${JSON.stringify(result)}`);
         resolve(result);
       });
     });
@@ -141,57 +188,306 @@ export class CcuConnectionLayer extends EventEmitter {
    * @returns {Promise<CcuChannelInfo[]>} List of all discovered channels.
    */
   async discoverChannels(): Promise<CcuChannelInfo[]> {
+    // Return cached data immediately
+    if (this.cache.channels.length > 0) {
+      this.log.debug(`discoverChannels: returning cached ${this.cache.channels.length} channels`);
+    } else {
+      // Ensure cache is loaded on first call
+      await this.loadCache();
+    }
+
+    // Spawn background refresh without awaiting (non-blocking)
+    this.refreshChannelsCache().catch((err) => {
+      this.log.warn(`Failed to refresh channel cache: ${String(err)}`);
+    });
+
+    return this.cache.channels;
+  }
+
+  /**
+   * Refresh the channel cache from RPC and ReGa (runs in background).
+   *
+   * @returns {Promise<void>} Promise that resolves when refresh is complete.
+   */
+  private async refreshChannelsCache(): Promise<void> {
+    const nameMap = await this.getRegaChannelNameMap();
+    const channelLists = await Promise.all(
+      [...this.clients.keys()].map(async (iface): Promise<CcuChannelInfo[]> => {
+        try {
+          const devices = (await this.callRpc(iface, 'listDevices', [])) as RpcDeviceDescription[];
+          const channels: CcuChannelInfo[] = [];
+
+          for (const dev of devices) {
+            if (!dev.ADDRESS.includes(':')) continue;
+
+            const colonIndex = dev.ADDRESS.indexOf(':');
+            const deviceAddress = dev.ADDRESS.slice(0, colonIndex);
+            const channelIndex = parseInt(dev.ADDRESS.slice(colonIndex + 1), 10);
+
+            channels.push({
+              address: dev.ADDRESS,
+              deviceAddress,
+              channelIndex,
+              type: dev.TYPE,
+              interfaceName: iface,
+              name: nameMap.get(dev.ADDRESS),
+            });
+          }
+
+          return channels;
+        } catch (err) {
+          this.log.warn(`RPC listDevices failed on ${iface}: ${String(err)}`);
+          return [];
+        }
+      }),
+    );
+
+    const channels = channelLists.flat();
+
+    // Update cache and persistence
+    this.cache = {
+      channels,
+      nameMap: Object.fromEntries(nameMap),
+      timestamp: Date.now(),
+    };
+
+    await this.saveCache();
+    this.log.debug(`discoverChannels cache: refreshed ${channels.length} channels and saved to disk`);
+  }
+
+  private async getRegaChannelNameMap(): Promise<Map<string, string>> {
     const nameMap = new Map<string, string>();
 
-    if (this.regaClient && this.config.regaEnabled) {
-      try {
-        const script = `string id;foreach(id,dom.GetObject(ID_CHANNELS)){var c=dom.GetObject(id);Write(c.Address()#"\t"#c.Name()#"\n");}`;
-        const { response } = await this.executeRegaScript(script);
+    if (!this.regaClient || !this.config.regaEnabled) {
+      return nameMap;
+    }
 
-        if (response) {
-          for (const line of response.split('\n')) {
-            const tabIndex = line.indexOf('\t');
-            if (tabIndex > 0) {
-              const address = line.slice(0, tabIndex).trim();
-              const name = line.slice(tabIndex + 1).trim();
-              if (address) nameMap.set(address, name);
-            }
+    try {
+      const started = Date.now();
+      this.log.debug('ReGa call -> method=getChannels');
+      const channels = await new Promise<RegaChannel[]>((resolve, reject) => {
+        const timeoutMs = this.getRequestTimeoutMs();
+        const timer = setTimeout(() => {
+          this.log.warn(`ReGa timeout <- method=getChannels timeoutMs=${timeoutMs}`);
+          reject(new Error(`ReGa getChannels timed out after ${timeoutMs} ms`));
+        }, timeoutMs);
+
+        this.regaClient?.getChannels((error, result) => {
+          clearTimeout(timer);
+          if (error) {
+            this.log.warn(`ReGa error <- method=getChannels error=${String(error)}`);
+            reject(error);
+            return;
+          }
+          resolve(Array.isArray(result) ? result : []);
+        });
+      });
+      this.log.debug(`ReGa result <- method=getChannels durationMs=${Date.now() - started} channels=${channels.length}`);
+
+      for (const channel of channels) {
+        if (typeof channel.address !== 'string' || !channel.address.includes(':')) continue;
+        const name = typeof channel.name === 'string' ? channel.name.trim() : '';
+        if (name) {
+          nameMap.set(channel.address, name);
+        }
+      }
+    } catch (err) {
+      this.log.warn(`ReGa channel name fetch via getChannels failed: ${String(err)}`);
+    }
+
+    return nameMap;
+  }
+
+  private getRequestTimeoutMs(): number {
+    const timeout = Number(this.config.queueTimeout);
+    if (Number.isFinite(timeout) && timeout > 0) return timeout;
+    return 5000;
+  }
+
+  private getInitAddress(): string {
+    const configured = this.config.rpcInitAddress?.trim();
+    if (configured && configured.length > 0) return configured;
+    return this.config.rpcServerHost;
+  }
+
+  private getCallbackUrl(protocol: 'xmlrpc' | 'binrpc'): string {
+    const host = this.getInitAddress();
+    if (protocol === 'binrpc') {
+      return `xmlrpc_bin://${host}:${this.config.rpcBinPort}`;
+    }
+    const scheme = this.config.tls ? 'https' : 'http';
+    return `${scheme}://${host}:${this.config.rpcXmlPort}`;
+  }
+
+  private getInterfaceInitId(iface: RpcInterfaceName): string {
+    return `mb_${iface.replace(/[^a-zA-Z0-9]/g, '_')}`;
+  }
+
+  private getIfaceFromInitId(idInit: unknown): RpcInterfaceName | undefined {
+    if (typeof idInit !== 'string') return undefined;
+    return this.initIdToInterface.get(idInit);
+  }
+
+  private getRpcCallbackMethodNames(): string[] {
+    return [
+      'system.listMethods',
+      'system.methodHelp',
+      'event',
+      'system.multicall',
+      'newDevices',
+      'deleteDevices',
+      'updateDevice',
+      'replaceDevice',
+      'readdedDevice',
+      'setReadyConfig',
+      'listDevices',
+      'init',
+    ];
+  }
+
+  private toJsonSafe(value: unknown): string {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+
+  private handleRpcCallback(method: string, parameters: unknown[]): unknown {
+    this.log.debug(`RPC callback <- method=${method} params=${this.toJsonSafe(parameters)}`);
+    this.emit('rpcCallback', method, parameters);
+
+    if (method === 'event') {
+      const [idInit, channel, datapoint, value] = parameters;
+      const iface = this.getIfaceFromInitId(idInit);
+      this.log.debug(`RPC event <- iface=${iface ?? 'unknown'} channel=${String(channel ?? '')} datapoint=${String(datapoint ?? '')} value=${this.toJsonSafe(value)}`);
+      this.emit('rpcEvent', {
+        iface,
+        idInit,
+        channel,
+        datapoint,
+        value,
+      });
+      return '';
+    }
+
+    if (method === 'system.multicall') {
+      const calls = Array.isArray(parameters[0]) ? (parameters[0] as Array<{ methodName?: string; params?: unknown[] }>) : [];
+      return calls.map((call) => {
+        const callMethod = typeof call?.methodName === 'string' ? call.methodName : '';
+        const callParams = Array.isArray(call?.params) ? call.params : [];
+        this.handleRpcCallback(callMethod, callParams);
+        return '';
+      });
+    }
+
+    if (method === 'system.listMethods') {
+      return this.getRpcCallbackMethodNames();
+    }
+
+    if (method === 'listDevices') {
+      return [];
+    }
+
+    return '';
+  }
+
+  private createRpcCallbackServer(protocol: 'xmlrpc' | 'binrpc', moduleFactory: RpcClientFactory, host: string, port: number): RpcServer | undefined {
+    if (typeof moduleFactory.createServer !== 'function') return undefined;
+
+    const server = moduleFactory.createServer({ host, port }, () => {
+      this.log.info(`RPC callback server listening protocol=${protocol} host=${host} port=${port}`);
+    });
+
+    server.on('NotFound', (method: unknown, params: unknown) => {
+      this.log.debug(`RPC callback <- protocol=${protocol} method=NotFound originalMethod=${String(method)} params=${this.toJsonSafe(params)}`);
+    });
+
+    for (const method of this.getRpcCallbackMethodNames()) {
+      server.on(method, (...args: unknown[]) => {
+        const parameters = args[1];
+        const callback = args[2];
+        const list = Array.isArray(parameters) ? parameters : [];
+        try {
+          const result = this.handleRpcCallback(method, list);
+          if (typeof callback === 'function') {
+            (callback as (error: unknown, result?: unknown) => void)(null, result);
+          }
+        } catch (error) {
+          this.log.warn(`RPC callback handler failed method=${method} error=${String(error)}`);
+          if (typeof callback === 'function') {
+            (callback as (error: unknown, result?: unknown) => void)(error, '');
           }
         }
-      } catch (err) {
-        this.log.warn(`ReGa channel name fetch failed: ${String(err)}`);
-      }
+      });
     }
 
-    const channels: CcuChannelInfo[] = [];
+    return server;
+  }
 
-    for (const [iface] of this.clients) {
-      try {
-        const devices = (await this.callRpc(iface, 'listDevices', [])) as RpcDeviceDescription[];
+  private async initRpcCallbackServersAndSubscribe(): Promise<void> {
+    const xmlIfaces = [...this.clients.keys()].filter((iface) => this.getRpcDefinitions()[iface].protocol === 'xmlrpc');
+    const binIfaces = [...this.clients.keys()].filter((iface) => this.getRpcDefinitions()[iface].protocol === 'binrpc');
 
-        for (const dev of devices) {
-          if (!dev.ADDRESS.includes(':')) continue;
+    if (xmlIfaces.length > 0 && !this.callbackServers.has('xmlrpc')) {
+      const server = this.createRpcCallbackServer('xmlrpc', xmlrpc, this.config.rpcServerHost, this.config.rpcXmlPort);
+      if (server) this.callbackServers.set('xmlrpc', server);
+    }
+    if (binIfaces.length > 0 && !this.callbackServers.has('binrpc')) {
+      const server = this.createRpcCallbackServer('binrpc', binrpc, this.config.rpcServerHost, this.config.rpcBinPort);
+      if (server) this.callbackServers.set('binrpc', server);
+    }
 
-          const colonIndex = dev.ADDRESS.indexOf(':');
-          const deviceAddress = dev.ADDRESS.slice(0, colonIndex);
-          const channelIndex = parseInt(dev.ADDRESS.slice(colonIndex + 1), 10);
-
-          channels.push({
-            address: dev.ADDRESS,
-            deviceAddress,
-            channelIndex,
-            type: dev.TYPE,
-            interfaceName: iface,
-            name: nameMap.get(dev.ADDRESS),
-          });
+    await Promise.all(
+      [...this.clients.keys()].map(async (iface) => {
+        const definition = this.getRpcDefinitions()[iface];
+        const callbackUrl = this.getCallbackUrl(definition.protocol);
+        const initId = this.getInterfaceInitId(iface);
+        this.initIdToInterface.set(initId, iface);
+        this.log.info(`RPC init -> iface=${iface} callbackUrl=${callbackUrl} initId=${initId}`);
+        try {
+          await this.callRpc(iface, 'init', [callbackUrl, initId]);
+          this.log.info(`RPC init done <- iface=${iface}`);
+        } catch (error) {
+          this.log.warn(`RPC init failed <- iface=${iface} error=${String(error)}`);
         }
-      } catch (err) {
-        this.log.warn(`RPC listDevices failed on ${iface}: ${String(err)}`);
-      }
-    }
+      }),
+    );
+  }
 
-    this.log.debug(`discoverChannels: found ${channels.length} channels across ${this.clients.size} interface(s).`);
-    return channels;
+  private async deinitRpcCallbacksAndCloseServers(): Promise<void> {
+    await Promise.all(
+      [...this.clients.keys()].map(async (iface) => {
+        const definition = this.getRpcDefinitions()[iface];
+        const callbackUrl = this.getCallbackUrl(definition.protocol);
+        this.log.info(`RPC de-init -> iface=${iface} callbackUrl=${callbackUrl}`);
+        try {
+          await this.callRpc(iface, 'init', [callbackUrl, '']);
+          this.log.info(`RPC de-init done <- iface=${iface}`);
+        } catch (error) {
+          this.log.warn(`RPC de-init failed <- iface=${iface} error=${String(error)}`);
+        }
+      }),
+    );
+
+    await Promise.all(
+      [...this.callbackServers.entries()].map(
+        async ([protocol, server]) =>
+          new Promise<void>((resolve) => {
+            try {
+              server.close(() => {
+                this.log.info(`RPC callback server closed protocol=${protocol}`);
+                resolve();
+              });
+            } catch (error) {
+              this.log.warn(`RPC callback server close failed protocol=${protocol} error=${String(error)}`);
+              resolve();
+            }
+          }),
+      ),
+    );
+
+    this.callbackServers.clear();
   }
 
   /**
@@ -205,24 +501,34 @@ export class CcuConnectionLayer extends EventEmitter {
       throw new Error('ReGa interface is not connected.');
     }
 
+    const started = Date.now();
+    const preview = script.replace(/\s+/g, ' ').slice(0, 180);
+    this.log.debug(`ReGa call -> method=exec scriptPreview="${preview}"`);
+
     return new Promise((resolve, reject) => {
       this.regaClient?.exec(script, (error, response, objects) => {
         if (error) {
+          this.log.warn(`ReGa error <- method=exec durationMs=${Date.now() - started} error=${String(error)}`);
           this.emit('regaError', error);
           reject(error);
           return;
         }
+        this.log.debug(
+          `ReGa result <- method=exec durationMs=${Date.now() - started} responseLength=${response?.length ?? 0} objectKeys=${objects ? Object.keys(objects).length : 0}`,
+        );
         resolve({ response, objects });
       });
     });
   }
 
   private async discoverNetwork(): Promise<void> {
+    this.log.debug('Network discovery -> hm-discover start');
     await new Promise<void>((resolve) => {
       let resolved = false;
       const timeout = setTimeout(() => {
         if (!resolved) {
           resolved = true;
+          this.log.debug('Network discovery <- hm-discover timeout after 1000ms');
           resolve();
         }
       }, 1000);
@@ -238,6 +544,7 @@ export class CcuConnectionLayer extends EventEmitter {
 
         resolved = true;
         clearTimeout(timeout);
+        this.log.debug(`Network discovery <- hm-discover found=${devices.length}`);
         resolve();
       });
     });
@@ -245,6 +552,8 @@ export class CcuConnectionLayer extends EventEmitter {
 
   private initRegaClient(): void {
     if (!this.config.regaEnabled) return;
+
+    this.log.debug(`ReGa client init -> host=${this.config.host} port=${this.config.tls ? 48181 : 8181} tls=${this.config.tls} auth=${this.config.authentication}`);
 
     this.regaClient = new RegaConstructor({
       host: this.config.host,
@@ -285,11 +594,15 @@ export class CcuConnectionLayer extends EventEmitter {
       }
 
       const useSecureFactory = this.config.tls && typeof definition.module.createSecureClient === 'function';
+      this.log.debug(
+        `RPC client init -> iface=${iface} secure=${useSecureFactory} host=${String(options.host ?? this.config.host)} port=${String(options.port ?? '')} url=${String(options.url ?? '')}`,
+      );
       const client = useSecureFactory ? definition.module.createSecureClient?.(options) : definition.module.createClient(options);
 
       if (client) {
         this.clients.set(iface, client);
         this.connectedInterfaces.add(iface);
+        this.log.debug(`RPC client ready <- iface=${iface}`);
       }
     }
   }
@@ -307,32 +620,71 @@ export class CcuConnectionLayer extends EventEmitter {
     return enabled;
   }
 
+  /**
+   * Load cache from disk.
+   *
+   * @returns {Promise<void>} Promise that resolves when cache is loaded.
+   */
+  private async loadCache(): Promise<void> {
+    try {
+      const content = await fs.readFile(this.cacheFilePath, 'utf-8');
+      const parsed = JSON.parse(content) as CcuDiscoveryCache;
+
+      if (parsed.channels && Array.isArray(parsed.channels) && typeof parsed.nameMap === 'object') {
+        this.cache = parsed;
+        this.log.debug(`Discovery cache loaded: ${parsed.channels.length} channels, timestamp ${new Date(parsed.timestamp).toISOString()}`);
+      }
+    } catch {
+      // Cache file does not exist or is invalid; start with empty cache
+      this.log.debug('Discovery cache not found or invalid; starting with empty cache');
+    }
+  }
+
+  /**
+   * Save cache to disk.
+   *
+   * @returns {Promise<void>} Promise that resolves when cache is saved.
+   */
+  private async saveCache(): Promise<void> {
+    try {
+      const content = JSON.stringify(this.cache, null, 2);
+      await fs.writeFile(this.cacheFilePath, content, 'utf-8');
+    } catch (err) {
+      this.log.warn(`Failed to save discovery cache: ${String(err)}`);
+    }
+  }
+
   private getRpcDefinitions(): Record<RpcInterfaceName, RpcInterfaceDefinition> {
     return {
       'BidCos-RF': {
         enabled: this.config.bcrfEnabled,
         module: xmlrpc,
+        protocol: 'xmlrpc',
         port: this.config.tls ? 42001 : 2001,
       },
       'BidCos-Wired': {
         enabled: this.config.bcwiEnabled,
         module: xmlrpc,
+        protocol: 'xmlrpc',
         port: this.config.tls ? 42000 : 2000,
       },
       'HmIP-RF': {
         enabled: this.config.iprfEnabled,
         module: xmlrpc,
+        protocol: 'xmlrpc',
         port: this.config.tls ? 42010 : 2010,
       },
       'VirtualDevices': {
         enabled: this.config.virtEnabled,
         module: xmlrpc,
+        protocol: 'xmlrpc',
         port: this.config.tls ? 49292 : 9292,
         path: 'groups',
       },
       'CUxD': {
         enabled: this.config.cuxdEnabled,
         module: binrpc,
+        protocol: 'binrpc',
         port: 8701,
       },
     };

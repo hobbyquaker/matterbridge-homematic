@@ -16,5 +16,9 @@
 - For Jest tests in this repository, use ESM-safe patterns. Prefer `jest.unstable_mockModule` over `jest.mock`.
 - When behavior changes, update the relevant tests and documentation.
 - For CCU integration work, use https://github.com/rdmtc/node-red-contrib-ccu as an example for an interface to a Homematic CCU, including RPC and ReGa communication patterns and practical usage of the related Node.js modules.
+- Use these repositories as the source of truth for platform patterns, lifecycle usage, and supported device semantics:
+  - https://github.com/Luligu/matterbridge
+  - https://github.com/Luligu/matterbridge-plugin-template
+  - https://github.com/Luligu/matterbridge-example-dynamic-platform
 - Always commit completed changes unless the user explicitly asks not to commit.
 - Use this commit message convention: `<type>(<scope>): <short imperative summary>` where `type` is one of `feat|fix|refactor|docs|test|chore|build|ci|perf|revert`, `scope` is short and optional, and the summary is concise (preferably <= 72 characters).

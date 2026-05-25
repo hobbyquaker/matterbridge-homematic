@@ -50,10 +50,23 @@ export interface RpcClient {
 export interface RpcClientFactory {
   createClient(options: Record<string, unknown>): RpcClient;
   createSecureClient?: (options: Record<string, unknown>) => RpcClient;
+  createServer?: (options: Record<string, unknown>, onListening?: () => void) => RpcServer;
+}
+
+export interface RpcServer {
+  on(event: string, listener: (...parameters: unknown[]) => void): void;
+  close(callback?: () => void): void;
 }
 
 export interface RegaClient {
   exec(script: string, callback: (error: Error | null, response?: string, objects?: Record<string, unknown>) => void): void;
+  getChannels(callback: (error: Error | null, channels?: RegaChannel[]) => void): void;
+}
+
+export interface RegaChannel {
+  id: number;
+  address: string;
+  name: string;
 }
 
 export interface CcuStatusSnapshot {
@@ -88,4 +101,11 @@ export interface CcuChannelOverride {
   address: string;
   enabled?: boolean;
   switchMatterType?: SwitchMatterType;
+}
+
+/** Cache for discovered channels and ReGa names to avoid repeated RPC/ReGa calls. */
+export interface CcuDiscoveryCache {
+  channels: CcuChannelInfo[];
+  nameMap: Record<string, string>;
+  timestamp: number;
 }
