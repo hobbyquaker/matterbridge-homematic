@@ -124,6 +124,21 @@ export interface ChannelMappingOptions {
 }
 
 /**
+ * Infer the best Matter device type for a SWITCH channel from the ReGa channel name.
+ * Returns `undefined` when no keyword matches so the caller can fall back to the default ('light').
+ *
+ * @param {string | undefined} name ReGa display name of the channel.
+ * @returns {SwitchMatterType | undefined} Inferred type, or `undefined` when name gives no signal.
+ */
+export function inferSwitchMatterTypeFromName(name: string | undefined): SwitchMatterType | undefined {
+  if (!name) return undefined;
+  const lower = name.toLowerCase();
+  if (['standby', 'plug', 'steckdose', 'buchse'].some((kw) => lower.includes(kw))) return 'outlet';
+  if (['licht', 'light', 'lampe', 'lamp', 'leuchte'].some((kw) => lower.includes(kw))) return 'light';
+  return undefined;
+}
+
+/**
  * Example function to map a device endpoint with options.
  *
  * @param {MatterbridgeEndpoint} endpoint The Matterbridge endpoint instance to map.

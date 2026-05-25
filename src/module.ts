@@ -32,7 +32,7 @@ import { AnsiLogger, LogLevel } from 'matterbridge/logger';
 
 import { parseCcuConnectionConfig } from './ccu/config.js';
 import { CcuConnectionLayer } from './ccu/connection-layer.js';
-import { createEndpointForChannel, isSupportedChannelType, resolveChannelsForMatter } from './ccu/device-mapper.js';
+import { createEndpointForChannel, inferSwitchMatterTypeFromName, isSupportedChannelType, resolveChannelsForMatter } from './ccu/device-mapper.js';
 import { getMatchingMainsPoweredPrefix, isAlwaysMainsPoweredDeviceType, MAINS_POWERED_DEVICE_TYPE_PREFIXES } from './ccu/device-power.js';
 import { CcuChannelInfo, CcuChannelOverride, SwitchMatterType } from './ccu/types.js';
 
@@ -272,7 +272,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       enabledCount++;
 
       const endpoint = createEndpointForChannel(channel as Parameters<typeof createEndpointForChannel>[0], this.matterbridge.aggregatorVendorId, {
-        switchMatterType: override?.switchMatterType,
+        switchMatterType: override?.switchMatterType ?? inferSwitchMatterTypeFromName(channel.name),
         batteryPowered: this.deviceBatteryHints.get(channel.deviceAddress) ?? channel.batteryPowered,
       });
 
