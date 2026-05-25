@@ -78,6 +78,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
   private readonly deviceBatteryHints = new Map<string, boolean>();
 
+  private readonly deviceBatteryLowState = new Map<string, boolean>();
+
   constructor(matterbridge: PlatformMatterbridge, log: AnsiLogger, config: PlatformConfig) {
     // Always call super(matterbridge, log, config)
     super(matterbridge, log, config);
@@ -112,8 +114,9 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     });
 
     // Listen for RPC events to track device availability via UNREACH datapoint
-    this.ccuConnection.on('rpcEvent', (event: { iface?: string; idInit?: string; channel?: number; datapoint?: string; value?: unknown }) => {
+    this.ccuConnection.on('rpcEvent', (event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }) => {
       void this.handleRpcEventAvailability(event);
+      void this.handleRpcEventBattery(event);
     });
 
     this.ccuConnection.on('deviceBatteryHint', (hint: { deviceAddress?: string; batteryPowered?: boolean }) => {
@@ -260,28 +263,84 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     }
   }
 
-  private async handleRpcEventAvailability(event: { iface?: string; idInit?: string; channel?: number; datapoint?: string; value?: unknown }): Promise<void> {
-    // We only care about UNREACH on channel 0 (device level)
-    if (event.channel !== 0 || event.datapoint !== 'UNREACH') return;
+  private async handleRpcEventAvailability(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
+    if (event.datapoint !== 'UNREACH') return;
+
+    const deviceAddress = this.extractDeviceAddressFromRpcChannel(event.channel);
+    const isDeviceLevelEvent = deviceAddress !== undefined || event.channel === 0;
+    if (!isDeviceLevelEvent) return;
 
     const unreachValue = event.value === true;
-    this.log.debug(`UNREACH event: iface=${String(event.iface ?? 'unknown')} unreachable=${unreachValue}`);
+    const reachable = !unreachValue;
+    this.log.debug(`UNREACH event: iface=${String(event.iface ?? 'unknown')} device=${deviceAddress ?? 'unknown'} reachable=${reachable}`);
 
-    // Update all devices on the affected interface
-    for (const [deviceAddress, device] of this.deviceAddressToDevice) {
-      try {
-        // The reachable attribute is the inverse of UNREACH
-        const reachable = !unreachValue;
-        const currentReachable = await device.getAttribute('BridgedDeviceBasicInformation', 'reachable');
-
-        if (currentReachable !== reachable) {
-          this.log.info(`Device reachability changed: ${deviceAddress} reachable=${reachable}`);
-          await device.updateAttribute('BridgedDeviceBasicInformation', 'reachable', reachable);
-        }
-      } catch (err) {
-        this.log.debug(`Failed to update reachability for ${deviceAddress}: ${String(err)}`);
-      }
+    if (deviceAddress) {
+      const device = this.deviceAddressToDevice.get(deviceAddress);
+      if (!device) return;
+      await this.updateDeviceReachable(deviceAddress, device, reachable);
+      return;
     }
+
+    // Backward-compatible fallback when only channel index is provided.
+    for (const [address, device] of this.deviceAddressToDevice) {
+      await this.updateDeviceReachable(address, device, reachable);
+    }
+  }
+
+  private async handleRpcEventBattery(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
+    const datapoint = typeof event.datapoint === 'string' ? event.datapoint.trim().toUpperCase() : '';
+    if (datapoint !== 'LOWBAT' && datapoint !== 'LOW_BAT') return;
+
+    const deviceAddress = this.extractDeviceAddressFromRpcChannel(event.channel);
+    if (!deviceAddress) return;
+
+    const batteryLow = event.value === true || event.value === 1 || event.value === '1';
+    const previous = this.deviceBatteryLowState.get(deviceAddress);
+    if (previous === batteryLow) return;
+
+    this.deviceBatteryLowState.set(deviceAddress, batteryLow);
+    this.deviceBatteryHints.set(deviceAddress, true);
+
+    const endpoint = this.deviceAddressToDevice.get(deviceAddress);
+    if (!endpoint) return;
+    if (!endpoint.hasClusterServer('PowerSource')) {
+      this.log.debug(`LOWBAT event ignored for ${deviceAddress}: endpoint has no PowerSource cluster`);
+      return;
+    }
+
+    // Matter PowerSource.batChargeLevel: 0=ok, 1=warning, 2=critical.
+    const chargeLevel = batteryLow ? 1 : 0;
+
+    try {
+      const currentChargeLevel = await endpoint.getAttribute('PowerSource', 'batChargeLevel');
+      if (currentChargeLevel !== chargeLevel) {
+        await endpoint.updateAttribute('PowerSource', 'batChargeLevel', chargeLevel);
+        this.log.info(`Battery state changed: ${deviceAddress} low=${batteryLow} batChargeLevel=${chargeLevel}`);
+      }
+    } catch (err) {
+      this.log.debug(`Failed to update battery charge level for ${deviceAddress}: ${String(err)}`);
+    }
+  }
+
+  private async updateDeviceReachable(deviceAddress: string, device: MatterbridgeEndpoint, reachable: boolean): Promise<void> {
+    try {
+      const currentReachable = await device.getAttribute('BridgedDeviceBasicInformation', 'reachable');
+      if (currentReachable !== reachable) {
+        this.log.info(`Device reachability changed: ${deviceAddress} reachable=${reachable}`);
+        await device.updateAttribute('BridgedDeviceBasicInformation', 'reachable', reachable);
+      }
+    } catch (err) {
+      this.log.debug(`Failed to update reachability for ${deviceAddress}: ${String(err)}`);
+    }
+  }
+
+  private extractDeviceAddressFromRpcChannel(channel: unknown): string | undefined {
+    if (typeof channel !== 'string' || channel.length === 0) return undefined;
+    const separatorIndex = channel.indexOf(':');
+    if (separatorIndex <= 0) return undefined;
+    const suffix = channel.slice(separatorIndex + 1);
+    if (suffix !== '0') return undefined;
+    return channel.slice(0, separatorIndex);
   }
 
   private refreshDeviceNames(updatedChannels: CcuChannelInfo[]): void {
