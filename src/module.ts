@@ -211,9 +211,6 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const selectSerial = this.getChannelSelectSerial(channel.address);
       const legacyDashSerial = channel.address.replace(':', '-');
 
-      // Read current persisted selection before updating visible metadata.
-      const wasSelected = this.getSelectDevice(selectSerial) !== undefined || this.getSelectDevice(legacyDashSerial) !== undefined;
-
       // Remove legacy select rows keyed with '-' to avoid duplicate UI entries.
       if (legacyDashSerial !== selectSerial && this.getSelectDevice(legacyDashSerial) !== undefined) {
         await this.clearDeviceSelect(legacyDashSerial);
@@ -221,7 +218,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
       this.setSelectDevice(selectSerial, displayName, undefined, 'switch');
 
-      if (!this.isChannelEnabled(channel, override, wasSelected)) {
+      if (!this.isChannelEnabled(channel, override, displayName)) {
         this.log.debug(`Skipping disabled channel ${channel.address}`);
         continue;
       }
@@ -326,12 +323,15 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     return this.getChannelOverrides().find((item) => item.address === channelAddress);
   }
 
-  private isChannelEnabled(channel: CcuChannelInfo, override: CcuChannelOverride | undefined, wasSelected: boolean): boolean {
+  private isChannelEnabled(channel: CcuChannelInfo, override: CcuChannelOverride | undefined, displayName: string): boolean {
     if (override && typeof override.enabled === 'boolean') {
       return override.enabled;
     }
-    // Fallback to Matterbridge persisted selection checkboxes when no explicit override exists.
-    return wasSelected;
+    // Fall back to Matterbridge whitelist/blacklist validation used by Home checkbox selections.
+    const candidates = [this.getChannelSelectSerial(channel.address), channel.address, channel.name?.trim(), displayName].filter(
+      (value): value is string => typeof value === 'string' && value.length > 0,
+    );
+    return this.validateDevice(candidates, false);
   }
 
   private getChannelDisplayName(channel: CcuChannelInfo): string {
