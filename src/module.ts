@@ -156,6 +156,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       void this.handleRpcEventBlindTilt(event);
       void this.handleRpcEventBlindActivity(event);
       void this.handleRpcEventMotion(event);
+      void this.handleRpcEventTemperatureHumidity(event);
     });
 
     this.ccuConnection.on('deviceBatteryHint', (hint: { deviceAddress?: string; batteryPowered?: boolean }) => {
@@ -369,6 +370,11 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
       // Track MOTION_DETECTOR channel address for inbound MOTION events.
       if (channel.type === 'MOTION_DETECTOR') {
+        this.channelAddressToDevice.set(channel.address, endpoint);
+      }
+
+      // Track TEMPERATURE_HUMIDITY_TRANSMITTER channel address for inbound sensor events.
+      if (channel.type === 'TEMPERATURE_HUMIDITY_TRANSMITTER') {
         this.channelAddressToDevice.set(channel.address, endpoint);
       }
 
@@ -824,6 +830,57 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       }
     } catch (err) {
       this.log.warn(`Failed to update Matter OccupancySensing for ${channelAddress}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Handle incoming RPC event for TEMPERATURE_HUMIDITY_TRANSMITTER channel datapoints.
+   * Maps ACTUAL_TEMPERATURE to TemperatureMeasurement and HUMIDITY to RelativeHumidityMeasurement.
+   *
+   * @param {object} event RPC event payload.
+   * @param {unknown} [event.channel] Channel address string.
+   * @param {string} [event.datapoint] Datapoint name ('ACTUAL_TEMPERATURE' or 'HUMIDITY').
+   * @param {unknown} [event.value] Datapoint value (float; temperature in °C, humidity in %).
+   * @returns {Promise<void>} Resolves when the Matter attribute has been updated.
+   */
+  private async handleRpcEventTemperatureHumidity(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
+    const datapoint = typeof event.datapoint === 'string' ? event.datapoint.trim().toUpperCase() : '';
+    if (datapoint !== 'ACTUAL_TEMPERATURE' && datapoint !== 'HUMIDITY') return;
+
+    const channelAddress = typeof event.channel === 'string' ? event.channel : undefined;
+    if (!channelAddress) return;
+
+    const endpoint = this.channelAddressToDevice.get(channelAddress);
+    if (!endpoint) return;
+
+    if (datapoint === 'ACTUAL_TEMPERATURE') {
+      if (!endpoint.hasClusterServer('TemperatureMeasurement')) return;
+      // Matter TemperatureMeasurement.measuredValue is in units of 0.01°C.
+      const measuredValue = Math.round((typeof event.value === 'number' ? event.value : 0) * 100);
+      try {
+        const current = await endpoint.getAttribute('TemperatureMeasurement', 'measuredValue');
+        if (current !== measuredValue) {
+          await endpoint.updateAttribute('TemperatureMeasurement', 'measuredValue', measuredValue);
+          this.log.info(`TEMPERATURE event: updated TemperatureMeasurement for ${channelAddress} to ${measuredValue} (${measuredValue / 100}°C)`);
+        }
+      } catch (err) {
+        this.log.warn(`Failed to update TemperatureMeasurement for ${channelAddress}: ${String(err)}`);
+      }
+      return;
+    }
+
+    // HUMIDITY
+    if (!endpoint.hasClusterServer('RelativeHumidityMeasurement')) return;
+    // Matter RelativeHumidityMeasurement.measuredValue is in units of 0.01%.
+    const measuredValue = Math.round((typeof event.value === 'number' ? event.value : 0) * 100);
+    try {
+      const current = await endpoint.getAttribute('RelativeHumidityMeasurement', 'measuredValue');
+      if (current !== measuredValue) {
+        await endpoint.updateAttribute('RelativeHumidityMeasurement', 'measuredValue', measuredValue);
+        this.log.info(`HUMIDITY event: updated RelativeHumidityMeasurement for ${channelAddress} to ${measuredValue} (${measuredValue / 100}%)`);
+      }
+    } catch (err) {
+      this.log.warn(`Failed to update RelativeHumidityMeasurement for ${channelAddress}: ${String(err)}`);
     }
   }
 

@@ -4,12 +4,12 @@
  * @file device-mapper.ts
  */
 
-import { contactSensor, coverDevice, dimmableLight, MatterbridgeEndpoint, occupancySensor, onOffLight, onOffOutlet, onOffSwitch } from 'matterbridge';
+import { contactSensor, coverDevice, dimmableLight, humiditySensor, MatterbridgeEndpoint, occupancySensor, onOffLight, onOffOutlet, onOffSwitch, temperatureSensor } from 'matterbridge';
 
 import { CcuChannelInfo, SwitchMatterType } from './types.js';
 
 /** Homematic channel types that are mapped to Matter devices by this plugin. */
-export const SUPPORTED_CHANNEL_TYPES = ['BLIND', 'DIMMER', 'MOTION_DETECTOR', 'SWITCH', 'SHUTTER_CONTACT'] as const;
+export const SUPPORTED_CHANNEL_TYPES = ['BLIND', 'DIMMER', 'MOTION_DETECTOR', 'SHUTTER_CONTACT', 'SWITCH', 'TEMPERATURE_HUMIDITY_TRANSMITTER'] as const;
 
 /** Union of the Homematic channel type strings that this plugin supports. */
 export type SupportedChannelType = (typeof SUPPORTED_CHANNEL_TYPES)[number];
@@ -261,6 +261,16 @@ export function createEndpointForChannel(channel: CcuChannelInfo & { type: Suppo
           .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Motion Detector')
           // Default: unoccupied. Updated from RPC events.
           .createDefaultOccupancySensingClusterServer(false),
+        { ...options, batteryPowered: channel.batteryPowered },
+      );
+
+    case 'TEMPERATURE_HUMIDITY_TRANSMITTER':
+      return finalizeEndpoint(
+        new MatterbridgeEndpoint([temperatureSensor, humiditySensor], { id })
+          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Temperature/Humidity Sensor')
+          // null defaults: values are updated from RPC events on startup.
+          .createDefaultTemperatureMeasurementClusterServer()
+          .createDefaultRelativeHumidityMeasurementClusterServer(),
         { ...options, batteryPowered: channel.batteryPowered },
       );
   }
