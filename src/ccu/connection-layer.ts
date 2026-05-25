@@ -57,6 +57,8 @@ export class CcuConnectionLayer extends EventEmitter {
 
   private readonly discoveredHosts = new Set<string>();
 
+  private readonly deviceBatteryHints = new Map<string, boolean>();
+
   private readonly cacheFilePath: string;
 
   private cache: CcuDiscoveryCache = { channels: [], nameMap: {}, timestamp: 0 };
@@ -120,6 +122,7 @@ export class CcuConnectionLayer extends EventEmitter {
     this.clients.clear();
     this.initIdToInterface.clear();
     this.connectedInterfaces.clear();
+    this.deviceBatteryHints.clear();
     this.regaClient = undefined;
     this.started = false;
     this.log.info('CCU connection layer stopped.');
@@ -232,6 +235,7 @@ export class CcuConnectionLayer extends EventEmitter {
               type: dev.TYPE,
               interfaceName: iface,
               name: nameMap.get(dev.ADDRESS),
+              batteryPowered: this.deviceBatteryHints.get(deviceAddress),
             });
           }
 
@@ -376,6 +380,11 @@ export class CcuConnectionLayer extends EventEmitter {
     this.log.debug(`RPC callback <- method=${method} params=${this.toJsonSafe(parameters)}`);
     this.emit('rpcCallback', method, parameters);
 
+    if (method === 'newDevices') {
+      this.processNewDevicesCallback(parameters);
+      return '';
+    }
+
     if (method === 'event') {
       const [idInit, channel, datapoint, value] = parameters;
       const iface = this.getIfaceFromInitId(idInit);
@@ -409,6 +418,58 @@ export class CcuConnectionLayer extends EventEmitter {
     }
 
     return '';
+  }
+
+  private processNewDevicesCallback(parameters: unknown[]): void {
+    const iface = this.getIfaceFromInitId(parameters[0]);
+    const payload = Array.isArray(parameters[1]) ? parameters[1] : [];
+
+    for (const entry of payload) {
+      if (!entry || typeof entry !== 'object') continue;
+      const addressValue = (entry as Record<string, unknown>).ADDRESS;
+      if (typeof addressValue !== 'string' || !addressValue.endsWith(':0')) continue;
+
+      const deviceAddress = addressValue.slice(0, addressValue.indexOf(':'));
+      const batteryPowered = this.containsLowBatMarker(entry);
+      const previous = this.deviceBatteryHints.get(deviceAddress);
+
+      if (previous !== batteryPowered) {
+        this.deviceBatteryHints.set(deviceAddress, batteryPowered);
+        this.log.debug(`RPC newDevices battery hint <- iface=${iface ?? 'unknown'} device=${deviceAddress} batteryPowered=${batteryPowered}`);
+        this.emit('deviceBatteryHint', {
+          iface,
+          deviceAddress,
+          batteryPowered,
+        });
+      }
+    }
+  }
+
+  private containsLowBatMarker(value: unknown, depth = 0): boolean {
+    if (depth > 6) return false;
+
+    if (typeof value === 'string') {
+      const marker = value.trim().toUpperCase();
+      return marker === 'LOWBAT' || marker === 'LOW_BAT';
+    }
+
+    if (Array.isArray(value)) {
+      return value.some((item) => this.containsLowBatMarker(item, depth + 1));
+    }
+
+    if (value && typeof value === 'object') {
+      for (const [key, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+        const marker = key.trim().toUpperCase();
+        if (marker === 'LOWBAT' || marker === 'LOW_BAT') {
+          return true;
+        }
+        if (this.containsLowBatMarker(nestedValue, depth + 1)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
   }
 
   private createRpcCallbackServer(protocol: 'xmlrpc' | 'binrpc', moduleFactory: RpcClientFactory, host: string, port: number): RpcServer | undefined {

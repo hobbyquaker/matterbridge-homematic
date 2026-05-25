@@ -91,6 +91,8 @@ export interface CcuChannelInfo {
   interfaceName: Exclude<CcuInterfaceName, 'ReGaHSS'>;
   /** ReGa display name for the channel, if available. */
   name?: string;
+  /** Whether the parent device is battery powered, inferred from channel 0 datapoints. */
+  batteryPowered?: boolean;
 }
 
 /** Matter device type selection for Homematic SWITCH channels. */

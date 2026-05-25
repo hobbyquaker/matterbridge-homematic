@@ -76,6 +76,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
   private deviceAddressToDevice = new Map<string, MatterbridgeEndpoint>();
 
+  private readonly deviceBatteryHints = new Map<string, boolean>();
+
   constructor(matterbridge: PlatformMatterbridge, log: AnsiLogger, config: PlatformConfig) {
     // Always call super(matterbridge, log, config)
     super(matterbridge, log, config);
@@ -114,6 +116,12 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     // Listen for RPC events to track device availability via UNREACH datapoint
     this.ccuConnection.on('rpcEvent', (event: { iface?: string; idInit?: string; channel?: number; datapoint?: string; value?: unknown }) => {
       void this.handleRpcEventAvailability(event);
+    });
+
+    this.ccuConnection.on('deviceBatteryHint', (hint: { deviceAddress?: string; batteryPowered?: boolean }) => {
+      if (typeof hint.deviceAddress !== 'string' || typeof hint.batteryPowered !== 'boolean') return;
+      this.deviceBatteryHints.set(hint.deviceAddress, hint.batteryPowered);
+      this.log.debug(`Device battery hint updated: ${hint.deviceAddress} batteryPowered=${hint.batteryPowered}`);
     });
 
     await this.startChannelEditorServer();
@@ -200,6 +208,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
       const endpoint = createEndpointForChannel(channel as Parameters<typeof createEndpointForChannel>[0], this.matterbridge.aggregatorVendorId, {
         switchMatterType: override?.switchMatterType,
+        batteryPowered: this.deviceBatteryHints.get(channel.deviceAddress) ?? channel.batteryPowered,
       });
 
       endpoint.configUrl = this.buildChannelConfigUrl(channel.address);

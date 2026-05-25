@@ -16,6 +16,14 @@ export type SupportedChannelType = (typeof SUPPORTED_CHANNEL_TYPES)[number];
 
 export interface ChannelMappingOptions {
   switchMatterType?: SwitchMatterType;
+  batteryPowered?: boolean;
+}
+
+function finalizeEndpoint(endpoint: MatterbridgeEndpoint, options: ChannelMappingOptions): MatterbridgeEndpoint {
+  if (options.batteryPowered) {
+    endpoint.createDefaultPowerSourceReplaceableBatteryClusterServer(100);
+  }
+  return endpoint.addRequiredClusterServers();
 }
 
 /**
@@ -43,31 +51,61 @@ export function createEndpointForChannel(channel: CcuChannelInfo & { type: Suppo
 
   switch (channel.type) {
     case 'DIMMER':
-      return new MatterbridgeEndpoint(dimmableLight, { id })
-        .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Dimmer')
-        .addRequiredClusterServers();
+      return finalizeEndpoint(
+        new MatterbridgeEndpoint(dimmableLight, { id }).createDefaultBridgedDeviceBasicInformationClusterServer(
+          displayName,
+          serialNumber,
+          vendorId,
+          'Homematic',
+          'Homematic Dimmer',
+        ),
+        { ...options, batteryPowered: channel.batteryPowered },
+      );
 
     case 'SWITCH':
       switch (options.switchMatterType ?? 'light') {
         case 'outlet':
-          return new MatterbridgeEndpoint(onOffOutlet, { id })
-            .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Switch Outlet')
-            .addRequiredClusterServers();
+          return finalizeEndpoint(
+            new MatterbridgeEndpoint(onOffOutlet, { id }).createDefaultBridgedDeviceBasicInformationClusterServer(
+              displayName,
+              serialNumber,
+              vendorId,
+              'Homematic',
+              'Homematic Switch Outlet',
+            ),
+            { ...options, batteryPowered: channel.batteryPowered },
+          );
         case 'switch':
-          return new MatterbridgeEndpoint(onOffSwitch, { id })
-            .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Switch Relay')
-            .addRequiredClusterServers();
+          return finalizeEndpoint(
+            new MatterbridgeEndpoint(onOffSwitch, { id }).createDefaultBridgedDeviceBasicInformationClusterServer(
+              displayName,
+              serialNumber,
+              vendorId,
+              'Homematic',
+              'Homematic Switch Relay',
+            ),
+            { ...options, batteryPowered: channel.batteryPowered },
+          );
         case 'light':
         default:
-          return new MatterbridgeEndpoint(onOffLight, { id })
-            .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Switch Light')
-            .addRequiredClusterServers();
+          return finalizeEndpoint(
+            new MatterbridgeEndpoint(onOffLight, { id }).createDefaultBridgedDeviceBasicInformationClusterServer(
+              displayName,
+              serialNumber,
+              vendorId,
+              'Homematic',
+              'Homematic Switch Light',
+            ),
+            { ...options, batteryPowered: channel.batteryPowered },
+          );
       }
 
     case 'SHUTTER_CONTACT':
-      return new MatterbridgeEndpoint(contactSensor, { id })
-        .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Shutter Contact')
-        .createDefaultBooleanStateClusterServer(false)
-        .addRequiredClusterServers();
+      return finalizeEndpoint(
+        new MatterbridgeEndpoint(contactSensor, { id })
+          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Shutter Contact')
+          .createDefaultBooleanStateClusterServer(false),
+        { ...options, batteryPowered: channel.batteryPowered },
+      );
   }
 }
