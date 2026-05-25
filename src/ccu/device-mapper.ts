@@ -4,12 +4,12 @@
  * @file device-mapper.ts
  */
 
-import { contactSensor, dimmableLight, MatterbridgeEndpoint, onOffLight, onOffOutlet, onOffSwitch } from 'matterbridge';
+import { contactSensor, coverDevice, dimmableLight, MatterbridgeEndpoint, onOffLight, onOffOutlet, onOffSwitch } from 'matterbridge';
 
 import { CcuChannelInfo, SwitchMatterType } from './types.js';
 
 /** Homematic channel types that are mapped to Matter devices by this plugin. */
-export const SUPPORTED_CHANNEL_TYPES = ['DIMMER', 'SWITCH', 'SHUTTER_CONTACT'] as const;
+export const SUPPORTED_CHANNEL_TYPES = ['BLIND', 'DIMMER', 'SWITCH', 'SHUTTER_CONTACT'] as const;
 
 /** Union of the Homematic channel type strings that this plugin supports. */
 export type SupportedChannelType = (typeof SUPPORTED_CHANNEL_TYPES)[number];
@@ -22,6 +22,7 @@ export type SupportedChannelType = (typeof SUPPORTED_CHANNEL_TYPES)[number];
 const HMIP_CHANNEL_PAIRS: Array<{ transmitter: string; receiver: string; matterType: SupportedChannelType }> = [
   { transmitter: 'SWITCH_TRANSMITTER', receiver: 'SWITCH_VIRTUAL_RECEIVER', matterType: 'SWITCH' },
   { transmitter: 'DIMMER_TRANSMITTER', receiver: 'DIMMER_VIRTUAL_RECEIVER', matterType: 'DIMMER' },
+  { transmitter: 'BLIND_TRANSMITTER', receiver: 'BLIND_VIRTUAL_TRANSCEIVER', matterType: 'BLIND' },
 ];
 
 /**
@@ -137,6 +138,15 @@ export function createEndpointForChannel(channel: CcuChannelInfo & { type: Suppo
   const id = `hm-${channel.address.replace(':', '-')}`;
 
   switch (channel.type) {
+    case 'BLIND':
+      return finalizeEndpoint(
+        new MatterbridgeEndpoint(coverDevice, { id })
+          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Blind')
+          // Default: fully closed (10000 = 100.00%). Position is updated from RPC events on startup.
+          .createDefaultWindowCoveringClusterServer(10000),
+        { ...options, batteryPowered: channel.batteryPowered },
+      );
+
     case 'DIMMER':
       return finalizeEndpoint(
         new MatterbridgeEndpoint(dimmableLight, { id }).createDefaultBridgedDeviceBasicInformationClusterServer(

@@ -149,6 +149,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       void this.handleRpcEventContactState(event);
       void this.handleRpcEventDimmerWorking(event);
       void this.handleRpcEventDimmerLevel(event);
+      void this.handleRpcEventBlindLevel(event);
     });
 
     this.ccuConnection.on('deviceBatteryHint', (hint: { deviceAddress?: string; batteryPowered?: boolean }) => {
@@ -358,6 +359,34 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       // Track SHUTTER_CONTACT channel address for inbound STATE events.
       if (channel.type === 'SHUTTER_CONTACT') {
         this.channelAddressToDevice.set(channel.address, endpoint);
+      }
+
+      // Wire WindowCovering position for BLIND channels.
+      // Matter Percent100ths: 0 = fully open, 10000 = fully closed.
+      // Homematic LEVEL: 0.0 = fully closed, 1.0 = fully open.
+      if (channel.type === 'BLIND' && this.ccuConnection) {
+        const ccuConn = this.ccuConnection;
+        this.channelAddressToDevice.set(channel.address, endpoint);
+        try {
+          await endpoint.subscribeAttribute('WindowCovering', 'targetPositionLiftPercent100ths', (value: number | null) => {
+            const iface = channel.interfaceName;
+            const address = channel.address;
+            // Matter 0 = open → hmLevel 1.0; Matter 10000 = closed → hmLevel 0.0.
+            const hmLevel = value != null ? Math.round((1 - value / 10000) * 100) / 100 : 0;
+            // Suppress echo when this target change was triggered by an inbound RPC event.
+            const suppress = this.rpcEchoSuppress.get(address + ':blindTarget');
+            if (suppress !== undefined && suppress === value) {
+              this.rpcEchoSuppress.delete(address + ':blindTarget');
+              return;
+            }
+            this.log.debug(`Matter WindowCovering target -> Homematic LEVEL: iface=${iface} channel=${address} target=${value?.toString() ?? 'null'} hmLevel=${hmLevel}`);
+            ccuConn.setChannelDatapointValue(iface, address, 'LEVEL', String(hmLevel)).catch((err: unknown) => {
+              this.log.warn(`Failed to set Homematic LEVEL for ${address}: ${String(err)}`);
+            });
+          });
+        } catch (err) {
+          this.log.warn(`Failed to subscribe WindowCovering for ${channel.address}: ${String(err)}`);
+        }
       }
     }
 
@@ -679,7 +708,11 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       this.log.debug(`DIMMER WORKING=false: applying last known level=${last.level} age=${age}ms channel=${channelAddress}`);
       const endpoint = this.channelAddressToDevice.get(channelAddress);
       if (endpoint) {
-        await this.applyDimmerLevel(channelAddress, endpoint, last.level);
+        if (endpoint.hasClusterServer('WindowCovering')) {
+          await this.applyBlindLevel(channelAddress, endpoint, last.level);
+        } else {
+          await this.applyDimmerLevel(channelAddress, endpoint, last.level);
+        }
       }
     } else {
       // Last known level is stale or absent — wait for the next LEVEL event.
@@ -718,6 +751,70 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       this.rpcEchoSuppress.delete(channelAddress);
       this.rpcEchoSuppress.delete(channelAddress + ':onoff');
       this.log.warn(`Failed to update Matter LevelControl for ${channelAddress}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Handle incoming RPC event for BLIND channel LEVEL and update Matter WindowCovering endpoint.
+   *
+   * @param {object} event RPC event payload.
+   * @param {string} [event.iface] Interface name.
+   * @param {string} [event.idInit] Init ID of the interface.
+   * @param {unknown} [event.channel] Channel address string.
+   * @param {string} [event.datapoint] Datapoint name (e.g. 'LEVEL').
+   * @param {unknown} [event.value] Datapoint value (0.0–1.0 float; 0=closed, 1=open).
+   * @returns {Promise<void>} Resolves when the Matter attribute has been updated.
+   */
+  private async handleRpcEventBlindLevel(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
+    const datapoint = typeof event.datapoint === 'string' ? event.datapoint.trim().toUpperCase() : '';
+    if (datapoint !== 'LEVEL') return;
+
+    const channelAddress = typeof event.channel === 'string' ? event.channel : undefined;
+    if (!channelAddress) return;
+
+    const endpoint = this.channelAddressToDevice.get(channelAddress);
+    if (!endpoint) return;
+
+    if (!endpoint.hasClusterServer('WindowCovering')) return;
+
+    const hmLevel = typeof event.value === 'number' ? event.value : 0;
+
+    // Always record the latest level with a timestamp so WORKING=false can pick it up.
+    this.dimmerLastLevel.set(channelAddress, { level: hmLevel, time: Date.now() });
+
+    // Suppress Matter update while the device is moving.
+    if (this.dimmerWorking.get(channelAddress) === true) {
+      this.log.debug(`BLIND LEVEL event suppressed (WORKING=true): channel=${channelAddress} level=${hmLevel}`);
+      return;
+    }
+
+    const wasAwaiting = this.dimmerAwaitingFinalLevel.delete(channelAddress);
+    if (wasAwaiting) {
+      this.log.debug(`BLIND LEVEL event applied (awaited after WORKING=false): channel=${channelAddress} level=${hmLevel}`);
+    }
+
+    await this.applyBlindLevel(channelAddress, endpoint, hmLevel);
+  }
+
+  /**
+   * Apply a Homematic LEVEL value to the corresponding Matter WindowCovering attributes.
+   *
+   * @param {string} channelAddress Full channel address (e.g. 'DEVICE:1').
+   * @param {MatterbridgeEndpoint} endpoint The Matter endpoint to update.
+   * @param {number} hmLevel Homematic LEVEL value in the range 0.0 (closed) – 1.0 (open).
+   * @returns {Promise<void>} Resolves when the attributes have been updated.
+   */
+  private async applyBlindLevel(channelAddress: string, endpoint: MatterbridgeEndpoint, hmLevel: number): Promise<void> {
+    // Matter Percent100ths: 0 = fully open, 10000 = fully closed.
+    const position = Math.round((1 - hmLevel) * 10000);
+    try {
+      // Suppress the echo that subscribeAttribute on targetPositionLiftPercent100ths would send back.
+      this.rpcEchoSuppress.set(channelAddress + ':blindTarget', position);
+      await endpoint.setWindowCoveringTargetAndCurrentPosition(position);
+      this.log.info(`BLIND LEVEL event: updated WindowCovering for ${channelAddress} to ${position}/10000 (hmLevel=${hmLevel})`);
+    } catch (err) {
+      this.rpcEchoSuppress.delete(channelAddress + ':blindTarget');
+      this.log.warn(`Failed to update Matter WindowCovering for ${channelAddress}: ${String(err)}`);
     }
   }
 
