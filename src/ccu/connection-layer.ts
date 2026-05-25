@@ -122,12 +122,7 @@ export class CcuConnectionLayer extends EventEmitter {
    * @param {Record<string, unknown>} values Key/value pairs to write into the VALUES paramset.
    * @param {number} [timeoutMs] Optional timeout in milliseconds.
    */
-  public async putChannelParamsetValues(
-    iface: RpcInterfaceName,
-    channelAddress: string,
-    values: Record<string, unknown>,
-    timeoutMs = this.getRequestTimeoutMs(),
-  ): Promise<void> {
+  public async putChannelParamsetValues(iface: RpcInterfaceName, channelAddress: string, values: Record<string, unknown>, timeoutMs = this.getRequestTimeoutMs()): Promise<void> {
     await this.callRpc(iface, 'putParamset', [channelAddress, 'VALUES', values], timeoutMs);
     this.log.debug(`putChannelParamsetValues -> iface=${iface} channel=${channelAddress} values=${JSON.stringify(values)}`);
   }

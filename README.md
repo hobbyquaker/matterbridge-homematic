@@ -21,21 +21,21 @@ Until now only a few device resp. channel types are supported and this thing is 
 
 The following Homematic channel types are currently mapped to Matter device types:
 
-| Homematic Channel Type | Matter Device Type | Key Datapoints |
-|---|---|---|
-| `ALARMSTATE` | Water Leak Detector | `ALARMSTATE` → leak detected |
-| `BLIND` | Window Covering | `LEVEL` (lift), `LEVEL_2` (tilt, venetian blinds only), `ACTIVITY_STATE` / `DIRECTION` (operational status) |
-| `DIMMER` | Dimmable Light | `LEVEL`, `WORKING` |
-| `HEATING_CLIMATECONTROL_TRANSCEIVER` | Thermostat | `ACTUAL_TEMPERATURE`, `SET_POINT_TEMPERATURE`, `SETPOINT` |
-| `MOTION_DETECTOR` | Occupancy Sensor + Light Sensor | `MOTION`, `ILLUMINATION` |
-| `POWERMETER` | Electrical Sensor | `POWER` (W), `CURRENT` (A), `VOLTAGE` (V) |
-| `ROTARY_HANDLE_SENSOR` | Contact Sensor | `STATE` (0=closed, 1=tilted, 2=open) |
-| `SHUTTER_CONTACT` | Contact Sensor | `STATE` (open/closed) |
-| `SMOKE_DETECTOR` | Smoke/CO Alarm | `SMOKE_DETECTOR_ALARM_STATUS`, `STATE` |
-| `SWITCH` | On/Off Light · Outlet · Switch | `STATE` |
-| `TEMPERATURE_HUMIDITY_TRANSMITTER` | Temperature + Humidity Sensor | `ACTUAL_TEMPERATURE`, `HUMIDITY` |
-| `THERMALCONTROL_TRANSMIT` | Thermostat | `ACTUAL_TEMPERATURE`, `SET_POINT_TEMPERATURE` |
-| `WEATHER` | Temperature + Humidity + Light Sensor | `TEMPERATURE`, `HUMIDITY`, `BRIGHTNESS` |
+| Homematic Channel Type               | Matter Device Type                    | Key Datapoints                                                                                              |
+| ------------------------------------ | ------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `ALARMSTATE`                         | Water Leak Detector                   | `ALARMSTATE` → leak detected                                                                                |
+| `BLIND`                              | Window Covering                       | `LEVEL` (lift), `LEVEL_2` (tilt, venetian blinds only), `ACTIVITY_STATE` / `DIRECTION` (operational status) |
+| `DIMMER`                             | Dimmable Light                        | `LEVEL`, `WORKING`                                                                                          |
+| `HEATING_CLIMATECONTROL_TRANSCEIVER` | Thermostat                            | `ACTUAL_TEMPERATURE`, `SET_POINT_TEMPERATURE`, `SETPOINT`                                                   |
+| `MOTION_DETECTOR`                    | Occupancy Sensor + Light Sensor       | `MOTION`, `ILLUMINATION`                                                                                    |
+| `POWERMETER`                         | Electrical Sensor                     | `POWER` (W), `CURRENT` (A), `VOLTAGE` (V)                                                                   |
+| `ROTARY_HANDLE_SENSOR`               | Contact Sensor                        | `STATE` (0=closed, 1=tilted, 2=open)                                                                        |
+| `SHUTTER_CONTACT`                    | Contact Sensor                        | `STATE` (open/closed)                                                                                       |
+| `SMOKE_DETECTOR`                     | Smoke/CO Alarm                        | `SMOKE_DETECTOR_ALARM_STATUS`, `STATE`                                                                      |
+| `SWITCH`                             | On/Off Light · Outlet · Switch        | `STATE`                                                                                                     |
+| `TEMPERATURE_HUMIDITY_TRANSMITTER`   | Temperature + Humidity Sensor         | `ACTUAL_TEMPERATURE`, `HUMIDITY`                                                                            |
+| `THERMALCONTROL_TRANSMIT`            | Thermostat                            | `ACTUAL_TEMPERATURE`, `SET_POINT_TEMPERATURE`                                                               |
+| `WEATHER`                            | Temperature + Humidity + Light Sensor | `TEMPERATURE`, `HUMIDITY`, `BRIGHTNESS`                                                                     |
 
 Battery (`LOW_BAT` / `LOWBAT` / `OPERATING_VOLTAGE`) and availability (`UNREACH`) are handled for all device types on channel `:0`.
 
