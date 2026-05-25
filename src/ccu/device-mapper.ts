@@ -4,12 +4,12 @@
  * @file device-mapper.ts
  */
 
-import { contactSensor, coverDevice, dimmableLight, MatterbridgeEndpoint, onOffLight, onOffOutlet, onOffSwitch } from 'matterbridge';
+import { contactSensor, coverDevice, dimmableLight, MatterbridgeEndpoint, occupancySensor, onOffLight, onOffOutlet, onOffSwitch } from 'matterbridge';
 
 import { CcuChannelInfo, SwitchMatterType } from './types.js';
 
 /** Homematic channel types that are mapped to Matter devices by this plugin. */
-export const SUPPORTED_CHANNEL_TYPES = ['BLIND', 'DIMMER', 'SWITCH', 'SHUTTER_CONTACT'] as const;
+export const SUPPORTED_CHANNEL_TYPES = ['BLIND', 'DIMMER', 'MOTION_DETECTOR', 'SWITCH', 'SHUTTER_CONTACT'] as const;
 
 /** Union of the Homematic channel type strings that this plugin supports. */
 export type SupportedChannelType = (typeof SUPPORTED_CHANNEL_TYPES)[number];
@@ -252,6 +252,15 @@ export function createEndpointForChannel(channel: CcuChannelInfo & { type: Suppo
         new MatterbridgeEndpoint(contactSensor, { id })
           .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Shutter Contact')
           .createDefaultBooleanStateClusterServer(true),
+        { ...options, batteryPowered: channel.batteryPowered },
+      );
+
+    case 'MOTION_DETECTOR':
+      return finalizeEndpoint(
+        new MatterbridgeEndpoint(occupancySensor, { id })
+          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', 'Homematic Motion Detector')
+          // Default: unoccupied. Updated from RPC events.
+          .createDefaultOccupancySensingClusterServer(false),
         { ...options, batteryPowered: channel.batteryPowered },
       );
   }

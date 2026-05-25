@@ -155,6 +155,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       void this.handleRpcEventBlindLevel(event);
       void this.handleRpcEventBlindTilt(event);
       void this.handleRpcEventBlindActivity(event);
+      void this.handleRpcEventMotion(event);
     });
 
     this.ccuConnection.on('deviceBatteryHint', (hint: { deviceAddress?: string; batteryPowered?: boolean }) => {
@@ -363,6 +364,11 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
       // Track SHUTTER_CONTACT channel address for inbound STATE events.
       if (channel.type === 'SHUTTER_CONTACT') {
+        this.channelAddressToDevice.set(channel.address, endpoint);
+      }
+
+      // Track MOTION_DETECTOR channel address for inbound MOTION events.
+      if (channel.type === 'MOTION_DETECTOR') {
         this.channelAddressToDevice.set(channel.address, endpoint);
       }
 
@@ -784,6 +790,40 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       this.rpcEchoSuppress.delete(channelAddress);
       this.rpcEchoSuppress.delete(channelAddress + ':onoff');
       this.log.warn(`Failed to update Matter LevelControl for ${channelAddress}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Handle incoming RPC event for MOTION_DETECTOR channel MOTION datapoint.
+   * Maps to the Matter OccupancySensing cluster.
+   *
+   * @param {object} event RPC event payload.
+   * @param {unknown} [event.channel] Channel address string.
+   * @param {string} [event.datapoint] Datapoint name (e.g. 'MOTION').
+   * @param {unknown} [event.value] Datapoint value (boolean; true = motion detected).
+   * @returns {Promise<void>} Resolves when the Matter attribute has been updated.
+   */
+  private async handleRpcEventMotion(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
+    const datapoint = typeof event.datapoint === 'string' ? event.datapoint.trim().toUpperCase() : '';
+    if (datapoint !== 'MOTION') return;
+
+    const channelAddress = typeof event.channel === 'string' ? event.channel : undefined;
+    if (!channelAddress) return;
+
+    const endpoint = this.channelAddressToDevice.get(channelAddress);
+    if (!endpoint) return;
+    if (!endpoint.hasClusterServer('OccupancySensing')) return;
+
+    const occupied = event.value === true || event.value === 1 || event.value === '1';
+    try {
+      const current = await endpoint.getAttribute('OccupancySensing', 'occupancy');
+      const currentOccupied = typeof current === 'object' && current !== null && 'occupied' in current ? (current as { occupied: boolean }).occupied : false;
+      if (currentOccupied !== occupied) {
+        await endpoint.updateAttribute('OccupancySensing', 'occupancy', { occupied });
+        this.log.info(`MOTION_DETECTOR MOTION event: updated occupancy for ${channelAddress} to ${occupied}`);
+      }
+    } catch (err) {
+      this.log.warn(`Failed to update Matter OccupancySensing for ${channelAddress}: ${String(err)}`);
     }
   }
 
