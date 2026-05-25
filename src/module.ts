@@ -77,6 +77,9 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
   private deviceAddressToDevice = new Map<string, MatterbridgeEndpoint>();
 
+  /** Maps full channel address (e.g. 'DEVICE:3') to its Matter endpoint for SWITCH/DIMMER channels. */
+  private channelAddressToDevice = new Map<string, MatterbridgeEndpoint>();
+
   private readonly deviceBatteryHints = new Map<string, boolean>();
 
   private readonly deviceBatteryLowState = new Map<string, boolean>();
@@ -125,6 +128,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       void this.handleRpcEventAvailability(event);
       void this.handleRpcEventBattery(event);
       void this.handleRpcEventSwitchState(event);
+      void this.handleRpcEventDimmerLevel(event);
     });
 
     this.ccuConnection.on('deviceBatteryHint', (hint: { deviceAddress?: string; batteryPowered?: boolean }) => {
@@ -219,6 +223,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       await this.unregisterAllDevices();
     }
     this.deviceAddressToDevice.clear();
+    this.channelAddressToDevice.clear();
 
     let enabledCount = 0;
     let registeredCount = 0;
@@ -254,12 +259,14 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       await this.registerDevice(endpoint);
       registeredCount++;
 
-      // Track device for availability monitoring
+      // Track device for availability monitoring (keyed by root device address).
       this.deviceAddressToDevice.set(channel.deviceAddress, endpoint);
 
       // Wire OnOff attribute for SWITCH channels
       if (channel.type === 'SWITCH' && this.ccuConnection) {
         const ccuConn = this.ccuConnection;
+        // Track channel address for precise inbound event matching.
+        this.channelAddressToDevice.set(channel.address, endpoint);
         try {
           await endpoint.subscribeAttribute('OnOff', 'onOff', (value: boolean) => {
             const iface = channel.interfaceName;
@@ -278,6 +285,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       // Matter currentLevel is 0-254; Homematic LEVEL is 0.0-1.0.
       if (channel.type === 'DIMMER' && this.ccuConnection) {
         const ccuConn = this.ccuConnection;
+        // Track channel address for precise inbound event matching.
+        this.channelAddressToDevice.set(channel.address, endpoint);
         try {
           await endpoint.subscribeAttribute('LevelControl', 'currentLevel', (value: number | null) => {
             const iface = channel.interfaceName;
@@ -469,9 +478,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     const channelAddress = typeof event.channel === 'string' ? event.channel : undefined;
     if (!channelAddress) return;
 
-    const endpoint = Array.from(this.deviceAddressToDevice.values()).find(
-      (ep) => typeof ep.originalId === 'string' && ep.originalId.replace(/^hm-/, '') === channelAddress.replace(':', '-'),
-    );
+    // Direct lookup by channel address — works for both single-gang and multi-gang HmIP devices.
+    const endpoint = this.channelAddressToDevice.get(channelAddress);
     if (!endpoint) return;
 
     if (!endpoint.hasClusterServer('OnOff')) return;
@@ -481,10 +489,52 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const current = await endpoint.getAttribute('OnOff', 'onOff');
       if (current !== newValue) {
         await endpoint.updateAttribute('OnOff', 'onOff', newValue);
-        this.log.info(`SWITCH STATE event: Updated Matter OnOff for ${channelAddress} to ${newValue}`);
+        this.log.info(`SWITCH STATE event: updated Matter OnOff for ${channelAddress} to ${newValue}`);
       }
     } catch (err) {
       this.log.warn(`Failed to update Matter OnOff for ${channelAddress}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Handle incoming RPC event for DIMMER channel LEVEL and update Matter endpoint.
+   *
+   * @param {object} event RPC event payload.
+   * @param {string} [event.iface] Interface name.
+   * @param {string} [event.idInit] Init ID of the interface.
+   * @param {unknown} [event.channel] Channel address string.
+   * @param {string} [event.datapoint] Datapoint name (e.g. 'LEVEL').
+   * @param {unknown} [event.value] Datapoint value (0.0–1.0 float).
+   * @returns {Promise<void>} Resolves when Matter attributes have been updated.
+   */
+  private async handleRpcEventDimmerLevel(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
+    const datapoint = typeof event.datapoint === 'string' ? event.datapoint.trim().toUpperCase() : '';
+    if (datapoint !== 'LEVEL') return;
+
+    const channelAddress = typeof event.channel === 'string' ? event.channel : undefined;
+    if (!channelAddress) return;
+
+    const endpoint = this.channelAddressToDevice.get(channelAddress);
+    if (!endpoint) return;
+
+    if (!endpoint.hasClusterServer('LevelControl')) return;
+
+    // Homematic LEVEL is 0.0–1.0; Matter currentLevel is 1–254 (0 means off).
+    const hmLevel = typeof event.value === 'number' ? event.value : 0;
+    const matterLevel = hmLevel > 0 ? Math.max(1, Math.round(hmLevel * 254)) : 0;
+    const onOff = matterLevel > 0;
+
+    try {
+      await endpoint.updateAttribute('LevelControl', 'currentLevel', matterLevel > 0 ? matterLevel : 1);
+      if (endpoint.hasClusterServer('OnOff')) {
+        const currentOnOff = await endpoint.getAttribute('OnOff', 'onOff');
+        if (currentOnOff !== onOff) {
+          await endpoint.updateAttribute('OnOff', 'onOff', onOff);
+        }
+      }
+      this.log.info(`DIMMER LEVEL event: updated Matter level for ${channelAddress} to ${matterLevel} (onOff=${onOff})`);
+    } catch (err) {
+      this.log.warn(`Failed to update Matter LevelControl for ${channelAddress}: ${String(err)}`);
     }
   }
 
