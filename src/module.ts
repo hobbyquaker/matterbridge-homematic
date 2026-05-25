@@ -192,6 +192,14 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     const channelsWithNames = channels.filter((c) => c.name).length;
     this.log.info(`Discovered ${channels.length} channels from CCU (${channelsWithNames} have ReGa names).`);
 
+    // Reconcile exposed devices with current enabled selections.
+    const existingDevices = this.getDevices();
+    if (existingDevices.length > 0) {
+      this.log.info(`Unregistering ${existingDevices.length} previously exposed devices before re-discovery`);
+      await this.unregisterAllDevices();
+    }
+    this.deviceAddressToDevice.clear();
+
     let enabledCount = 0;
     let registeredCount = 0;
 
@@ -201,13 +209,14 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const displayName = this.getChannelDisplayName(channel);
       const override = this.getChannelOverride(channel.address);
       const selectSerial = this.getChannelSelectSerial(channel.address);
+      const legacyDashSerial = channel.address.replace(':', '-');
 
       // Read current persisted selection before updating visible metadata.
-      const wasSelected = this.getSelectDevice(selectSerial) !== undefined || this.getSelectDevice(channel.address) !== undefined;
+      const wasSelected = this.getSelectDevice(selectSerial) !== undefined || this.getSelectDevice(legacyDashSerial) !== undefined;
 
-      // Remove legacy select rows keyed by channel address with ':' to avoid duplicate UI entries.
-      if (selectSerial !== channel.address && this.getSelectDevice(channel.address) !== undefined) {
-        await this.clearDeviceSelect(channel.address);
+      // Remove legacy select rows keyed with '-' to avoid duplicate UI entries.
+      if (legacyDashSerial !== selectSerial && this.getSelectDevice(legacyDashSerial) !== undefined) {
+        await this.clearDeviceSelect(legacyDashSerial);
       }
 
       this.setSelectDevice(selectSerial, displayName, undefined, 'switch');
@@ -301,7 +310,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   }
 
   private getChannelSelectSerial(channelAddress: string): string {
-    return channelAddress.replace(':', '-');
+    return channelAddress;
   }
 
   private getPlatformConfig(): HomematicPlatformConfig {
