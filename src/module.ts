@@ -32,7 +32,7 @@ import { AnsiLogger, LogLevel } from 'matterbridge/logger';
 
 import { parseCcuConnectionConfig } from './ccu/config.js';
 import { CcuConnectionLayer } from './ccu/connection-layer.js';
-import { createEndpointForChannel, isSupportedChannelType } from './ccu/device-mapper.js';
+import { createEndpointForChannel, isSupportedChannelType, resolveChannelsForMatter } from './ccu/device-mapper.js';
 import { getMatchingMainsPoweredPrefix, isAlwaysMainsPoweredDeviceType, MAINS_POWERED_DEVICE_TYPE_PREFIXES } from './ccu/device-power.js';
 import { CcuChannelInfo, CcuChannelOverride, SwitchMatterType } from './ccu/types.js';
 
@@ -204,12 +204,13 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       return;
     }
 
-    const channels = await this.ccuConnection.discoverChannels();
-    this.updateMainsPoweredDeviceSet(channels);
-    await this.primeBatteryHintsFromRpc(channels);
+    const rawChannels = await this.ccuConnection.discoverChannels();
+    this.updateMainsPoweredDeviceSet(rawChannels);
+    await this.primeBatteryHintsFromRpc(rawChannels);
+    const channels = resolveChannelsForMatter(rawChannels);
     this.discoveredChannels = channels;
     const channelsWithNames = channels.filter((c) => c.name).length;
-    this.log.info(`Discovered ${channels.length} channels from CCU (${channelsWithNames} have ReGa names).`);
+    this.log.info(`Discovered ${rawChannels.length} raw channels, ${channels.length} resolved for Matter (${channelsWithNames} have ReGa names).`);
 
     // Reconcile exposed devices with current enabled selections.
     const existingDevices = this.getDevices();
@@ -261,7 +262,6 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         const ccuConn = this.ccuConnection;
         try {
           await endpoint.subscribeAttribute('OnOff', 'onOff', (value: boolean) => {
-            // Find the correct interface for this channel
             const iface = channel.interfaceName;
             const address = channel.address;
             this.log.debug(`Matter OnOff -> Homematic setValue: iface=${iface} channel=${address} value=${value}`);
@@ -271,6 +271,25 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
           });
         } catch (err) {
           this.log.warn(`Failed to subscribe OnOff for ${channel.address}: ${String(err)}`);
+        }
+      }
+
+      // Wire LevelControl attribute for DIMMER channels.
+      // Matter currentLevel is 0-254; Homematic LEVEL is 0.0-1.0.
+      if (channel.type === 'DIMMER' && this.ccuConnection) {
+        const ccuConn = this.ccuConnection;
+        try {
+          await endpoint.subscribeAttribute('LevelControl', 'currentLevel', (value: number | null) => {
+            const iface = channel.interfaceName;
+            const address = channel.address;
+            const level = value != null ? Math.round((value / 254) * 100) / 100 : 0;
+            this.log.debug(`Matter currentLevel -> Homematic setValue: iface=${iface} channel=${address} level=${level}`);
+            ccuConn.setChannelDatapointValue(iface, address, 'LEVEL', level).catch((err: unknown) => {
+              this.log.warn(`Failed to set Homematic LEVEL for ${address}: ${String(err)}`);
+            });
+          });
+        } catch (err) {
+          this.log.warn(`Failed to subscribe LevelControl for ${channel.address}: ${String(err)}`);
         }
       }
     }

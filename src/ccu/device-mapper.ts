@@ -14,6 +14,83 @@ export const SUPPORTED_CHANNEL_TYPES = ['DIMMER', 'SWITCH', 'SHUTTER_CONTACT'] a
 /** Union of the Homematic channel type strings that this plugin supports. */
 export type SupportedChannelType = (typeof SUPPORTED_CHANNEL_TYPES)[number];
 
+/**
+ * HmIP transmitter/virtual-receiver channel type pairs.
+ * For each TRANSMITTER channel found on a device, the first VIRTUAL_RECEIVER channel
+ * with a higher channel index is selected and remapped to the canonical Matter-ready type.
+ */
+const HMIP_CHANNEL_PAIRS: Array<{ transmitter: string; receiver: string; matterType: SupportedChannelType }> = [
+  { transmitter: 'SWITCH_TRANSMITTER', receiver: 'SWITCH_VIRTUAL_RECEIVER', matterType: 'SWITCH' },
+  { transmitter: 'DIMMER_TRANSMITTER', receiver: 'DIMMER_VIRTUAL_RECEIVER', matterType: 'DIMMER' },
+];
+
+/**
+ * Select the channels that should be exposed as Matter devices from the full CCU channel list.
+ *
+ * For HmIP devices that use virtual-receiver channels (e.g. HmIP-BSM, HmIP-BDT), each
+ * `SWITCH_TRANSMITTER` / `DIMMER_TRANSMITTER` channel is paired with the first
+ * `SWITCH_VIRTUAL_RECEIVER` / `DIMMER_VIRTUAL_RECEIVER` channel that follows it (by
+ * channel index).  The returned channel has its `type` remapped to `'SWITCH'` or
+ * `'DIMMER'` so downstream handling is identical to classic BidCos devices.
+ *
+ * Classic BidCos channels (`SWITCH`, `DIMMER`, `SHUTTER_CONTACT`, …) pass through unchanged.
+ *
+ * @param {CcuChannelInfo[]} allChannels All channels as returned by CCU discovery.
+ * @returns {CcuChannelInfo[]} Channels ready for Matter endpoint creation.
+ */
+export function resolveChannelsForMatter(allChannels: CcuChannelInfo[]): CcuChannelInfo[] {
+  // Group by device address, sorted by channel index ascending.
+  const byDevice = new Map<string, CcuChannelInfo[]>();
+  for (const ch of allChannels) {
+    const group = byDevice.get(ch.deviceAddress) ?? [];
+    group.push(ch);
+    byDevice.set(ch.deviceAddress, group);
+  }
+  for (const group of byDevice.values()) {
+    group.sort((a, b) => a.channelIndex - b.channelIndex);
+  }
+
+  const result: CcuChannelInfo[] = [];
+
+  for (const deviceChannels of byDevice.values()) {
+    // Collect all channel addresses handled by HmIP pairing so they are not passed through as-is.
+    const hmipHandled = new Set<string>();
+    const hmipSelected: CcuChannelInfo[] = [];
+
+    for (const pair of HMIP_CHANNEL_PAIRS) {
+      const transmitters = deviceChannels.filter((c) => c.type === pair.transmitter);
+      if (transmitters.length === 0) continue;
+
+      // Mark all transmitter and receiver channels as handled.
+      for (const ch of deviceChannels) {
+        if (ch.type === pair.transmitter || ch.type === pair.receiver) {
+          hmipHandled.add(ch.address);
+        }
+      }
+
+      for (const tx of transmitters) {
+        // The first receiver channel whose index is greater than the transmitter's.
+        const rx = deviceChannels.find((c) => c.type === pair.receiver && c.channelIndex > tx.channelIndex);
+        if (!rx) continue;
+        // Return a copy with the type remapped to the canonical Matter-ready type.
+        hmipSelected.push({ ...rx, type: pair.matterType });
+      }
+    }
+
+    // Pass through all non-HmIP-handled channels unchanged.
+    for (const ch of deviceChannels) {
+      if (!hmipHandled.has(ch.address)) {
+        result.push(ch);
+      }
+    }
+
+    // Append the selected HmIP virtual-receiver channels (remapped type).
+    result.push(...hmipSelected);
+  }
+
+  return result;
+}
+
 export interface ChannelMappingOptions {
   switchMatterType?: SwitchMatterType;
   batteryPowered?: boolean;
