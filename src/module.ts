@@ -205,38 +205,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       endpoint.configUrl = this.buildChannelConfigUrl(channel.address);
       await this.registerDevice(endpoint);
 
-      // Track device for availability monitoring and initialize reachable state
+      // Track device for availability monitoring
       this.deviceAddressToDevice.set(channel.deviceAddress, endpoint);
-      await this.initializeDeviceAvailability(channel, endpoint);
-    }
-  }
-
-  private async initializeDeviceAvailability(channel: CcuChannelInfo, endpoint: MatterbridgeEndpoint): Promise<void> {
-    if (!this.ccuConnection) return;
-
-    try {
-      // Query UNREACH value for device channel 0
-      const unreachValue = await this.ccuConnection.callRpc(channel.interfaceName, 'getParamset', [
-        `${channel.deviceAddress}:0`,
-        'VALUES',
-      ] as unknown[]);
-
-      if (typeof unreachValue === 'object' && unreachValue !== null) {
-        const unreachParams = unreachValue as Record<string, unknown>;
-        const unreach = unreachParams.UNREACH === true;
-        const reachable = !unreach;
-
-        this.log.debug(`Initialize device availability: ${channel.deviceAddress} reachable=${reachable} (UNREACH=${unreach})`);
-        await endpoint.updateAttribute('BridgedDeviceBasicInformation', 'reachable', reachable);
-      }
-    } catch (err) {
-      this.log.debug(`Failed to initialize availability for ${channel.deviceAddress}: ${String(err)}`);
-      // Default to reachable if we can't query
-      try {
-        await endpoint.updateAttribute('BridgedDeviceBasicInformation', 'reachable', true);
-      } catch {
-        /* ignore */
-      }
     }
   }
 
