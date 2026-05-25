@@ -15,11 +15,9 @@ A [Matterbridge](https://github.com/Luligu/matterbridge) plugin for Homematic
 
 This plugin bridges your Homematic CCU's devices to the Matter ecosystem
 
-# WORK IN PROGRESS. NOT YET PUBLISHED ON NPM.
-
 ## Supported Device Types
 
-Until now only a few device resp. channel types are supported. This is a work in progress, as soon as i think it's "production ready" and device support is more comprehensive I will bump the version to 1.0.0
+Until now only a few device resp. channel types are supported. This is _work in progress_, as soon as I think it's "production ready" and device support is more comprehensive I will bump the version to 1.0.0
 
 ## Installation
 
