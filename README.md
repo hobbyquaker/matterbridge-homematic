@@ -11,9 +11,11 @@
 [![ESM](https://img.shields.io/badge/ESM-Node.js-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![matterbridge.io](https://img.shields.io/badge/matterbridge.io-online-brightgreen)](https://matterbridge.io)
 
-A [Matterbridge](https://github.com/Luligu/matterbridge) plugin for integrating Homematic and Homematic IP smart home devices into Apple HomeKit via Matter protocol.
+A [Matterbridge](https://github.com/Luligu/matterbridge) plugin for Homematic
 
-This plugin bridges your Homematic CCU (Central Control Unit) to the Matter ecosystem, allowing you to control your Homematic devices through HomeKit on Apple devices.
+This plugin bridges your Homematic CCU's devices to the Matter ecosystem
+
+# WORK IN PROGRESS. NOT YET PUBLISHED ON NPM.
 
 ## Features
 
@@ -91,11 +93,13 @@ The communication with the Homematic CCU involves **two independent communicatio
 If Matterbridge runs behind NAT, in Docker, or in a virtualized environment:
 
 1. **Expose the RPC ports** in your Docker configuration:
+
    ```bash
    docker run -p 8700:8700 -p 8701:8701 ...
    ```
 
 2. **Set the Init Address** to the external IP/hostname where CCU can reach the plugin:
+
    ```json
    {
      "rpcInitAddress": "192.168.1.200:8701"
@@ -131,6 +135,7 @@ For the second CCU:
 - **`deviceEditorExternalUrl`** - External URL for the editor (useful for reverse proxies)
 
 The device editor allows you to:
+
 - Enable/disable individual channels
 - Choose Matter device type for SWITCH channels (Light, Outlet, or Switch)
 - View discovered device names and addresses
