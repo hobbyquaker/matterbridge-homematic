@@ -22,8 +22,6 @@
  * limitations under the License.
  */
 
-import { promises as fs } from 'node:fs';
-import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -32,9 +30,9 @@ import { AnsiLogger, LogLevel } from 'matterbridge/logger';
 
 import { parseCcuConnectionConfig } from './ccu/config.js';
 import { CcuConnectionLayer } from './ccu/connection-layer.js';
-import { createEndpointForChannel, inferSwitchMatterTypeFromName, isSupportedChannelType, resolveChannelsForMatter } from './ccu/device-mapper.js';
+import { channelTypeLabel, createEndpointForChannel, inferSwitchMatterTypeFromName, isSupportedChannelType, resolveChannelsForMatter } from './ccu/device-mapper.js';
 import { getBatteryVoltageRange, getMatchingMainsPoweredPrefix, isAlwaysMainsPoweredDeviceType, MAINS_POWERED_DEVICE_TYPE_PREFIXES } from './ccu/device-power.js';
-import { CcuChannelInfo, CcuChannelOverride, SwitchMatterType } from './ccu/types.js';
+import { CcuChannelInfo, CcuChannelOverride } from './ccu/types.js';
 
 /**
  * This is the standard interface for Matterbridge plugins.
@@ -51,27 +49,14 @@ export default function initializePlugin(matterbridge: PlatformMatterbridge, log
 
 interface HomematicPlatformConfig extends PlatformConfig {
   channelOverrides?: CcuChannelOverride[];
-  deviceEditorEnabled?: boolean;
-  deviceEditorPort?: number;
-  deviceEditorExternalUrl?: string;
-}
-
-interface ChannelEditorPayload {
-  channelAddress: string;
-  enabled: boolean;
-  switchMatterType?: SwitchMatterType;
+  /** When true, fetch current datapoint values from ReGa on startup to seed initial Matter state. Default false. */
+  initialValuesFromRega?: boolean;
 }
 
 // Here we define the TemplatePlatform class, which extends the MatterbridgeDynamicPlatform.
 // If you want to create an Accessory platform plugin, you should extend the MatterbridgeAccessoryPlatform class instead.
 export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   private ccuConnection?: CcuConnectionLayer;
-
-  private editorServer?: Server;
-
-  private editorPort = 0;
-
-  private externalHost = '';
 
   private discoveredChannels: CcuChannelInfo[] = [];
 
@@ -95,11 +80,31 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   /** Tracks DIMMER channels that are currently moving (WORKING=true). */
   private readonly dimmerWorking = new Map<string, boolean>();
 
+  /**
+   * Tracks the Matter-commanded target position (Percent100ths) for BLIND channels.
+   * Set when the subscription fires (command sent to CCU); cleared when movement stops.
+   * While set, early LEVEL echos from the CCU only update currentPositionLiftPercent100ths,
+   * preserving the commanded target so the Home app shows the correct destination.
+   */
+  private readonly blindCommandedTarget = new Map<string, number>();
+
   /** Records the last received Homematic LEVEL value and its timestamp for each DIMMER channel. */
   private readonly dimmerLastLevel = new Map<string, { level: number; time: number }>();
 
   /** Records the last received Homematic LEVEL_2 (tilt) value for each venetian blind channel. */
   private readonly blindLastTilt = new Map<string, number>();
+
+  /**
+   * Remembers the last non-frost-protection setpoint (>4.5°C) per thermostat channel address.
+   * Used to restore the previous setpoint when switching from Off back to Heat mode.
+   */
+  private readonly thermostatLastSetpoint = new Map<string, number>();
+
+  /**
+   * Tracks the combined lock state (STATE, STATE_UNCERTAIN, ERROR) per KEYMATIC channel address.
+   * Used to derive the Matter DoorLock.lockState from multiple Homematic datapoints.
+   */
+  private readonly keymaticState = new Map<string, { state: boolean; uncertain: boolean; error: boolean; direction: number }>();
 
   /**
    * Set of DIMMER channels waiting for the next LEVEL event after WORKING=false fired with a stale
@@ -118,6 +123,9 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   constructor(matterbridge: PlatformMatterbridge, log: AnsiLogger, config: PlatformConfig) {
     // Always call super(matterbridge, log, config)
     super(matterbridge, log, config);
+
+    // Override the log name so the log prefix stays 'Homematic' regardless of the npm package description.
+    this.log.logName = 'Homematic';
 
     // Verify that Matterbridge is the correct version
     if (typeof this.verifyMatterbridgeVersion !== 'function' || !this.verifyMatterbridgeVersion('3.4.0')) {
@@ -141,7 +149,6 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     const cacheDir = path.join(os.homedir(), '.matterbridge');
     this.ccuConnection = new CcuConnectionLayer(ccuConfig, this.log, cacheDir);
     await this.ccuConnection.start();
-    await this.loadPersistedChannelOverrides();
 
     // Listen for channel updates and refresh device names when ReGa names arrive
     this.ccuConnection.on('channelsUpdated', (updatedChannels: CcuChannelInfo[]) => {
@@ -170,6 +177,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       void this.handleRpcEventRotaryHandle(event);
       void this.handleRpcEventPowerMeter(event);
       void this.handleRpcEventThermostat(event);
+      void this.handleRpcEventKeymatic(event);
+      void this.handleRpcEventKey(event);
     });
 
     this.ccuConnection.on('deviceBatteryHint', (hint: { deviceAddress?: string; batteryPowered?: boolean }) => {
@@ -183,13 +192,12 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       }
     });
 
-    await this.startChannelEditorServer();
-
     const status = this.ccuConnection.getStatusSnapshot();
     this.log.info(`CCU status host=${status.host || 'not-configured'} connected=${status.connected} interfaces=${status.connectedInterfaces.join(',') || 'none'}`);
 
     // Implements your own logic there
     await this.discoverDevices();
+    await this.applyInitialValuesFromRega();
     await this.applyStartupServiceMessages();
   }
 
@@ -216,12 +224,6 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   override async onShutdown(reason?: string): Promise<void> {
     // Always call super.onShutdown(reason)
     await super.onShutdown(reason);
-
-    if (this.editorServer) {
-      await new Promise<void>((resolve) => this.editorServer?.close(() => resolve()));
-      this.editorServer = undefined;
-      this.log.info('Channel editor server stopped');
-    }
 
     if (this.ccuConnection) {
       await this.ccuConnection.stop();
@@ -275,12 +277,22 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
       const displayName = this.getChannelDisplayName(channel);
       const override = this.getChannelOverride(channel.address);
-      const selectSerial = this.getChannelSelectSerial(channel.address);
-      const legacyDashSerial = channel.address.replace(':', '-');
-
-      // Remove legacy select rows keyed with '-' to avoid duplicate UI entries.
-      if (legacyDashSerial !== selectSerial && this.getSelectDevice(legacyDashSerial) !== undefined) {
-        await this.clearDeviceSelect(legacyDashSerial);
+      // Serial format: <interface>:<short-type>:<device>:<channel> — matches serialNumber in createEndpointForChannel.
+      const selectSerial = `${channel.interfaceName}:${channelTypeLabel(channel.type)}:${channel.address}`;
+      // Clear all known legacy key formats accumulated across migrations to avoid duplicate UI rows.
+      const legacySelectKeys = new Set(
+        [
+          channel.address.replace(':', '-'), // very old: dash-address
+          channel.address, // old: plain address
+          `${channel.type}:${channel.address}`, // pre-abbreviation: raw-type:address
+          `${channelTypeLabel(channel.type)}:${channel.address}`, // pre-interface: label:address
+          `${channel.interfaceName}:${channel.type}:${channel.address}`, // post-interface, pre-abbreviation
+        ].filter((k) => k !== selectSerial),
+      );
+      for (const oldKey of legacySelectKeys) {
+        if (this.getSelectDevice(oldKey) !== undefined) {
+          await this.clearDeviceSelect(oldKey);
+        }
       }
 
       this.setSelectDevice(selectSerial, displayName, undefined, 'switch');
@@ -297,7 +309,6 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         batteryPowered: this.deviceBatteryHints.get(channel.deviceAddress) ?? channel.batteryPowered,
       });
 
-      endpoint.configUrl = this.buildChannelConfigUrl(channel.address);
       await this.registerDevice(endpoint);
       registeredCount++;
 
@@ -432,15 +443,22 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
               this.rpcEchoSuppress.delete(address + ':heatingSetpoint');
               return;
             }
+            // Remember last non-frost setpoint so mode switches can restore it.
+            if (setpointDegC > 4.5) {
+              this.thermostatLastSetpoint.set(address, setpointDegC);
+            }
             this.log.debug(`Matter Thermostat setpoint -> Homematic: channel=${address} setpoint=${setpointDegC}`);
-            ccuConn.setChannelDatapointValue(channel.interfaceName, address, 'SET_POINT_TEMPERATURE', String(setpointDegC)).catch((err: unknown) => {
+            ccuConn.setChannelDatapointValue(channel.interfaceName, address, 'SET_POINT_TEMPERATURE', setpointDegC).catch((err: unknown) => {
               this.log.warn(`Failed to set Homematic SET_POINT_TEMPERATURE for ${address}: ${String(err)}`);
             });
           });
         } catch (err) {
           this.log.warn(`Failed to subscribe Thermostat setpoint for ${channel.address}: ${String(err)}`);
         }
-        // Subscribe to systemMode — Matter 0=Off maps to frost-protection setpoint (4.5°C) on the device.
+        // Subscribe to systemMode — Matter 0=Off maps to frost-protection setpoint (4.5°C) on the device;
+        // Matter 4=Heat syncs the current occupiedHeatingSetpoint back to Homematic.
+        // Both use putParamset with CONTROL_MODE=1 (manual) + SET_POINT_TEMPERATURE, which is the
+        // only reliable way to change the setpoint on HmIP-eTRV-style devices.
         try {
           await endpoint.subscribeAttribute('Thermostat', 'systemMode', (value: number) => {
             const address = channel.address;
@@ -450,15 +468,71 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
               return;
             }
             if (value === 0) {
-              // systemMode=Off: write frost-protection temperature to suppress heating.
-              ccuConn.setChannelDatapointValue(channel.interfaceName, address, 'SET_POINT_TEMPERATURE', '4.5').catch((err: unknown) => {
+              // systemMode=Off: switch to manual mode with frost-protection temperature.
+              this.log.debug(`Matter Thermostat systemMode=Off -> Homematic: channel=${address} CONTROL_MODE=1 SET_POINT_TEMPERATURE=4.5`);
+              ccuConn.putChannelParamsetValues(channel.interfaceName, address, { CONTROL_MODE: 1, SET_POINT_TEMPERATURE: 4.5 }).catch((err: unknown) => {
                 this.log.warn(`Failed to set frost protection for ${address}: ${String(err)}`);
+              });
+            } else if (value === 4) {
+              // systemMode=Heat: switch to manual mode and restore the last non-frost setpoint.
+              const setpointDegC = this.thermostatLastSetpoint.get(address) ?? 21;
+              this.log.debug(`Matter Thermostat systemMode=Heat -> Homematic: channel=${address} CONTROL_MODE=1 SET_POINT_TEMPERATURE=${setpointDegC}`);
+              ccuConn.putChannelParamsetValues(channel.interfaceName, address, { CONTROL_MODE: 1, SET_POINT_TEMPERATURE: setpointDegC }).catch((err: unknown) => {
+                this.log.warn(`Failed to set Homematic SET_POINT_TEMPERATURE on heat mode for ${address}: ${String(err)}`);
               });
             }
           });
         } catch (err) {
           this.log.warn(`Failed to subscribe Thermostat mode for ${channel.address}: ${String(err)}`);
         }
+      }
+
+      // Wire DoorLock commands for KEYMATIC channels.
+      // Matter lockDoor → Homematic STATE=false (locked); unlockDoor → STATE=true (unlocked).
+      if (channel.type === 'KEYMATIC' && this.ccuConnection) {
+        const ccuConn = this.ccuConnection;
+        this.channelAddressToDevice.set(channel.address, endpoint);
+        this.keymaticState.set(channel.address, { state: false, uncertain: false, error: false, direction: 0 });
+        endpoint.addCommandHandler('lockDoor', () => {
+          this.log.debug(`Matter lockDoor -> Homematic STATE=false: channel=${channel.address}`);
+          // Optimistically set direction=2 (closing) so that incoming STATE events (which still carry
+          // the old value) cannot set lockState back to Unlocked before the real DIRECTION RPC event arrives.
+          const flags = this.keymaticState.get(channel.address);
+          if (flags) flags.direction = 2;
+          // Signal NotFullyLocked immediately after the command transaction closes so the Home app
+          // shows the "closing" animation without waiting for the first CCU RPC event (~800ms delay).
+          setImmediate(() => {
+            endpoint.updateAttribute('DoorLock', 'lockState', 0).catch((err: unknown) => {
+              this.log.warn(`Failed to set NotFullyLocked on lockDoor for ${channel.address}: ${String(err)}`);
+            });
+          });
+          ccuConn.setChannelDatapointValue(channel.interfaceName, channel.address, 'STATE', false).catch((err: unknown) => {
+            this.log.warn(`Failed to set Homematic STATE for ${channel.address}: ${String(err)}`);
+          });
+        });
+        endpoint.addCommandHandler('unlockDoor', () => {
+          this.log.debug(`Matter unlockDoor -> Homematic STATE=true: channel=${channel.address}`);
+          // Optimistically set direction=1 (opening) so that incoming STATE events (which still carry
+          // the old value) cannot set lockState back to Locked before the real DIRECTION RPC event arrives.
+          const flags = this.keymaticState.get(channel.address);
+          if (flags) flags.direction = 1;
+          // Signal NotFullyLocked immediately after the command transaction closes so the Home app
+          // shows the "opening" animation without waiting for the first CCU RPC event (~800ms delay).
+          setImmediate(() => {
+            endpoint.updateAttribute('DoorLock', 'lockState', 0).catch((err: unknown) => {
+              this.log.warn(`Failed to set NotFullyLocked on unlockDoor for ${channel.address}: ${String(err)}`);
+            });
+          });
+          ccuConn.setChannelDatapointValue(channel.interfaceName, channel.address, 'STATE', true).catch((err: unknown) => {
+            this.log.warn(`Failed to set Homematic STATE for ${channel.address}: ${String(err)}`);
+          });
+        });
+      }
+
+      // Track KEY / KEY_TRANSCEIVER channel address for inbound PRESS_SHORT / PRESS_LONG events.
+      // These channels are receive-only: HM fires events, we forward them to Matter as switch events.
+      if ((channel.type === 'KEY' || channel.type === 'KEY_TRANSCEIVER') && this.ccuConnection) {
+        this.channelAddressToDevice.set(channel.address, endpoint);
       }
 
       // Wire WindowCovering position for BLIND channels.
@@ -478,6 +552,9 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
               this.rpcEchoSuppress.delete(address + ':blindTarget');
               return;
             }
+            // Record the commanded target so that early LEVEL echos from the CCU (before DIRECTION/WORKING
+            // arrives) only update currentPositionLiftPercent100ths and don't overwrite this target.
+            this.blindCommandedTarget.set(address, value ?? 0);
             this.log.debug(`Matter WindowCovering target -> Homematic LEVEL: iface=${iface} channel=${address} target=${value?.toString() ?? 'null'} hmLevel=${hmLevel}`);
             if (isTiltSupported) {
               const tilt = this.blindLastTilt.get(address) ?? 0.5;
@@ -617,23 +694,6 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       }
     }
     return false;
-  }
-
-  private async loadPersistedChannelOverrides(): Promise<void> {
-    try {
-      const configPath = this.getConfigFilePath();
-      const content = await fs.readFile(configPath, 'utf8');
-      const persisted = JSON.parse(content) as HomematicPlatformConfig;
-      const persistedOverrides = Array.isArray(persisted.channelOverrides) ? persisted.channelOverrides : [];
-
-      if (persistedOverrides.length > 0) {
-        this.getPlatformConfig().channelOverrides = persistedOverrides;
-      }
-
-      this.log.info(`Loaded persisted channel overrides: ${persistedOverrides.length}`);
-    } catch (err) {
-      this.log.debug(`No persisted channel overrides loaded: ${String(err)}`);
-    }
   }
 
   private async handleRpcEventAvailability(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
@@ -879,6 +939,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const endpoint = this.channelAddressToDevice.get(channelAddress);
       if (endpoint) {
         if (endpoint.hasClusterServer('WindowCovering')) {
+          // Movement is done: clear the commanded target so applyBlindLevel updates both current and target.
+          this.blindCommandedTarget.delete(channelAddress);
           await this.applyBlindLevel(channelAddress, endpoint, last.level);
         } else {
           await this.applyDimmerLevel(channelAddress, endpoint, last.level);
@@ -1287,6 +1349,92 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   }
 
   /**
+   * Handle incoming RPC event for KEYMATIC channel datapoints.
+   * Maps STATE, STATE_UNCERTAIN, ERROR, and DIRECTION to Matter DoorLock.lockState.
+   * NotFullyLocked=0 while motor is running (DIRECTION≠0) or on error/uncertainty; Unlocked=2 (STATE=true, stopped); Locked=1 (STATE=false, stopped).
+   *
+   * @param {object} event RPC event payload.
+   * @param {string} [event.iface] RPC interface name.
+   * @param {string} [event.idInit] Device init ID.
+   * @param {unknown} [event.channel] Channel address string.
+   * @param {string} [event.datapoint] Datapoint name ('STATE', 'STATE_UNCERTAIN', or 'ERROR').
+   * @param {unknown} [event.value] Datapoint value.
+   * @returns {Promise<void>} Resolves when the Matter attribute has been updated.
+   */
+  private async handleRpcEventKeymatic(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
+    const datapoint = typeof event.datapoint === 'string' ? event.datapoint.trim().toUpperCase() : '';
+    if (datapoint !== 'STATE' && datapoint !== 'STATE_UNCERTAIN' && datapoint !== 'ERROR' && datapoint !== 'DIRECTION') return;
+
+    const channelAddress = typeof event.channel === 'string' ? event.channel : undefined;
+    if (!channelAddress) return;
+
+    const endpoint = this.channelAddressToDevice.get(channelAddress);
+    if (!endpoint) return;
+    if (!endpoint.hasClusterServer('DoorLock')) return;
+
+    const flags = this.keymaticState.get(channelAddress) ?? { state: false, uncertain: false, error: false, direction: 0 };
+
+    if (datapoint === 'STATE') flags.state = event.value === true || event.value === 1 || event.value === '1';
+    if (datapoint === 'STATE_UNCERTAIN') flags.uncertain = event.value === true || event.value === 1 || event.value === '1';
+    if (datapoint === 'ERROR') flags.error = typeof event.value === 'number' ? event.value !== 0 : Boolean(event.value);
+    // DIRECTION: 0=stopped, 1=opening/unlocking, 2=closing/locking.
+    if (datapoint === 'DIRECTION') flags.direction = typeof event.value === 'number' ? event.value : 0;
+
+    this.keymaticState.set(channelAddress, flags);
+
+    // Motor moving (DIRECTION≠0), uncertain, or error → NotFullyLocked=0; else Unlocked=2 or Locked=1.
+    const lockState = flags.error || flags.uncertain || flags.direction !== 0 ? 0 : flags.state ? 2 : 1;
+
+    try {
+      const current = await endpoint.getAttribute('DoorLock', 'lockState');
+      if (current !== lockState) {
+        await endpoint.updateAttribute('DoorLock', 'lockState', lockState);
+        this.log.info(
+          `KEYMATIC ${datapoint} event: updated lockState for ${channelAddress} to ${lockState} (state=${flags.state} uncertain=${flags.uncertain} error=${flags.error} direction=${flags.direction})`,
+        );
+      }
+    } catch (err) {
+      this.log.warn(`Failed to update DoorLock lockState for ${channelAddress}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Handle incoming RPC event for KEY / KEY_TRANSCEIVER channel datapoints.
+   * Forwards PRESS_SHORT as a Matter 'Single' switch event and PRESS_LONG as a 'Long' switch event.
+   * The channel emits only events; no persistent state is stored.
+   *
+   * @param {object} event RPC event payload.
+   * @param {string} [event.iface] RPC interface name.
+   * @param {string} [event.idInit] Device init ID.
+   * @param {unknown} [event.channel] Channel address string.
+   * @param {string} [event.datapoint] Datapoint name ('PRESS_SHORT', 'PRESS_LONG').
+   * @param {unknown} [event.value] Datapoint value (boolean true = press fired).
+   * @returns {Promise<void>} Resolves when the Matter switch event has been triggered.
+   */
+  private async handleRpcEventKey(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
+    const datapoint = typeof event.datapoint === 'string' ? event.datapoint.trim().toUpperCase() : '';
+    if (datapoint !== 'PRESS_SHORT' && datapoint !== 'PRESS_LONG') return;
+
+    // Homematic fires PRESS_SHORT/PRESS_LONG with value=true on press; ignore value=false echoes.
+    if (!(event.value === true || event.value === 1 || event.value === '1')) return;
+
+    const channelAddress = typeof event.channel === 'string' ? event.channel : undefined;
+    if (!channelAddress) return;
+
+    const endpoint = this.channelAddressToDevice.get(channelAddress);
+    if (!endpoint) return;
+    if (!endpoint.hasClusterServer('Switch')) return;
+
+    const switchEvent = datapoint === 'PRESS_SHORT' ? 'Single' : 'Long';
+    try {
+      await endpoint.triggerSwitchEvent(switchEvent, this.log);
+      this.log.info(`KEY ${datapoint} event: triggered Matter switch '${switchEvent}' for ${channelAddress}`);
+    } catch (err) {
+      this.log.warn(`Failed to trigger switch event for ${channelAddress}: ${String(err)}`);
+    }
+  }
+
+  /**
    * Handle incoming RPC event for the BLIND channel LEVEL_2 (slat tilt) datapoint.
    * Only applies to venetian blind channels that support tilt (BLIND_VIRTUAL_RECEIVER).
    *
@@ -1375,15 +1523,20 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   }
 
   /**
-   * Handle incoming RPC event for the BLIND channel ACTIVITY_STATE or DIRECTION datapoint.
-   * Maps the movement direction to the Matter WindowCovering operationalStatus.
+   * Handle incoming RPC event for the BLIND channel ACTIVITY_STATE (HmIP) or DIRECTION (BidCos) datapoint.
+   * Drives the dimmerWorking flag to suppress intermediate LEVEL events during movement
+   * (same role as WORKING for dimmer/BidCos-blind channels).
+   * When movement stops, applies the last known LEVEL using the same logic as handleRpcEventDimmerWorking.
+   *
+   * ACTIVITY_STATE: 0=inactive, 1=opening, 2=closing, 3=idle/stopped (common HmIP stopped signal).
+   * DIRECTION:      0=stopped, 1=UP/opening, 2=DOWN/closing, 3=UNDEFINED (direction unknown, motor may still run).
    *
    * @param {object} event RPC event payload.
    * @param {string} [event.iface] RPC interface name.
    * @param {string} [event.idInit] Device init ID.
    * @param {unknown} [event.channel] Channel address string.
    * @param {string} [event.datapoint] Datapoint name ('ACTIVITY_STATE' or 'DIRECTION').
-   * @param {unknown} [event.value] Datapoint value (integer: 0=stopped, 1=opening, 2=closing).
+   * @param {unknown} [event.value] Datapoint value (integer).
    * @returns {Promise<void>} Resolves when the Matter attribute has been updated.
    */
   private async handleRpcEventBlindActivity(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
@@ -1397,13 +1550,46 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     if (!endpoint) return;
     if (!endpoint.hasClusterServer('WindowCovering')) return;
 
-    // Homematic: 0=stopped, 1=opening (INCREASING), 2=closing (DECREASING).
+    // ACTIVITY_STATE: 0=inactive, 1=opening, 2=closing, 3=idle/stopped (common HmIP "stopped" signal).
+    // DIRECTION:      0=stopped, 1=UP, 2=DOWN, 3=UNDEFINED (direction unknown, motor may still run).
+    // For ACTIVITY_STATE, value=3 means the motor is idle and should be treated as stopped.
+    // For DIRECTION, value=3 means the direction is unknown but the motor may still run — leave dimmerWorking.
     const value = typeof event.value === 'number' ? event.value : 0;
+    const isMoving = value === 1 || value === 2;
+    const isStopped = value === 0 || (value === 3 && datapoint === 'ACTIVITY_STATE');
     const status = value === 1 ? 1 : value === 2 ? 2 : 0;
+
+    if (isMoving) {
+      // Mark channel as moving so that intermediate LEVEL events are suppressed (same as WORKING=true).
+      this.dimmerWorking.set(channelAddress, true);
+      this.log.debug(`BLIND ${datapoint}=${value} (moving): suppressing LEVEL updates for ${channelAddress}`);
+    } else if (isStopped) {
+      // Motor has stopped: clear the movement flag and apply the final position.
+      // Only trigger level application if we were the ones who set the moving flag
+      // (i.e. the flag is still set — WORKING=false may have already cleared it for BidCos).
+      const wasMoving = this.dimmerWorking.get(channelAddress) === true;
+      this.dimmerWorking.delete(channelAddress);
+      this.log.debug(`BLIND ${datapoint}=0 (stopped): wasMoving=${wasMoving} for ${channelAddress}`);
+
+      if (wasMoving) {
+        // Movement is done: clear the commanded target so applyBlindLevel updates both current and target.
+        this.blindCommandedTarget.delete(channelAddress);
+        const last = this.dimmerLastLevel.get(channelAddress);
+        const age = last !== undefined ? Date.now() - last.time : Infinity;
+        if (last !== undefined && age < 500) {
+          this.log.debug(`BLIND ${datapoint}=0: applying last known level=${last.level} age=${age}ms for ${channelAddress}`);
+          await this.applyBlindLevel(channelAddress, endpoint, last.level);
+        } else {
+          this.log.debug(`BLIND ${datapoint}=0: awaiting next LEVEL (last age=${age === Infinity ? 'none' : `${age}ms`}) for ${channelAddress}`);
+          this.dimmerAwaitingFinalLevel.add(channelAddress);
+        }
+      }
+    }
+    // value === 3 (DIRECTION=UNDEFINED): update UI status only, do not touch dimmerWorking.
 
     try {
       await endpoint.setWindowCoveringStatus(status);
-      this.log.debug(`BLIND ACTIVITY_STATE event: operationalStatus=${status} for ${channelAddress}`);
+      this.log.debug(`BLIND ${datapoint} event: operationalStatus=${status} for ${channelAddress}`);
     } catch (err) {
       this.log.warn(`Failed to update WindowCovering operationalStatus for ${channelAddress}: ${String(err)}`);
     }
@@ -1421,14 +1607,62 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     // Matter Percent100ths: 0 = fully open, 10000 = fully closed.
     const position = Math.round((1 - hmLevel) * 10000);
     try {
-      // Suppress the echo that subscribeAttribute on targetPositionLiftPercent100ths would send back.
-      this.rpcEchoSuppress.set(channelAddress + ':blindTarget', position);
-      await endpoint.setWindowCoveringTargetAndCurrentPosition(position);
-      this.log.info(`BLIND LEVEL event: updated WindowCovering for ${channelAddress} to ${position}/10000 (hmLevel=${hmLevel})`);
+      if (this.blindCommandedTarget.has(channelAddress)) {
+        // A Matter command is in flight (DIRECTION/WORKING not yet received). Only update the current
+        // position so the Home app sees the blind starting to move; preserve the commanded target.
+        await endpoint.updateAttribute('WindowCovering', 'currentPositionLiftPercent100ths', position);
+        this.log.info(`BLIND LEVEL event: updated currentPosition for ${channelAddress} to ${position}/10000 (hmLevel=${hmLevel}, target preserved)`);
+      } else {
+        // No command in flight: update both current and target (normal status update or final position).
+        // Suppress the echo that subscribeAttribute on targetPositionLiftPercent100ths would send back.
+        this.rpcEchoSuppress.set(channelAddress + ':blindTarget', position);
+        await endpoint.setWindowCoveringTargetAndCurrentPosition(position);
+        this.log.info(`BLIND LEVEL event: updated WindowCovering for ${channelAddress} to ${position}/10000 (hmLevel=${hmLevel})`);
+      }
     } catch (err) {
       this.rpcEchoSuppress.delete(channelAddress + ':blindTarget');
       this.log.warn(`Failed to update Matter WindowCovering for ${channelAddress}: ${String(err)}`);
     }
+  }
+
+  private async applyInitialValuesFromRega(): Promise<void> {
+    if (!this.getPlatformConfig().initialValuesFromRega) return;
+    if (!this.ccuConnection) return;
+
+    this.log.info('Fetching initial device state from ReGa...');
+
+    const datapoints = await this.ccuConnection.fetchInitialValues();
+    if (datapoints.length === 0) {
+      this.log.info('ReGa initial values: no datapoints returned (ReGa may be disabled or not connected).');
+      return;
+    }
+
+    let applied = 0;
+
+    for (const { iface, channel, datapoint, value, uncertain } of datapoints) {
+      if (uncertain) continue;
+
+      const event = { iface, channel, datapoint, value };
+
+      await this.handleRpcEventSwitchState(event);
+      await this.handleRpcEventContactState(event);
+      await this.handleRpcEventDimmerLevel(event);
+      await this.handleRpcEventBlindLevel(event);
+      await this.handleRpcEventBlindTilt(event);
+      await this.handleRpcEventMotion(event);
+      await this.handleRpcEventIlluminance(event);
+      await this.handleRpcEventTemperatureHumidity(event);
+      await this.handleRpcEventSmoke(event);
+      await this.handleRpcEventAlarmState(event);
+      await this.handleRpcEventRotaryHandle(event);
+      await this.handleRpcEventPowerMeter(event);
+      await this.handleRpcEventThermostat(event);
+      await this.handleRpcEventKeymatic(event);
+
+      applied++;
+    }
+
+    this.log.info(`ReGa initial values applied: ${applied} datapoints processed (${datapoints.length} total, ${datapoints.length - applied} uncertain/skipped).`);
   }
 
   private async applyStartupServiceMessages(): Promise<void> {
@@ -1631,7 +1865,12 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       if (newName && newName !== oldName && newName !== channelAddress) {
         this.log.info(`Updating device name for ${channelAddress}: "${oldName}" -> "${newName}"`);
         device.deviceName = newName;
-        this.setSelectDevice(this.getChannelSelectSerial(channelAddress), newName, undefined, 'switch');
+        this.setSelectDevice(
+          `${updatedChannel.interfaceName}:${isSupportedChannelType(updatedChannel.type) ? channelTypeLabel(updatedChannel.type) : updatedChannel.type}:${channelAddress}`,
+          newName,
+          undefined,
+          'switch',
+        );
       }
     }
   }
@@ -1669,243 +1908,5 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     this.log.debug(`getChannelDisplayName <- address=${channel.address} regaName=${regaName ? `"${regaName}"` : 'empty'} fallbacks=${channel.address}`);
     if (regaName && regaName.length > 0) return regaName;
     return channel.address;
-  }
-
-  private buildChannelConfigUrl(channelAddress: string): string {
-    const pluginName = encodeURIComponent(String(this.config.name ?? 'matterbridge-homematic'));
-    const encodedAddress = encodeURIComponent(channelAddress);
-    const query = `?plugin=${pluginName}&channel=${encodedAddress}`;
-    const configuredUrl = String(this.getPlatformConfig().deviceEditorExternalUrl ?? '').trim();
-
-    if (configuredUrl) {
-      const baseUrl = configuredUrl.replace('{port}', String(this.editorPort));
-      return `${baseUrl}/homematic-config${query}`;
-    }
-    if (this.externalHost && this.editorPort > 0) {
-      return `${this.externalHost}:${this.editorPort}/homematic-config${query}`;
-    }
-    return `/homematic-config${query}`;
-  }
-
-  private async startChannelEditorServer(): Promise<void> {
-    if (this.editorServer) {
-      return;
-    }
-
-    const enabled = this.getPlatformConfig().deviceEditorEnabled !== false;
-    if (!enabled) {
-      this.log.info('Channel editor server disabled by config');
-      return;
-    }
-
-    const configuredPort = Number(this.getPlatformConfig().deviceEditorPort ?? 0);
-    const listenPort = Number.isFinite(configuredPort) && configuredPort >= 0 ? configuredPort : 0;
-
-    this.editorServer = createServer((req, res) => {
-      void this.handleChannelEditorRequest(req, res);
-    });
-
-    await new Promise<void>((resolve, reject) => {
-      this.editorServer?.once('error', reject);
-      this.editorServer?.listen(listenPort, '0.0.0.0', () => resolve());
-    });
-
-    const address = this.editorServer.address();
-    if (address && typeof address === 'object') {
-      this.editorPort = address.port;
-      this.log.info(`Channel editor server listening on 0.0.0.0:${this.editorPort}`);
-    }
-  }
-
-  private async handleChannelEditorRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    if (!this.externalHost && req.headers.host) {
-      const proto = req.headers['x-forwarded-proto'] ?? 'http';
-      const host = req.headers['x-forwarded-host'] ?? req.headers.host;
-      this.externalHost = `${proto}://${host}`;
-    }
-
-    if (!req.url) {
-      this.sendTextResponse(res, 400, 'Bad Request');
-      return;
-    }
-
-    const url = new URL(req.url, 'http://127.0.0.1');
-
-    if (req.method === 'GET' && url.pathname === '/homematic-config') {
-      const channelAddress = String(url.searchParams.get('channel') ?? '');
-      const html = this.renderChannelEditorHtml(channelAddress);
-      if (!html) {
-        this.sendTextResponse(res, 404, `Unknown channel: ${channelAddress}`);
-        return;
-      }
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(html);
-      return;
-    }
-
-    if (req.method === 'GET' && url.pathname === '/api/homematic-config') {
-      const payload: ChannelEditorPayload = {
-        channelAddress: String(url.searchParams.get('channelAddress') ?? ''),
-        enabled: String(url.searchParams.get('enabled') ?? '').toLowerCase() === 'true',
-        switchMatterType: this.toSwitchMatterType(url.searchParams.get('switchMatterType')),
-      };
-
-      const ok = await this.saveChannelEditorPayload(payload);
-      if (!ok) {
-        this.sendJsonResponse(res, 404, { ok: false, error: `Unknown channel: ${payload.channelAddress}` });
-        return;
-      }
-
-      this.sendJsonResponse(res, 200, { ok: true });
-      return;
-    }
-
-    this.sendTextResponse(res, 404, 'Not Found');
-  }
-
-  private renderChannelEditorHtml(channelAddress: string): string | null {
-    const channel = this.discoveredChannels.find((item) => item.address === channelAddress);
-    if (!channel) return null;
-
-    const override = this.getChannelOverride(channel.address);
-    const displayName = this.getChannelDisplayName(channel);
-    const switchMatterType = override?.switchMatterType ?? 'light';
-    const enabled = override?.enabled ?? false;
-    const showSwitchTypeSelect = channel.type === 'SWITCH';
-
-    return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Homematic Channel Config</title>
-  <style>
-    body { font-family: Segoe UI, sans-serif; margin: 0; background: #f5f7fb; color: #1a2233; }
-    .wrap { max-width: 720px; margin: 24px auto; background: #fff; border-radius: 10px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); }
-    h1 { margin: 0 0 6px 0; font-size: 24px; }
-    p { margin: 0 0 16px 0; color: #4a5a78; }
-    .field { margin-bottom: 12px; display: flex; flex-direction: column; gap: 6px; }
-    label { font-size: 13px; color: #4a5a78; }
-    select { border: 1px solid #cfd6e4; border-radius: 8px; padding: 8px 10px; font-size: 14px; }
-    .row { display: flex; align-items: center; gap: 8px; }
-    button { border: 0; border-radius: 8px; background: #1f6feb; color: #fff; padding: 10px 14px; font-weight: 600; cursor: pointer; }
-    .status { font-size: 13px; color: #4a5a78; margin-left: 10px; }
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <h1>${this.escapeHtml(displayName)}</h1>
-    <p>Channel ${this.escapeHtml(channel.address)} (${this.escapeHtml(channel.type)})</p>
-
-    <div class="field">
-      <label class="row"><input id="enabled" type="checkbox" ${enabled ? 'checked' : ''} /> Enabled</label>
-    </div>
-
-    ${
-      showSwitchTypeSelect
-        ? `<div class="field">
-      <label for="switchMatterType">Matter type for SWITCH channel</label>
-      <select id="switchMatterType">
-        <option value="light" ${switchMatterType === 'light' ? 'selected' : ''}>Light</option>
-        <option value="outlet" ${switchMatterType === 'outlet' ? 'selected' : ''}>Outlet</option>
-        <option value="switch" ${switchMatterType === 'switch' ? 'selected' : ''}>Switch / Relay</option>
-      </select>
-    </div>`
-        : ''
-    }
-
-    <button id="saveBtn" type="button">Save</button>
-    <span class="status" id="status">Ready</span>
-  </div>
-
-  <script>
-    const channelAddress = ${JSON.stringify(channel.address)};
-    const saveBtn = document.getElementById('saveBtn');
-    const status = document.getElementById('status');
-
-    saveBtn.addEventListener('click', async () => {
-      status.textContent = 'Saving...';
-      const params = new URLSearchParams();
-      params.set('channelAddress', channelAddress);
-      params.set('enabled', document.getElementById('enabled').checked ? 'true' : 'false');
-      const switchSelect = document.getElementById('switchMatterType');
-      if (switchSelect) params.set('switchMatterType', switchSelect.value);
-
-      try {
-        const resp = await fetch('/api/homematic-config?' + params.toString(), { method: 'GET' });
-        const data = await resp.json();
-        if (!resp.ok || !data.ok) {
-          status.textContent = 'Save failed: ' + (data.error || 'unknown error');
-          return;
-        }
-        status.textContent = 'Saved. Restart plugin to apply changes.';
-      } catch (error) {
-        status.textContent = 'Save failed: ' + error;
-      }
-    });
-  </script>
-</body>
-</html>`;
-  }
-
-  private async saveChannelEditorPayload(payload: ChannelEditorPayload): Promise<boolean> {
-    const channel = this.discoveredChannels.find((item) => item.address === payload.channelAddress);
-    if (!channel) return false;
-
-    const config = this.getPlatformConfig();
-    const overrides = this.getChannelOverrides();
-    const existing = overrides.find((item) => item.address === payload.channelAddress);
-    if (existing) {
-      existing.enabled = payload.enabled;
-      if (channel.type === 'SWITCH') {
-        existing.switchMatterType = payload.switchMatterType ?? 'light';
-      } else {
-        delete existing.switchMatterType;
-      }
-    } else {
-      const newOverride: CcuChannelOverride = {
-        address: payload.channelAddress,
-        enabled: payload.enabled,
-      };
-      if (channel.type === 'SWITCH') newOverride.switchMatterType = payload.switchMatterType ?? 'light';
-      overrides.push(newOverride);
-    }
-    config.channelOverrides = overrides;
-
-    await this.persistCurrentConfig(config);
-    return true;
-  }
-
-  private async persistCurrentConfig(config: HomematicPlatformConfig): Promise<void> {
-    const configPath = this.getConfigFilePath();
-    const existingText = await fs.readFile(configPath, 'utf8');
-    const existingConfig = JSON.parse(existingText) as Record<string, unknown>;
-    existingConfig.channelOverrides = config.channelOverrides ?? [];
-    await fs.writeFile(configPath, `${JSON.stringify(existingConfig, null, 2)}\n`, 'utf8');
-    this.log.info(`Saved channel override config to ${configPath}`);
-  }
-
-  private getConfigFilePath(): string {
-    const pluginName = String(this.config.name ?? 'matterbridge-homematic');
-    return path.join(os.homedir(), '.matterbridge', `${pluginName}.config.json`);
-  }
-
-  private toSwitchMatterType(value: string | null): SwitchMatterType | undefined {
-    if (value === 'light' || value === 'outlet' || value === 'switch') return value;
-    return undefined;
-  }
-
-  private escapeHtml(input: string): string {
-    return input.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
-  }
-
-  private sendTextResponse(res: ServerResponse, status: number, text: string): void {
-    res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end(text);
-  }
-
-  private sendJsonResponse(res: ServerResponse, status: number, data: Record<string, unknown>): void {
-    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify(data));
   }
 }

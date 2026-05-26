@@ -27,6 +27,9 @@ The following Homematic channel types are currently mapped to Matter device type
 | `BLIND`                              | Window Covering                       | `LEVEL` (lift), `LEVEL_2` (tilt, venetian blinds only), `ACTIVITY_STATE` / `DIRECTION` (operational status) |
 | `DIMMER`                             | Dimmable Light                        | `LEVEL`, `WORKING`                                                                                          |
 | `HEATING_CLIMATECONTROL_TRANSCEIVER` | Thermostat                            | `ACTUAL_TEMPERATURE`, `SET_POINT_TEMPERATURE`, `SETPOINT`                                                   |
+| `KEY`                                | Generic Switch                        | `PRESS_SHORT`, `PRESS_LONG` (momentary switch events)                                                       |
+| `KEY_TRANSCEIVER`                    | Generic Switch                        | `PRESS_SHORT`, `PRESS_LONG` (momentary switch events)                                                       |
+| `KEYMATIC`                           | Door Lock                             | `STATE`, `STATE_UNCERTAIN`, `ERROR`, `DIRECTION`                                                            |
 | `MOTION_DETECTOR`                    | Occupancy Sensor + Light Sensor       | `MOTION`, `ILLUMINATION`                                                                                    |
 | `POWERMETER`                         | Electrical Sensor                     | `POWER` (W), `CURRENT` (A), `VOLTAGE` (V)                                                                   |
 | `ROTARY_HANDLE_SENSOR`               | Contact Sensor                        | `STATE` (0=closed, 1=tilted, 2=open)                                                                        |
@@ -50,20 +53,6 @@ Battery (`LOW_BAT` / `LOWBAT` / `OPERATING_VOLTAGE`) and availability (`UNREACH`
 ## Configuration
 
 ### Basic Setup
-
-```json
-{
-  "host": "192.168.1.100",
-  "regaEnabled": true,
-  "bcrfEnabled": true,
-  "bcwiEnabled": true,
-  "iprfEnabled": true,
-  "virtEnabled": false,
-  "cuxdEnabled": false,
-  "deviceEditorEnabled": true,
-  "deviceEditorPort": 0
-}
-```
 
 ### RPC Server Configuration
 
@@ -176,7 +165,7 @@ The device editor allows you to:
 
 ### Three-Layer Design
 
-```
+```text
 ┌─────────────────────────────────────┐
 │    Matterbridge Platform Layer      │
 │  (Device Registration & Lifecycle)  │
@@ -213,7 +202,7 @@ To minimize startup time, the plugin caches discovered devices:
 
 ### Project Structure
 
-```
+```text
 src/
 ├── module.ts                 # Main plugin entry & platform class
 ├── ccu/
