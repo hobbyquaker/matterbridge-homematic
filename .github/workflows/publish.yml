@@ -5,6 +5,7 @@ name: Publish to npm
 on:
   release:
     types: [created]
+  workflow_call: # Called directly from release.yml after the release is created
   schedule:
     - cron: '0 0 * * *' # Run daily at 00:00 UTC
   workflow_dispatch:
@@ -21,7 +22,7 @@ permissions:
 jobs:
   publish-release:
     name: Publish release to npm
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || github.event_name == 'workflow_call'
     runs-on: ubuntu-latest
     # env:
     #   PAT_TOKEN: ${{ secrets.PAT_TOKEN }}

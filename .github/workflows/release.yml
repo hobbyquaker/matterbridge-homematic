@@ -93,7 +93,7 @@ jobs:
 
       - name: Create GitHub Release
         env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           IS_PRERELEASE: ${{ contains(github.ref_name, '-') }}
         run: |
           PRERELEASE_FLAG=""
@@ -104,3 +104,8 @@ jobs:
             --title "${{ github.ref_name }}" \
             --notes-file release_notes.md \
             $PRERELEASE_FLAG
+
+  publish:
+    name: Publish to npm
+    needs: create-release
+    uses: ./.github/workflows/publish.yml
