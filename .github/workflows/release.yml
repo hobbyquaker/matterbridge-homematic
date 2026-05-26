@@ -1,0 +1,106 @@
+# Create GitHub Release on tag push and trigger npm publish
+# Generates categorized release notes from conventional commits since the previous tag.
+
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Generate release notes
+        run: |
+          python3 << 'EOF'
+          import subprocess, re, os
+
+          current_tag = os.environ['GITHUB_REF_NAME']
+
+          tags = subprocess.run(
+            ['git', 'tag', '--sort=-version:refname'],
+            capture_output=True, text=True
+          ).stdout.strip().split('\n')
+          other_tags = [t for t in tags if t and t != current_tag]
+          previous_tag = other_tags[0] if other_tags else None
+
+          commit_range = f'{previous_tag}..HEAD' if previous_tag else 'HEAD'
+          print(f'Changelog for {current_tag} (since {previous_tag or "beginning"})')
+
+          raw = subprocess.run(
+            ['git', 'log', commit_range, '--pretty=format:%s'],
+            capture_output=True, text=True
+          ).stdout.strip().split('\n')
+
+          categories = [
+            ('feat',     'Features'),
+            ('fix',      'Bug Fixes'),
+            ('perf',     'Performance'),
+            ('refactor', 'Refactoring'),
+            ('docs',     'Documentation'),
+            ('test',     'Tests'),
+            ('build',    'Build'),
+            ('ci',       'CI'),
+            ('chore',    'Chores'),
+            ('revert',   'Reverts'),
+          ]
+          buckets = {k: [] for k, _ in categories}
+          other = []
+
+          pattern = re.compile(r'^(\w+)(?:\(([^)]+)\))?!?: (.+)$')
+
+          for line in raw:
+            if not line:
+              continue
+            m = pattern.match(line)
+            if m:
+              type_, scope, desc = m.group(1), m.group(2), m.group(3)
+              entry = f'- **{scope}**: {desc}' if scope else f'- {desc}'
+              if type_ in buckets:
+                buckets[type_].append(entry)
+              else:
+                other.append(f'- {line}')
+            else:
+              other.append(f'- {line}')
+
+          notes = []
+          for key, title in categories:
+            if buckets[key]:
+              notes.append(f'### {title}')
+              notes.extend(buckets[key])
+              notes.append('')
+          if other:
+            notes.append('### Other')
+            notes.extend(other)
+            notes.append('')
+
+          with open('release_notes.md', 'w') as f:
+            f.write('\n'.join(notes) if notes else 'No changes recorded.')
+          print('release_notes.md written.')
+          EOF
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IS_PRERELEASE: ${{ contains(github.ref_name, '-') }}
+        run: |
+          PRERELEASE_FLAG=""
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --notes-file release_notes.md \
+            $PRERELEASE_FLAG
