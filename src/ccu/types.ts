@@ -61,6 +61,21 @@ export interface RpcServer {
 export interface RegaClient {
   exec(script: string, callback: (error: Error | null, response?: string, objects?: Record<string, unknown>) => void): void;
   getChannels(callback: (error: Error | null, channels?: RegaChannel[]) => void): void;
+  getValues(callback: (error: Error | null, result?: Array<{ name: string; value: unknown; ts: string }>) => void): void;
+}
+
+/** A single datapoint returned by ReGa {@link RegaClient.getValues}. */
+export interface CcuReGaDatapoint {
+  /** RPC interface name, e.g. `'BidCos-RF'`. */
+  iface: string;
+  /** Full channel address, e.g. `'OEQ0854602:1'`. */
+  channel: string;
+  /** Datapoint name, e.g. `'LEVEL'`. */
+  datapoint: string;
+  /** Current value as stored in ReGa. */
+  value: unknown;
+  /** True when the CCU has never received a reliable value for this datapoint (ts = 1970-01-01). */
+  uncertain: boolean;
 }
 
 export interface RegaChannel {

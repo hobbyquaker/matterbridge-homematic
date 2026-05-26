@@ -17,6 +17,7 @@ import {
   CcuDiscoveryCache,
   CcuInterfaceName,
   CcuLogger,
+  CcuReGaDatapoint,
   CcuStatusSnapshot,
   RegaChannel,
   RegaClient,
@@ -45,6 +46,8 @@ interface RpcInterfaceDefinition {
   protocol: 'xmlrpc' | 'binrpc';
   port: number;
   path?: string;
+  /** Whether this interface supports the ping/pong watchdog mechanism. */
+  pingPong: boolean;
 }
 
 export class CcuConnectionLayer extends EventEmitter {
@@ -64,6 +67,12 @@ export class CcuConnectionLayer extends EventEmitter {
   private readonly initIdToInterface = new Map<string, RpcInterfaceName>();
 
   private readonly connectedInterfaces = new Set<CcuInterfaceName>();
+
+  /** Timestamp of the last received RPC event (including PONG) per interface. */
+  private readonly lastRpcEventTime = new Map<RpcInterfaceName, number>();
+
+  /** Active ping/pong watchdog timers per interface. */
+  private readonly pingTimers = new Map<RpcInterfaceName, ReturnType<typeof setTimeout>>();
 
   private readonly discoveredHosts = new Set<string>();
 
@@ -441,6 +450,15 @@ export class CcuConnectionLayer extends EventEmitter {
     if (method === 'event') {
       const [idInit, channel, datapoint, value] = parameters;
       const iface = this.getIfaceFromInitId(idInit);
+      // Update watchdog timestamp for every event, including PONG.
+      if (iface) {
+        this.lastRpcEventTime.set(iface, Date.now());
+      }
+      // PONG events only serve the watchdog — do not forward to subscribers.
+      if (typeof channel === 'string' && channel.includes('CENTRAL') && datapoint === 'PONG') {
+        this.log.debug(`RPC PONG <- iface=${iface ?? 'unknown'}`);
+        return '';
+      }
       this.log.debug(`RPC event <- iface=${iface ?? 'unknown'} channel=${String(channel ?? '')} datapoint=${String(datapoint ?? '')} value=${this.toJsonSafe(value)}`);
       this.emit('rpcEvent', {
         iface,
@@ -457,6 +475,18 @@ export class CcuConnectionLayer extends EventEmitter {
       return calls.map((call) => {
         const callMethod = typeof call?.methodName === 'string' ? call.methodName : '';
         const callParams = Array.isArray(call?.params) ? call.params : [];
+        // For system.multicall we need to update the watchdog timestamp for PONG entries
+        // even before delegating, so the watchdog recognises multicall-wrapped PONGs.
+        if (callMethod === 'event' && Array.isArray(callParams) && callParams.length >= 3) {
+          const [idInit, channel, datapoint] = callParams;
+          const iface = this.getIfaceFromInitId(idInit);
+          if (iface) {
+            this.lastRpcEventTime.set(iface, Date.now());
+          }
+          if (typeof channel === 'string' && channel.includes('CENTRAL') && datapoint === 'PONG') {
+            return '';
+          }
+        }
         this.handleRpcCallback(callMethod, callParams);
         return '';
       });
@@ -613,6 +643,10 @@ export class CcuConnectionLayer extends EventEmitter {
         try {
           await this.callRpc(iface, 'init', [callbackUrl, initId]);
           this.log.info(`RPC init done <- iface=${iface}`);
+          this.lastRpcEventTime.set(iface, Date.now());
+          if (definition.pingPong) {
+            this.startPingWatchdog(iface);
+          }
         } catch (error) {
           this.log.warn(`RPC init failed <- iface=${iface} error=${String(error)}`);
         }
@@ -620,7 +654,98 @@ export class CcuConnectionLayer extends EventEmitter {
     );
   }
 
+  /**
+   * Start the ping/pong watchdog for a given interface.
+   * Schedules recurring checks at pingTimeout/4 intervals.
+   *
+   * @param {RpcInterfaceName} iface Interface name.
+   */
+  private startPingWatchdog(iface: RpcInterfaceName): void {
+    this.stopPingWatchdog(iface);
+    const pingTimeout = this.getPingTimeoutMs();
+    this.log.debug(`Ping watchdog start -> iface=${iface} timeoutMs=${pingTimeout}`);
+    const schedule = (): void => {
+      this.pingTimers.set(
+        iface,
+        setTimeout(
+          () => {
+            void this.rpcCheckIface(iface, schedule);
+          },
+          Math.floor(pingTimeout / 4),
+        ),
+      );
+    };
+    schedule();
+  }
+
+  /**
+   * Stop the ping/pong watchdog for a given interface.
+   *
+   * @param {RpcInterfaceName} iface Interface name.
+   */
+  private stopPingWatchdog(iface: RpcInterfaceName): void {
+    const timer = this.pingTimers.get(iface);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      this.pingTimers.delete(iface);
+    }
+  }
+
+  /**
+   * Perform one watchdog tick: send a ping if half the timeout has elapsed, or
+   * re-subscribe if the full timeout has elapsed without any events.
+   *
+   * @param {RpcInterfaceName} iface Interface name.
+   * @param {() => void} reschedule Callback to reschedule the next check.
+   */
+  private async rpcCheckIface(iface: RpcInterfaceName, reschedule: () => void): Promise<void> {
+    const pingTimeout = this.getPingTimeoutMs();
+    const last = this.lastRpcEventTime.get(iface) ?? Date.now();
+    const elapsed = Date.now() - last;
+    this.log.debug(`Ping watchdog check -> iface=${iface} elapsedMs=${elapsed} pingTimeoutMs=${pingTimeout}`);
+
+    if (elapsed >= pingTimeout) {
+      // Full timeout exceeded — re-subscribe.
+      this.log.warn(`Ping timeout -> iface=${iface} elapsedMs=${elapsed} — re-initialising RPC subscription`);
+      this.stopPingWatchdog(iface);
+      const definition = this.getRpcDefinitions()[iface];
+      const callbackUrl = this.getCallbackUrl(definition.protocol);
+      const initId = this.getInterfaceInitId(iface);
+      try {
+        await this.callRpc(iface, 'init', [callbackUrl, initId]);
+        this.log.info(`Ping re-init done <- iface=${iface}`);
+        this.lastRpcEventTime.set(iface, Date.now());
+      } catch (error) {
+        this.log.warn(`Ping re-init failed <- iface=${iface} error=${String(error)}`);
+      }
+      this.startPingWatchdog(iface);
+      return;
+    }
+
+    if (elapsed >= pingTimeout / 2) {
+      // Half the timeout elapsed — send a ping to keep the subscription alive.
+      this.log.debug(`Ping send -> iface=${iface}`);
+      this.callRpc(iface, 'ping', ['mb']).catch((err: unknown) => {
+        this.log.warn(`Ping failed <- iface=${iface} error=${String(err)}`);
+      });
+    }
+
+    reschedule();
+  }
+
+  private getPingTimeoutMs(): number {
+    const timeout = Number(this.config.rpcPingTimeout);
+    if (Number.isFinite(timeout) && timeout > 0) return timeout * 1000;
+    return 60_000;
+  }
+
   private async deinitRpcCallbacksAndCloseServers(): Promise<void> {
+    // Stop all watchdog timers before de-initialising.
+    for (const iface of this.clients.keys()) {
+      this.stopPingWatchdog(iface);
+    }
+    this.lastRpcEventTime.clear();
+
     await Promise.all(
       [...this.clients.keys()].map(async (iface) => {
         const definition = this.getRpcDefinitions()[iface];
@@ -684,6 +809,73 @@ export class CcuConnectionLayer extends EventEmitter {
         resolve({ response, objects });
       });
     });
+  }
+
+  /**
+   * Fetch the current value of every datapoint known to ReGa.
+   * Used to seed initial Matter attribute state on startup instead of waiting for the first RPC event.
+   * Returns an empty array when ReGa is not enabled or not connected.
+   *
+   * The returned datapoints cover all interfaces the CCU knows about.
+   * The caller is responsible for filtering to relevant channels and interfaces.
+   *
+   * @returns {Promise<CcuReGaDatapoint[]>} Array of current datapoint values.
+   */
+  async fetchInitialValues(): Promise<CcuReGaDatapoint[]> {
+    if (!this.regaClient || !this.config.regaEnabled) {
+      this.log.debug(`fetchInitialValues early return <- reason=${!this.regaClient ? 'regaClient not initialized' : 'regaEnabled is false'}`);
+      return [];
+    }
+
+    const started = Date.now();
+    this.log.debug('ReGa call -> method=getValues');
+
+    try {
+      const raw = await new Promise<Array<{ name: string; value: unknown; ts: string }>>((resolve, reject) => {
+        const timeoutMs = this.getRequestTimeoutMs();
+        const timer = setTimeout(() => {
+          this.log.warn(`ReGa timeout <- method=getValues timeoutMs=${timeoutMs}`);
+          reject(new Error(`ReGa getValues timed out after ${timeoutMs} ms`));
+        }, timeoutMs);
+
+        this.regaClient?.getValues((error, result) => {
+          clearTimeout(timer);
+          if (error) {
+            this.log.warn(`ReGa error <- method=getValues error=${String(error)}`);
+            reject(error);
+            return;
+          }
+          resolve(Array.isArray(result) ? result : []);
+        });
+      });
+
+      const datapoints: CcuReGaDatapoint[] = [];
+
+      for (const dp of raw) {
+        if (typeof dp.name !== 'string') continue;
+
+        // Name format: "BidCos-RF.OEQ0854602:1.LEVEL"
+        // Channel address may contain ":" so split at first and last "." only.
+        const firstDot = dp.name.indexOf('.');
+        const lastDot = dp.name.lastIndexOf('.');
+        if (firstDot < 0 || lastDot <= firstDot) continue;
+
+        const iface = dp.name.slice(0, firstDot);
+        const channel = dp.name.slice(firstDot + 1, lastDot);
+        const datapoint = dp.name.slice(lastDot + 1);
+
+        if (!channel.includes(':') || datapoint.length === 0) continue;
+
+        const uncertain = dp.ts === '1970-01-01 01:00:00';
+        datapoints.push({ iface, channel, datapoint, value: dp.value, uncertain });
+      }
+
+      this.log.debug(`ReGa result <- method=getValues durationMs=${Date.now() - started} total=${raw.length} parsed=${datapoints.length}`);
+      return datapoints;
+    } catch (err) {
+      this.log.warn(`fetchInitialValues failed: ${String(err)}`);
+      return [];
+    }
   }
 
   private async discoverNetwork(): Promise<void> {
@@ -826,18 +1018,21 @@ export class CcuConnectionLayer extends EventEmitter {
         module: xmlrpc,
         protocol: 'xmlrpc',
         port: this.config.tls ? 42001 : 2001,
+        pingPong: true,
       },
       'BidCos-Wired': {
         enabled: this.config.bcwiEnabled,
         module: xmlrpc,
         protocol: 'xmlrpc',
         port: this.config.tls ? 42000 : 2000,
+        pingPong: true,
       },
       'HmIP-RF': {
         enabled: this.config.iprfEnabled,
         module: xmlrpc,
         protocol: 'xmlrpc',
         port: this.config.tls ? 42010 : 2010,
+        pingPong: true,
       },
       'VirtualDevices': {
         enabled: this.config.virtEnabled,
@@ -845,12 +1040,14 @@ export class CcuConnectionLayer extends EventEmitter {
         protocol: 'xmlrpc',
         port: this.config.tls ? 49292 : 9292,
         path: 'groups',
+        pingPong: false, // VirtualDevices does not support the ping/pong mechanism.
       },
       'CUxD': {
         enabled: this.config.cuxdEnabled,
         module: binrpc,
         protocol: 'binrpc',
         port: 8701,
+        pingPong: true,
       },
     };
   }
