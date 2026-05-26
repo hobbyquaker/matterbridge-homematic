@@ -112,6 +112,17 @@ export interface CcuChannelInfo {
   batteryPowered?: boolean;
   /** Whether this BLIND channel supports slat tilt control via the LEVEL_2 datapoint (venetian blinds). */
   tiltSupported?: boolean;
+  /**
+   * Address of a co-located power meter channel merged onto this SWITCH endpoint.
+   * Set by resolveChannelsForMatter when a POWERMETER or ENERGIE_METER_TRANSMITTER channel is
+   * found on the same device as a single SWITCH channel.
+   */
+  powerMeterChannelAddress?: string;
+  /**
+   * True when powerMeterChannelAddress refers to an ENERGIE_METER_TRANSMITTER channel (HmIP),
+   * which reports CURRENT in milliamps. False (or absent) for BidCos POWERMETER (CURRENT in amps).
+   */
+  powerMeterIsHmIP?: boolean;
 }
 
 /** Matter device type selection for Homematic SWITCH channels. */

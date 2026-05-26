@@ -31,6 +31,7 @@ export const SUPPORTED_CHANNEL_TYPES = [
   'ALARMSTATE',
   'BLIND',
   'DIMMER',
+  'ENERGIE_METER_TRANSMITTER',
   'HEATING_CLIMATECONTROL_TRANSCEIVER',
   'KEY',
   'KEYMATIC',
@@ -139,15 +140,41 @@ export function resolveChannelsForMatter(allChannels: CcuChannelInfo[]): CcuChan
       blindSlot = (blindSlot + 1) % 3;
     }
 
-    // Pass through all non-HmIP-handled channels unchanged, minus channels that must be excluded.
+    // Pass through all non-HmIP-handled channels, separating power meter channels out for merging.
+    const passthroughChannels: CcuChannelInfo[] = [];
+    const powerMeterCandidates: CcuChannelInfo[] = [];
     for (const ch of deviceChannels) {
       if (hmipHandled.has(ch.address)) continue;
       // KEY_TRANSCEIVER channels on VirtualDevices are virtual echoes of physical key presses.
       if (ch.type === 'KEY_TRANSCEIVER' && ch.interfaceName === 'VirtualDevices') continue;
       // HmIP-HEATING channel 5 on VirtualDevices is an internal control channel, not a real device.
       if (ch.deviceType === 'HmIP-HEATING' && ch.channelIndex === 5 && ch.interfaceName === 'VirtualDevices') continue;
-      result.push(ch);
+      if (ch.type === 'POWERMETER' || ch.type === 'ENERGIE_METER_TRANSMITTER') {
+        powerMeterCandidates.push(ch);
+      } else {
+        passthroughChannels.push(ch);
+      }
     }
+
+    // Merge a power meter channel into the co-located SWITCH endpoint when exactly one switch exists.
+    // The channel address is stored on the SWITCH channel so module.ts can register event routing.
+    if (powerMeterCandidates.length > 0) {
+      const switchChannels = [...passthroughChannels, ...hmipSelected].filter((c) => c.type === 'SWITCH');
+      if (switchChannels.length === 1) {
+        const pmCh = powerMeterCandidates[0];
+        switchChannels[0].powerMeterChannelAddress = pmCh.address;
+        switchChannels[0].powerMeterIsHmIP = pmCh.type === 'ENERGIE_METER_TRANSMITTER';
+        // Any additional power meter candidates (unusual) are exposed as standalone sensors.
+        for (const extra of powerMeterCandidates.slice(1)) {
+          passthroughChannels.push(extra);
+        }
+      } else {
+        // No switch or multiple switches — expose all power meter channels as standalone sensors.
+        passthroughChannels.push(...powerMeterCandidates);
+      }
+    }
+
+    result.push(...passthroughChannels);
 
     // Append the selected HmIP virtual-receiver channels (remapped type).
     result.push(...hmipSelected);
@@ -194,6 +221,7 @@ function finalizeEndpoint(endpoint: MatterbridgeEndpoint, options: ChannelMappin
 
 /** Short display labels for verbose channel type names used in the serial number column. */
 const CHANNEL_TYPE_LABEL: Partial<Record<SupportedChannelType, string>> = {
+  ENERGIE_METER_TRANSMITTER: 'ENERGIEMETER',
   HEATING_CLIMATECONTROL_TRANSCEIVER: 'HEATING',
   KEY_TRANSCEIVER: 'KEY',
   MOTION_DETECTOR: 'MOTION',
@@ -276,25 +304,26 @@ export function createEndpointForChannel(channel: CcuChannelInfo & { type: Suppo
         { ...options, batteryPowered: channel.batteryPowered },
       );
 
-    case 'SWITCH':
+    case 'SWITCH': {
+      let ep: MatterbridgeEndpoint;
       switch (options.switchMatterType ?? 'light') {
         case 'outlet':
-          return finalizeEndpoint(
-            new MatterbridgeEndpoint(onOffOutlet, { id }).createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model),
-            { ...options, batteryPowered: channel.batteryPowered },
-          );
+          ep = new MatterbridgeEndpoint(onOffOutlet, { id }).createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model);
+          break;
         case 'switch':
-          return finalizeEndpoint(
-            new MatterbridgeEndpoint(onOffSwitch, { id }).createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model),
-            { ...options, batteryPowered: channel.batteryPowered },
-          );
+          ep = new MatterbridgeEndpoint(onOffSwitch, { id }).createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model);
+          break;
         case 'light':
         default:
-          return finalizeEndpoint(
-            new MatterbridgeEndpoint(onOffLight, { id }).createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model),
-            { ...options, batteryPowered: channel.batteryPowered },
-          );
+          ep = new MatterbridgeEndpoint(onOffLight, { id }).createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model);
+          break;
       }
+      if (channel.powerMeterChannelAddress) {
+        // A co-located power meter channel is merged onto this endpoint.
+        ep.createDefaultElectricalPowerMeasurementClusterServer();
+      }
+      return finalizeEndpoint(ep, { ...options, batteryPowered: channel.batteryPowered });
+    }
 
     case 'SHUTTER_CONTACT':
       return finalizeEndpoint(
@@ -325,6 +354,7 @@ export function createEndpointForChannel(channel: CcuChannelInfo & { type: Suppo
       );
 
     case 'POWERMETER':
+    case 'ENERGIE_METER_TRANSMITTER':
       return finalizeEndpoint(
         new MatterbridgeEndpoint(electricalSensor, { id })
           .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)

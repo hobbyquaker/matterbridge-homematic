@@ -70,6 +70,13 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   private rotaryHandleChannels = new Map<string, MatterbridgeEndpoint>();
 
   /**
+   * Maps ENERGIE_METER_TRANSMITTER (HmIP) channel addresses to their Matter endpoints.
+   * Kept separate from channelAddressToDevice because HmIP reports CURRENT in milliamps (mA)
+   * while BidCos POWERMETER reports it in amps (A), requiring different unit conversion.
+   */
+  private readonly energieMeterChannels = new Map<string, MatterbridgeEndpoint>();
+
+  /**
    * Tracks the last value written to a Matter attribute from an incoming RPC event.
    * Used to suppress the echo setValue that the subscribeAttribute callback would otherwise send back.
    */
@@ -174,6 +181,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       void this.handleRpcEventAlarmState(event);
       void this.handleRpcEventRotaryHandle(event);
       void this.handleRpcEventPowerMeter(event);
+      void this.handleRpcEventEnergieMeter(event);
       void this.handleRpcEventThermostat(event);
       void this.handleRpcEventKeymatic(event);
       void this.handleRpcEventKey(event);
@@ -266,6 +274,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     this.deviceAddressToDevice.clear();
     this.channelAddressToDevice.clear();
     this.rotaryHandleChannels.clear();
+    this.energieMeterChannels.clear();
 
     let enabledCount = 0;
     let registeredCount = 0;
@@ -335,6 +344,17 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
           });
         } catch (err) {
           this.log.warn(`Failed to subscribe OnOff for ${channel.address}: ${String(err)}`);
+        }
+        // If a power meter channel was merged onto this SWITCH endpoint, register its address
+        // in the appropriate event map so incoming RPC events update the merged endpoint.
+        if (channel.powerMeterChannelAddress) {
+          if (channel.powerMeterIsHmIP) {
+            // ENERGIE_METER_TRANSMITTER: CURRENT reported in mA, handled by handleRpcEventEnergieMeter.
+            this.energieMeterChannels.set(channel.powerMeterChannelAddress, endpoint);
+          } else {
+            // BidCos POWERMETER: CURRENT reported in A, handled by handleRpcEventPowerMeter.
+            this.channelAddressToDevice.set(channel.powerMeterChannelAddress, endpoint);
+          }
         }
       }
 
@@ -424,6 +444,12 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       // Track POWERMETER channel address for inbound POWER/CURRENT/VOLTAGE events.
       if (channel.type === 'POWERMETER') {
         this.channelAddressToDevice.set(channel.address, endpoint);
+      }
+
+      // Track ENERGIE_METER_TRANSMITTER (HmIP) channel address for inbound POWER/CURRENT/VOLTAGE events.
+      // Uses a separate map because HmIP reports CURRENT in mA (BidCos POWERMETER reports it in A).
+      if (channel.type === 'ENERGIE_METER_TRANSMITTER') {
+        this.energieMeterChannels.set(channel.address, endpoint);
       }
 
       // Wire Thermostat setpoint and mode for HEATING_CLIMATECONTROL_TRANSCEIVER/THERMALCONTROL_TRANSMIT channels.
@@ -1279,6 +1305,52 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       if (current !== milliValue) {
         await endpoint.updateAttribute('ElectricalPowerMeasurement', attr, milliValue);
         this.log.info(`POWERMETER ${datapoint} event: updated ${attr} for ${channelAddress} to ${milliValue} (${raw} raw)`);
+      }
+    } catch (err) {
+      this.log.warn(`Failed to update ElectricalPowerMeasurement.${attr} for ${channelAddress}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Handle incoming RPC event for ENERGIE_METER_TRANSMITTER (HmIP) channel datapoints.
+   * Maps POWER (W), CURRENT (mA), and VOLTAGE (V) to Matter ElectricalPowerMeasurement cluster attributes.
+   * Unlike BidCos POWERMETER, HmIP reports CURRENT already in milliamps — no ×1000 conversion for that field.
+   *
+   * @param {object} event RPC event payload.
+   * @param {string} [event.iface] RPC interface name.
+   * @param {string} [event.idInit] Device init ID.
+   * @param {unknown} [event.channel] Channel address string.
+   * @param {string} [event.datapoint] Datapoint name ('POWER', 'CURRENT', or 'VOLTAGE').
+   * @param {unknown} [event.value] Datapoint value (float).
+   * @returns {Promise<void>} Resolves when the Matter attribute has been updated.
+   */
+  private async handleRpcEventEnergieMeter(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
+    const datapoint = typeof event.datapoint === 'string' ? event.datapoint.trim().toUpperCase() : '';
+    if (datapoint !== 'POWER' && datapoint !== 'CURRENT' && datapoint !== 'VOLTAGE') return;
+
+    const channelAddress = typeof event.channel === 'string' ? event.channel : undefined;
+    if (!channelAddress) return;
+
+    const endpoint = this.energieMeterChannels.get(channelAddress);
+    if (!endpoint) return;
+    if (!endpoint.hasClusterServer('ElectricalPowerMeasurement')) return;
+
+    const raw = typeof event.value === 'number' ? event.value : 0;
+
+    // ElectricalPowerMeasurement uses milliwatts/milliamps/millivolts.
+    // POWER (W) → milliwatts: raw * 1000
+    // CURRENT (mA) → milliamps: raw * 1 (HmIP already reports in mA, unlike BidCos which uses A)
+    // VOLTAGE (V) → millivolts: raw * 1000
+    const attrMap: Record<string, string> = { POWER: 'activePower', CURRENT: 'activeCurrent', VOLTAGE: 'voltage' };
+    const attr = attrMap[datapoint];
+    if (!attr) return;
+
+    const milliValue = datapoint === 'CURRENT' ? Math.round(raw) : Math.round(raw * 1000);
+    try {
+      const current = await endpoint.getAttribute('ElectricalPowerMeasurement', attr);
+      if (current !== milliValue) {
+        await endpoint.updateAttribute('ElectricalPowerMeasurement', attr, milliValue);
+        this.log.info(`ENERGIE_METER_TRANSMITTER ${datapoint} event: updated ${attr} for ${channelAddress} to ${milliValue} (${raw} raw)`);
       }
     } catch (err) {
       this.log.warn(`Failed to update ElectricalPowerMeasurement.${attr} for ${channelAddress}: ${String(err)}`);
