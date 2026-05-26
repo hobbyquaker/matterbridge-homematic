@@ -151,25 +151,11 @@
       "default": 250,
       "minimum": 0
     },
-    "deviceEditorEnabled": {
-      "title": "Enable Device Config Page",
-      "description": "Enable the per-channel web editor.",
+    "initialValuesFromRega": {
+      "title": "Seed Initial State from ReGa",
+      "description": "Fetch current datapoint values from ReGaHSS on startup to seed initial Matter device state instead of waiting for the first RPC event.",
       "type": "boolean",
-      "default": true
-    },
-    "deviceEditorPort": {
-      "title": "Device Config Page Port",
-      "description": "Port for the per-channel web editor (0 = random free port).",
-      "type": "integer",
-      "default": 0,
-      "minimum": 0,
-      "maximum": 65535
-    },
-    "deviceEditorExternalUrl": {
-      "title": "Device Config External URL",
-      "description": "Optional external base URL for config links. Supports {port} placeholder.",
-      "type": "string",
-      "default": ""
+      "default": false
     },
     "channelOverrides": {
       "title": "Channel Overrides",
