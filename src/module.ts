@@ -441,17 +441,6 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         this.rotaryHandleChannels.set(channel.address, endpoint);
       }
 
-      // Track POWERMETER channel address for inbound POWER/CURRENT/VOLTAGE events.
-      if (channel.type === 'POWERMETER') {
-        this.channelAddressToDevice.set(channel.address, endpoint);
-      }
-
-      // Track ENERGIE_METER_TRANSMITTER (HmIP) channel address for inbound POWER/CURRENT/VOLTAGE events.
-      // Uses a separate map because HmIP reports CURRENT in mA (BidCos POWERMETER reports it in A).
-      if (channel.type === 'ENERGIE_METER_TRANSMITTER') {
-        this.energieMeterChannels.set(channel.address, endpoint);
-      }
-
       // Wire Thermostat setpoint and mode for HEATING_CLIMATECONTROL_TRANSCEIVER/THERMALCONTROL_TRANSMIT channels.
       if ((channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' || channel.type === 'THERMALCONTROL_TRANSMIT') && this.ccuConnection) {
         const ccuConn = this.ccuConnection;

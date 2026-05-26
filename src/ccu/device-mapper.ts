@@ -9,7 +9,6 @@ import {
   coverDevice,
   dimmableLight,
   doorLockDevice,
-  electricalSensor,
   genericSwitch,
   humiditySensor,
   lightSensor,
@@ -31,13 +30,11 @@ export const SUPPORTED_CHANNEL_TYPES = [
   'ALARMSTATE',
   'BLIND',
   'DIMMER',
-  'ENERGIE_METER_TRANSMITTER',
   'HEATING_CLIMATECONTROL_TRANSCEIVER',
   'KEY',
   'KEYMATIC',
   'KEY_TRANSCEIVER',
   'MOTION_DETECTOR',
-  'POWERMETER',
   'ROTARY_HANDLE_SENSOR',
   'SHUTTER_CONTACT',
   'SMOKE_DETECTOR',
@@ -164,13 +161,6 @@ export function resolveChannelsForMatter(allChannels: CcuChannelInfo[]): CcuChan
         const pmCh = powerMeterCandidates[0];
         switchChannels[0].powerMeterChannelAddress = pmCh.address;
         switchChannels[0].powerMeterIsHmIP = pmCh.type === 'ENERGIE_METER_TRANSMITTER';
-        // Any additional power meter candidates (unusual) are exposed as standalone sensors.
-        for (const extra of powerMeterCandidates.slice(1)) {
-          passthroughChannels.push(extra);
-        }
-      } else {
-        // No switch or multiple switches — expose all power meter channels as standalone sensors.
-        passthroughChannels.push(...powerMeterCandidates);
       }
     }
 
@@ -221,7 +211,6 @@ function finalizeEndpoint(endpoint: MatterbridgeEndpoint, options: ChannelMappin
 
 /** Short display labels for verbose channel type names used in the serial number column. */
 const CHANNEL_TYPE_LABEL: Partial<Record<SupportedChannelType, string>> = {
-  ENERGIE_METER_TRANSMITTER: 'ENERGIEMETER',
   HEATING_CLIMATECONTROL_TRANSCEIVER: 'HEATING',
   KEY_TRANSCEIVER: 'KEY',
   MOTION_DETECTOR: 'MOTION',
@@ -350,16 +339,6 @@ export function createEndpointForChannel(channel: CcuChannelInfo & { type: Suppo
           .createDefaultOccupancySensingClusterServer(false)
           // Default: null illuminance. Updated from ILLUMINATION RPC events.
           .createDefaultIlluminanceMeasurementClusterServer(),
-        { ...options, batteryPowered: channel.batteryPowered },
-      );
-
-    case 'POWERMETER':
-    case 'ENERGIE_METER_TRANSMITTER':
-      return finalizeEndpoint(
-        new MatterbridgeEndpoint(electricalSensor, { id })
-          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
-          // Defaults: null power/current/voltage. Updated from POWER/CURRENT/VOLTAGE RPC events.
-          .createDefaultElectricalPowerMeasurementClusterServer(),
         { ...options, batteryPowered: channel.batteryPowered },
       );
 
