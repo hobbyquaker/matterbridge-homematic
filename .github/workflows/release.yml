@@ -93,7 +93,7 @@ jobs:
 
       - name: Create GitHub Release
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
           IS_PRERELEASE: ${{ contains(github.ref_name, '-') }}
         run: |
           PRERELEASE_FLAG=""
