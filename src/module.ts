@@ -1,13 +1,11 @@
 /**
- * This file contains the plugin template.
+ * This file contains the Homematic CCU plugin for Matterbridge.
  *
  * @file module.ts
- * @author Luca Liguori
+ * @author hobbyquaker (https://github.com/hobbyquaker)
  * @created 2025-06-15
- * @version 1.3.0
+ * @version 0.9.0
  * @license Apache-2.0
- *
- * Copyright 2025, 2026, 2027 Luca Liguori.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
