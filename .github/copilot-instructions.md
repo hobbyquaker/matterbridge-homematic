@@ -23,5 +23,6 @@
   - https://github.com/Luligu/matterbridge
   - https://github.com/Luligu/matterbridge-plugin-template
   - https://github.com/Luligu/matterbridge-example-dynamic-platform
+- When bumping the package version, also update the `@version` tag in the file-level JSDoc comment at the top of `src/module.ts` to match.
 - Always commit completed changes unless the user explicitly asks not to commit.
 - Use this commit message convention: `<type>(<scope>): <short imperative summary>` where `type` is one of `feat|fix|refactor|docs|test|chore|build|ci|perf|revert`, `scope` is short and optional, and the summary is concise (preferably <= 72 characters).
