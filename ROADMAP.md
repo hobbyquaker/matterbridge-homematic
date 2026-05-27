@@ -36,7 +36,7 @@ The channel-mapper registry and `resolveChannelsForMatter` handle all of the fol
 
 ### Priority: High
 
-#### UI-0 — Per-device / per-channel configuration web UI
+#### HM-0 — Per-device / per-channel configuration web UI
 
 **Effort: Medium** (frontend + backend, depends on upstream API)  
 **Status: BLOCKED** — waiting on [Luligu/matterbridge#561](https://github.com/Luligu/matterbridge/issues/561)
@@ -66,7 +66,7 @@ Luligu's response on the issue is positive — he was already considering a simi
 
 ### Priority: High
 
-#### 1 — Wall thermostat humidity endpoint (HmIP-WTH / STH / STHD family)
+#### HM-1 — Wall thermostat humidity endpoint (HmIP-WTH / STH / STHD family)
 
 **Effort: Low** (~40 LOC + tests)
 
@@ -84,7 +84,7 @@ RedMatic prior art: `hmip-wth.js`, `hmip-sthd.js` — both offer an optional `Hu
 
 ---
 
-#### 3 — HM-CC-VG-1 virtual thermostat group
+#### HM-3 — HM-CC-VG-1 virtual thermostat group
 
 **Effort: Low–Medium** (endpoint creation is easy; event routing needs research)
 
@@ -100,7 +100,7 @@ RedMatic prior art: `hm-cc-vg-1.js` — uses the group device address directly f
 
 ---
 
-#### 6 — HM-SEC-SIR-WM security alarm panel
+#### HM-6 — HM-SEC-SIR-WM security alarm panel
 
 **Effort: High**
 
@@ -128,7 +128,7 @@ RedMatic prior art: `hm-sec-sir-wm.js` maps to a HomeKit `SecuritySystem` with `
 
 ### Priority: Medium
 
-#### 5 — HM-LC-RGBW-WM / hb-uni-rgb-led-ctrl color light
+#### HM-5 — HM-LC-RGBW-WM / hb-uni-rgb-led-ctrl color light
 
 **Effort: High**
 
@@ -157,7 +157,7 @@ RedMatic prior art: `hm-lc-rgbw-wm.js` (and `hb-uni-rgb-led-ctrl.js` which is an
 
 ### Priority: Low
 
-#### 4 — HmIP-SWDO optional garage door mode
+#### HM-4 — HmIP-SWDO optional garage door mode
 
 **Effort: Low–Medium**
 
@@ -169,7 +169,7 @@ RedMatic prior art: `hmip-swdo.js` — defaults to ContactSensor, can be configu
 
 ---
 
-#### 7 — HmIP-MOD-HO / MOD-TM garage door / gate motor
+#### HM-7 — HmIP-MOD-HO / MOD-TM garage door / gate motor
 
 **Effort: Medium**
 
@@ -181,7 +181,7 @@ RedMatic prior art: `hmip-mod-ho.js` and `hmip-mod-tm.js` (alias for MOD-HO).
 
 ---
 
-#### 8 — ReGa program triggers as Matter switches
+#### HM-8 — ReGa program triggers as Matter switches
 
 **Effort: Medium**
 
@@ -218,7 +218,7 @@ Analyzed all `hb-` prefix devices from RedMatic-HomeKit. No new device mapper ca
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | hb-lc-bl1pbu-fm                                | Alias for HM-LC-Bl1PBU-FM → BLIND channel mapper handles it                                                                                                              |
 | hb-lc-sw1pbu-fm, hb-lc-sw2-fm, hb-lc-sw2pbu-fm | SWITCH channel mapper handles all                                                                                                                                        |
-| hb-uni-rgb-led-ctrl                            | Alias for hm-lc-rgbw-wm → covered by roadmap item #5                                                                                                                     |
+| hb-uni-rgb-led-ctrl                            | Alias for hm-lc-rgbw-wm → covered by roadmap item HM-5                                                                                                                     |
 | hb-uni-sen-press-sc                            | SHUTTER_CONTACT → contactSensor, already works                                                                                                                           |
 | hb-uni-sen-temp-ds18b20, hb-uni-sen-temp-ir    | Temperature-only probes; if channel type is TEMPERATURE_HUMIDITY_TRANSMITTER a humidity endpoint is created with no data — minor cosmetic issue, no device mapper needed |
 | hb-uni-sen-wea                                 | Uses `LUX` datapoint; WEATHER channel mapper uses `BRIGHTNESS`. May need a small fix to the WEATHER mapper to fall back to LUX, but no device mapper                     |
