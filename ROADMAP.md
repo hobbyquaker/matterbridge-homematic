@@ -180,17 +180,18 @@ The device mapper must account for two common motor wiring patterns:
 
 **Config options to expose in `matterbridge-homematic.schema.json`:**
 
-| Option | Type | Purpose |
-|---|---|---|
-| `openContactAddress` | `string` | Channel address of the "fully open" contact sensor |
-| `closeContactAddress` | `string` | Channel address of the "fully closed" contact sensor |
-| `openingTimeMs` | `number` | Estimated full travel time open→close (ms); used for timeout detection |
-| `closingTimeMs` | `number` | Estimated full travel time close→open (ms); used for timeout detection |
-| `togglePattern` | `boolean` | Set `true` for up-stop-down motors; `false` for dedicated open/close outputs |
+| Option                | Type      | Purpose                                                                      |
+| --------------------- | --------- | ---------------------------------------------------------------------------- |
+| `openContactAddress`  | `string`  | Channel address of the "fully open" contact sensor                           |
+| `closeContactAddress` | `string`  | Channel address of the "fully closed" contact sensor                         |
+| `openingTimeMs`       | `number`  | Estimated full travel time open→close (ms); used for timeout detection       |
+| `closingTimeMs`       | `number`  | Estimated full travel time close→open (ms); used for timeout detection       |
+| `togglePattern`       | `boolean` | Set `true` for up-stop-down motors; `false` for dedicated open/close outputs |
 
 **Matter mapping (workaround, Matter ≤ 1.5):**
 
 Use `doorLockDevice` as the interim device type:
+
 - `LockState.LOCKED` = door fully closed (confirmed by close contact)
 - `LockState.UNLOCKED` = door fully open (confirmed by open contact)
 - `LockState.NOT_FULLY_LOCKED` = door in motion or in an intermediate position
@@ -200,6 +201,7 @@ Timeout detection: if neither contact fires within `openingTimeMs` / `closingTim
 **Future upgrade path:** When Matter introduces a native garage door device type, the Matter mapping layer can be swapped out without changing the Homematic-side logic.
 
 **Relationship to other items:**
+
 - Replaces HM-4 (HmIP-SWDO simple mode) and HM-7 (HmIP-MOD-HO raw channel) once implemented
 - HM-4 / HM-7 can remain as lightweight fallbacks for setups without contact sensors
 
@@ -261,6 +263,118 @@ The CCU supports user-defined programs (Homematic scripts / automations). Expose
 
 - Should inactive/disabled programs be filtered out or exposed as disabled endpoints?
 - Should program execution errors (ReGa timeout, CCU unreachable) surface as a Matter fault state?
+
+---
+
+### Priority: Medium (post-2021 additions)
+
+#### HM-12 — Door Lock Drive – pro (HmIP-DLD-pro)
+
+**Effort: Medium** (channel type research + LOCK cluster wiring)  
+**Status: Device available** (released April 2026)
+
+The second-generation smart door lock replaces the original HmIP-DLD. It adds vibration and position sensors, auto-relock, whisper mode, and tamper detection, and is designed to integrate with the new alarm system. This is a natural Matter `doorLockDevice` mapping.
+
+The original HmIP-DLD likely uses `KEYMATIC` or a similar lock channel type (there is already a `keymatic.ts` channel mapper in the registry). The DLD-pro may reuse the same channel type or introduce a new one — needs verification on real hardware.
+
+**Matter mapping:**
+
+- `LockState.LOCKED` → door locked
+- `LockState.UNLOCKED` → door unlocked (latch retracted)
+- `LockControl` cluster `LockDoor` / `UnlockDoor` commands → send corresponding CCU SET
+
+**Implementation notes:**
+
+1. Check whether `KEYMATIC` channel type already produces a usable endpoint for DLD-pro on real hardware
+2. If the existing channel mapper is sufficient, only a device mapper for battery/mains classification override may be needed (DLD-pro is mains-powered via the door contact)
+3. If a different channel type is introduced, add a new `doorlock.ts` channel mapper
+
+---
+
+#### HM-9 and HM-12 relationship
+
+HM-12 (Door Lock Drive pro) and HM-9 (Garage door) both use `doorLockDevice` as their Matter device type but represent semantically different things. Implement them independently. HM-9 uses `doorLockDevice` as a workaround for the missing garage door type; HM-12 uses it as the canonical mapping for an actual door lock.
+
+---
+
+### Priority: Low (post-2021 additions)
+
+#### HM-10 — HmIP-WSM Watering Actuator
+
+**Effort: Low–Medium**  
+**Status: Device available** (released July 2025)
+
+Battery-powered garden watering actuator (IP44) that screws onto a standard outdoor tap. On/off valve control + integrated flow measurement (2–45 l/min). Technical data lists the function type as "Switch actuator", so the valve likely already maps via the standard SWITCH channel mapper. The new capability is the flow measurement datapoint.
+
+**Matter mapping:**
+
+- On/off valve → `onOffPlugin` endpoint (likely already works via SWITCH channel mapper)
+- Flow measurement → second endpoint: `flowSensor` device type + `FlowMeasurement` cluster  
+  (`measuredValue` in 0.1 ml/s units = `flowLitersPerMin × 100 / 6`)
+
+**Implementation notes:**
+
+- Verify that the valve channel appears as `SWITCH_TRANSMITTER / SWITCH_VIRTUAL_RECEIVER` on the CCU — if so, no device mapper is needed for basic on/off
+- The flow datapoint name is unknown — check CCU channel listing or paramsets.json for the datapoint key (likely something like `FLOW_VALUE` or `METER_VALUE`)
+- A device mapper is only needed if the flow measurement endpoint cannot be derived automatically from the channel type
+
+---
+
+#### HM-11 — Glass Wall Thermostat with CO2 Sensor
+
+**Effort: Low–Medium**  
+**Status: Device available** (released June 2025)
+
+Part of the new Homematic IP glass series. Combines thermostat, humidity, and CO2 measurement in one device. The thermostat and humidity parts are covered by HM-1 (same `HEATING_CLIMATECONTROL_TRANSCEIVER` channel type). The CO2 sensor adds a new datapoint that currently has no endpoint mapping.
+
+**Matter mapping:**
+
+- Thermostat endpoint → same as HM-1 (HEATING_CLIMATECONTROL_TRANSCEIVER)
+- Humidity endpoint → same as HM-1
+- CO2 endpoint → `airQualitySensor` device type + `CarbonDioxideConcentrationMeasurement` cluster  
+  (datapoint name likely `CO2_CONCENTRATION` or `CO2` — verify on real hardware)
+
+**Implementation notes:**
+
+- Implement HM-1 first; then this item is a small additive step on top
+- The device type string for the glass thermostat CO2 variant needs to be confirmed on real hardware to register the correct device mapper key
+
+---
+
+#### HM-13 — RGBWW Smart Bulbs (E27 / GU10)
+
+**Effort: Medium** (depends on channel type)  
+**Status: Not yet available** (planned Q3 2026)
+
+First-party Homematic IP RGBWW LED bulbs for E27 and GU10 sockets. Announced at Light + Building 2026. Will introduce a new RF device with color + brightness control.
+
+**Matter mapping:** `extendedColorLight` + `ColorControl` cluster (hue, saturation, color temperature, brightness)
+
+**Implementation notes:**
+
+- Channel type is unknown until devices ship — likely a new type or the same COLOR type as HM-LC-RGBW-WM
+- If the channel type matches HM-LC-RGBW-WM, the device mapper from HM-5 may cover these bulbs with no extra work
+- Revisit when the device ships and the CCU firmware adds support
+
+---
+
+#### HM-14 — New eTRV generation compatibility check
+
+**Effort: Very Low** (verification only, likely no code change)
+
+Several new eTRV form factors were released 2024–2025:
+
+| Model | Name |
+| --- | --- |
+| HmIP-eTRV-E | Radiator Thermostat – Evo (white / silver / anthracite) |
+| HmIP-eTRV-pure | Radiator Thermostat – pure |
+| HmIP-eTRV-basic | Radiator Thermostat – basic |
+| HmIP-eTRV-compact-2 | Radiator Thermostat – compact 2 |
+| HmIP-eTRV-compact-plus | Radiator Thermostat – compact plus |
+
+All use the same M30×1.5 valve thread and are expected to expose `HEATING_CLIMATECONTROL_TRANSCEIVER` on their functional channel — the same type already handled by the existing channel mapper. If confirmed on real hardware, no code changes are needed.
+
+**Also in scope:** Wired variants of already-handled RF types — HmIPW-DRBL4 (blind actuator), HmIPW-DRD3 (dimmer), HmIPW-WTH-A (wall thermostat with humidity), HmIPW-SCTHD (temperature + humidity sensor), HmIPW-SMI55 (motion + illuminance sensor), HmIPW-FALMOT-C12 (floor heating actuator). These are all expected to use the same channel types as their RF counterparts and require no new mappers — verify on real hardware when available.
 
 ---
 
