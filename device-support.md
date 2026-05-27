@@ -4,92 +4,100 @@ Alphabetical overview of all devices known to this plugin. Use the **Real-world 
 
 ## Legend
 
-| Symbol | Meaning |
-| --- | --- |
-| ✅ | Fully supported / confirmed |
-| ⚠️ | Partially supported — see Notes for known limitations |
-| 🔬 | Expected to work (wired variant or new-gen); not yet verified on real hardware |
-| 🔲 | Not yet supported — roadmap item planned |
+| Symbol | Meaning                                                                        |
+| ------ | ------------------------------------------------------------------------------ |
+| ✅     | Fully supported / confirmed                                                    |
+| ⚠️     | Partially supported — see Notes for known limitations                          |
+| 🔬     | Expected to work (wired variant or new-gen); not yet verified on real hardware |
+| 🔲     | Not yet supported — roadmap item planned                                       |
 
 A ✅ in **Device Mapper** means a dedicated file exists under `src/ccu/device-mapper/`.  
+A ✅ in **Should Work** means the existing channel mappers are expected to produce a useful Matter device for this hardware.  
+A ✅ in **Apple Home** means the resulting Matter device type is well-supported and visible in Apple Home (iOS 16+).  
 Leave **Real-world Tested** empty until you verify the device end-to-end, then mark ✅.
 
 ---
 
 ## Device table
 
-| Device | Description | Status | Device Mapper | Real-world Tested | Notes |
-| --- | --- | :---: | :---: | :---: | --- |
-| hb-lc-bl1pbu-fm | Homebrew blind actuator, flush-mount | ✅ | | | Alias for HM-LC-Bl1PBU-FM; BLIND channel mapper |
-| hb-lc-sw1pbu-fm | Homebrew 1-channel switch, flush-mount | ✅ | | | SWITCH channel mapper |
-| hb-lc-sw2-fm | Homebrew 2-channel switch, flush-mount | ✅ | | | SWITCH channel mapper |
-| hb-lc-sw2pbu-fm | Homebrew 2-channel switch + button, flush-mount | ✅ | | | SWITCH channel mapper |
-| hb-uni-dmx-master | Homebrew DMX master actuator | ✅ | | | ch1 SWITCH + ch2–3 KEY-like; standard channel types |
-| hb-uni-rgb-led-ctrl | Homebrew RGBW LED controller | 🔲 | | | Alias for HM-LC-RGBW-WM; roadmap HM-5 |
-| hb-uni-sen-press-sc | Homebrew pressure sensor as contact | ✅ | | | SHUTTER_CONTACT on ch2 → contactSensor |
-| hb-uni-sen-temp-ds18b20 | Homebrew DS18B20 temperature probe | ✅ | | | Multi-probe TEMPERATURE channels; each maps independently |
-| hb-uni-sen-temp-ir | Homebrew IR temperature sensor | ✅ | | | TEMPERATURE channel mapper |
-| hb-uni-sen-wea | Homebrew weather sensor | ✅ | | | WEATHER channel mapper; minor: uses LUX datapoint, mapper expects BRIGHTNESS |
-| hb-uni-senact-4-4-rc | Homebrew 4-sensor / 4-actuator (remote-control variant) | ✅ | | | SWITCH + KEY channels |
-| hb-uni-senact-4-4-sc | Homebrew 4-sensor / 4-actuator (contact variant) | ✅ | | | SWITCH + SHUTTER_CONTACT channels |
-| hb-uni-senact-8-8 | Homebrew 8-sensor / 8-actuator | ✅ | | | SWITCH + SHUTTER_CONTACT channels |
-| HM-CC-RT-DN | Classic radiator thermostat (BidCos-RF) | ✅ | | | THERMALCONTROL_TRANSMIT → thermostatDevice |
-| HM-CC-VG-1 | Virtual thermostat group | ⚠️ | | | Roadmap HM-3; may already work via VirtualDevices — needs verification |
-| HM-LC-RGBW-WM | RGBW LED controller | 🔲 | | | Roadmap HM-5; COLOR channel type not yet mapped |
-| HM-SEC-SIR-WM | Siren / alarm panel | 🔲 | | | Roadmap HM-6; ARMSTATE channel not yet correctly mapped |
-| HmIP-BBL | Blind actuator for brand switches | ✅ | | | BLIND_TRANSMITTER → BLIND_VIRTUAL_RECEIVER |
-| HmIP-BDT | Dimmer actuator | ✅ | | | DIMMER_TRANSMITTER → DIMMER_VIRTUAL_RECEIVER |
-| HmIP-BROLL | Roller shutter actuator | ✅ | | | BLIND_TRANSMITTER → BLIND_VIRTUAL_RECEIVER |
-| HmIP-BSL | Switch + LED indicator | ✅ | | | KEY + SWITCH channels map independently |
-| HmIP-BSM | Brand switch and meter | ✅ | ✅ | | Mains-powered; power measurement; device mapper is proof-of-concept |
-| HmIP-BWTH | Blind actuator + wall thermostat combo | ✅ | | | BLIND + THERMALCONTROL_TRANSMIT → two independent endpoints |
-| HmIP-DLD-pro | Door lock drive – pro (smart lock, 2026) | 🔲 | | | Roadmap HM-12; ships April 2026; maps to doorLockDevice |
-| HmIP-DRBLI4 | 4-channel blind actuator | ✅ | | | BLIND_TRANSMITTER → BLIND_VIRTUAL_RECEIVER |
-| HmIP-DRSI1 | 1-channel switch actuator | ✅ | | | SWITCH_TRANSMITTER → SWITCH_VIRTUAL_RECEIVER |
-| HmIP-DRSI4 | 4-channel switch actuator | ✅ | | | SWITCH_TRANSMITTER → SWITCH_VIRTUAL_RECEIVER |
-| HmIP-eTRV | Radiator thermostat (original) | ✅ | | | HEATING_CLIMATECONTROL_TRANSCEIVER |
-| HmIP-eTRV-2 | Radiator thermostat v2 | ✅ | | | HEATING_CLIMATECONTROL_TRANSCEIVER |
-| HmIP-eTRV-B | Radiator thermostat compact | ✅ | | | HEATING_CLIMATECONTROL_TRANSCEIVER |
-| HmIP-eTRV-C | Radiator thermostat compact 2 | ✅ | | | HEATING_CLIMATECONTROL_TRANSCEIVER |
-| HmIP-eTRV-E | Radiator thermostat – Evo (2024) | 🔬 | | | Roadmap HM-14; expected to use same channel type as eTRV-2 |
-| HmIP-FALMOT-C12 | 12-channel floor heating motorized actuator | 🔬 | | | Thermostat zones via VirtualDevices; verify channel type on real hardware |
-| HmIP-FROLL | Roller shutter actuator, flush-mount | ✅ | | | BLIND_TRANSMITTER → BLIND_VIRTUAL_RECEIVER |
-| HmIP-FSM | Full switch and meter | ✅ | | | SWITCH + power meter; mains-powered |
-| HmIP-FSM16 | Full switch and meter, 16 A | ✅ | | | SWITCH + power meter; mains-powered |
-| HmIP-HEATING | Virtual thermostat (VirtualDevices) | ✅ | | | HEATING_CLIMATECONTROL_TRANSCEIVER; channel 5 (internal) is skipped |
-| HmIP-MOD-HO | Garage door / gate motor | 🔲 | | | Roadmap HM-7; DOOR_STATE / DOOR_COMMAND channel type unknown — verify first |
-| HmIP-MOD-OC8 | 8-channel open-collector relay | ✅ | | | SWITCH_TRANSMITTER → SWITCH_VIRTUAL_RECEIVER |
-| HmIP-MOD-TM | Gate motor (alias for MOD-HO) | 🔲 | | | Roadmap HM-7 |
-| HmIP-PS | Plug switch | ✅ | | | SWITCH channel mapper; mains-powered |
-| HmIP-PSM | Plug switch and meter | ✅ | | | SWITCH + power meter; mains-powered |
-| HmIP-SCI | Contact interface (door / window) | ✅ | | | SHUTTER_CONTACT → contactSensor |
-| HmIP-SMI | Motion detector, indoor | ✅ | | | MOTION_DETECTOR → occupancySensor |
-| HmIP-SMI55 | Motion detector, indoor 55 mm | ✅ | | | MOTION_DETECTOR → occupancySensor |
-| HmIP-SMOKE | Smoke detector | ✅ | | | SMOKE_DETECTOR → smokeCoAlarmDevice |
-| HmIP-SRH | Rotary handle sensor | ✅ | | | ROTARY_HANDLE_SENSOR → tiltSensor |
-| HmIP-STH | Temperature + humidity sensor | ⚠️ | | | Roadmap HM-1; thermostat endpoint works; humidity endpoint missing |
-| HmIP-STHD | Temperature + humidity sensor with display | ⚠️ | | | Roadmap HM-1; thermostat endpoint works; humidity endpoint missing |
-| HmIP-STE2-PCB | Temperature + humidity sensor, PCB variant | ✅ | | | Each TEMPERATURE_HUMIDITY_TRANSMITTER channel maps independently |
-| HmIP-STE2+ | Temperature + humidity multi-probe | ✅ | | | Each TEMPERATURE_HUMIDITY_TRANSMITTER channel maps independently |
-| HmIP-SWDM | Window / door contact | ✅ | | | SHUTTER_CONTACT → contactSensor |
-| HmIP-SWDO | Motorized window / door opener | ⚠️ | | | Works as contactSensor by default; roadmap HM-4 for optional garage door mode |
-| HmIP-SWSD | Smoke and water detector | ✅ | | | SMOKE_DETECTOR + ALARMSTATE → smokeCoAlarm + waterLeakDetector |
-| HmIP-SWO-B | Weather and environment sensor | ✅ | | | WEATHER channel mapper; ALARMSTATE for rain / storm alerts |
-| HmIP-WRC2 | 2-button wall remote | ✅ | | | KEY_TRANSCEIVER → genericSwitch |
-| HmIP-WRC6 | 6-button wall remote | ✅ | | | KEY_TRANSCEIVER → genericSwitch |
-| HmIP-WSM | Watering actuator (2025) | 🔲 | | | Roadmap HM-10; valve likely already works as onOff switch; flow measurement endpoint missing |
-| HmIP-WTH | Wall thermostat with humidity | ⚠️ | | | Roadmap HM-1; thermostat endpoint works; humidity endpoint missing |
-| HmIP-WTH-2 | Wall thermostat with humidity v2 | ⚠️ | | | Roadmap HM-1; thermostat endpoint works; humidity endpoint missing |
-| HmIP-WTH-B | Wall thermostat with humidity (brand switch) | ⚠️ | | | Roadmap HM-1; thermostat endpoint works; humidity endpoint missing |
-| HmIP-WTH-CO2 | Glass wall thermostat with CO2 sensor (2025) | 🔲 | | | Roadmap HM-11; CO2 endpoint missing; implement HM-1 first |
-| HmIPW-DRBL4 | Wired 4-channel blind actuator | 🔬 | | | Roadmap HM-14; expected to use BLIND channel type |
-| HmIPW-DRD3 | Wired 3-channel dimmer | 🔬 | | | Roadmap HM-14; expected to use DIMMER channel type |
-| HmIPW-FALMOT-C12 | Wired 12-channel floor heating actuator | 🔬 | | | Roadmap HM-14; verify channel type on real hardware |
-| HmIPW-SCTHD | Wired temperature + humidity sensor | 🔬 | | | Roadmap HM-14; verify channel type on real hardware |
-| HmIPW-SMI55 | Wired motion + illuminance sensor | 🔬 | | | Roadmap HM-14; verify channel type on real hardware |
-| HmIPW-WTH-A | Wired wall thermostat with humidity | ⚠️ | | | Roadmap HM-1 + HM-14; thermostat likely works; humidity endpoint missing |
-| HmW-IO-12-SW7-DR | Classic wired 12-input / 7-switch DIN rail module | ✅ | | | Each channel maps independently |
-| HmW-Sen-SC-12 | Classic wired 12-channel contact sensor | ✅ | | | Each channel maps independently |
+| Device                  | Description                                             | Status | Device Mapper | Real-world Tested | Should Work | Apple Home | Notes                                                                                        |
+| ----------------------- | ------------------------------------------------------- | :----: | :-----------: | :---------------: | :---------: | :--------: | -------------------------------------------------------------------------------------------- |
+| hb-lc-bl1pbu-fm         | Homebrew blind actuator, flush-mount                    |   ✅   |               |                   |     ✅      |     ✅     | Alias for HM-LC-Bl1PBU-FM; BLIND channel mapper                                              |
+| hb-lc-sw1pbu-fm         | Homebrew 1-channel switch, flush-mount                  |   ✅   |               |                   |     ✅      |     ✅     | SWITCH channel mapper                                                                        |
+| hb-lc-sw2-fm            | Homebrew 2-channel switch, flush-mount                  |   ✅   |               |                   |     ✅      |     ✅     | SWITCH channel mapper                                                                        |
+| hb-lc-sw2pbu-fm         | Homebrew 2-channel switch + button, flush-mount         |   ✅   |               |                   |     ✅      |     ✅     | SWITCH channel mapper                                                                        |
+| hb-uni-dmx-master       | Homebrew DMX master actuator                            |   ✅   |               |                   |     ✅      |     ✅     | ch1 SWITCH + ch2–3 KEY-like; standard channel types                                          |
+| hb-uni-rgb-led-ctrl     | Homebrew RGBW LED controller                            |   🔲   |               |                   |             |            | Alias for HM-LC-RGBW-WM; roadmap HM-5                                                        |
+| hb-uni-sen-press-sc     | Homebrew pressure sensor as contact                     |   ✅   |               |                   |     ✅      |     ✅     | SHUTTER_CONTACT on ch2 → contactSensor                                                       |
+| hb-uni-sen-temp-ds18b20 | Homebrew DS18B20 temperature probe                      |   ✅   |               |                   |     ✅      |     ✅     | Multi-probe TEMPERATURE channels; each maps independently                                    |
+| hb-uni-sen-temp-ir      | Homebrew IR temperature sensor                          |   ✅   |               |                   |     ✅      |     ✅     | TEMPERATURE channel mapper                                                                   |
+| hb-uni-sen-wea          | Homebrew weather sensor                                 |   ✅   |               |                   |     ✅      |     ✅     | WEATHER channel mapper; minor: uses LUX datapoint, mapper expects BRIGHTNESS                 |
+| hb-uni-senact-4-4-rc    | Homebrew 4-sensor / 4-actuator (remote-control variant) |   ✅   |               |                   |     ✅      |     ✅     | SWITCH + KEY channels                                                                        |
+| hb-uni-senact-4-4-sc    | Homebrew 4-sensor / 4-actuator (contact variant)        |   ✅   |               |                   |     ✅      |     ✅     | SWITCH + SHUTTER_CONTACT channels                                                            |
+| hb-uni-senact-8-8       | Homebrew 8-sensor / 8-actuator                          |   ✅   |               |                   |     ✅      |     ✅     | SWITCH + SHUTTER_CONTACT channels                                                            |
+| HM-CC-RT-DN             | Classic radiator thermostat (BidCos-RF)                 |   ✅   |               |                   |     ✅      |     ✅     | THERMALCONTROL_TRANSMIT → thermostatDevice                                                   |
+| HM-CC-VG-1              | Virtual thermostat group                                |   ⚠️   |               |                   |     ✅      |     ✅     | Roadmap HM-3; may already work via VirtualDevices — needs verification                       |
+| HM-LC-RGBW-WM           | RGBW LED controller                                     |   🔲   |               |                   |             |            | Roadmap HM-5; COLOR channel type not yet mapped                                              |
+| HM-SEC-SIR-WM           | Siren / alarm panel                                     |   🔲   |               |                   |             |            | Roadmap HM-6; ARMSTATE channel not yet correctly mapped                                      |
+| HmIP-BBL                | Blind actuator for brand switches                       |   ✅   |               |                   |     ✅      |     ✅     | BLIND_TRANSMITTER → BLIND_VIRTUAL_RECEIVER                                                   |
+| HmIP-BDT                | Dimmer actuator                                         |   ✅   |               |                   |     ✅      |     ✅     | DIMMER_TRANSMITTER → DIMMER_VIRTUAL_RECEIVER                                                 |
+| HmIP-BROLL              | Roller shutter actuator                                 |   ✅   |               |                   |     ✅      |     ✅     | BLIND_TRANSMITTER → BLIND_VIRTUAL_RECEIVER                                                   |
+| HmIP-BSL                | Switch + LED indicator                                  |   ✅   |               |                   |     ✅      |     ✅     | KEY + SWITCH channels map independently                                                      |
+| HmIP-BSM                | Brand switch and meter                                  |   ✅   |      ✅       |                   |     ✅      |     ✅     | Mains-powered; power measurement; device mapper is proof-of-concept                          |
+| HmIP-BWTH               | Blind actuator + wall thermostat combo                  |   ✅   |               |                   |     ✅      |     ✅     | BLIND + THERMALCONTROL_TRANSMIT → two independent endpoints                                  |
+| HmIP-DLD-pro            | Door lock drive – pro (smart lock, 2026)                |   🔲   |               |                   |             |            | Roadmap HM-12; ships April 2026; maps to doorLockDevice                                      |
+| HmIP-DRBLI4             | 4-channel blind actuator                                |   ✅   |               |                   |     ✅      |     ✅     | BLIND_TRANSMITTER → BLIND_VIRTUAL_RECEIVER                                                   |
+| HmIP-DRSI1              | 1-channel switch actuator                               |   ✅   |               |                   |     ✅      |     ✅     | SWITCH_TRANSMITTER → SWITCH_VIRTUAL_RECEIVER                                                 |
+| HmIP-DRSI4              | 4-channel switch actuator                               |   ✅   |               |                   |     ✅      |     ✅     | SWITCH_TRANSMITTER → SWITCH_VIRTUAL_RECEIVER                                                 |
+| HmIP-eTRV               | Radiator thermostat (original)                          |   ✅   |               |                   |     ✅      |     ✅     | HEATING_CLIMATECONTROL_TRANSCEIVER                                                           |
+| HmIP-eTRV-2             | Radiator thermostat v2                                  |   ✅   |               |                   |     ✅      |     ✅     | HEATING_CLIMATECONTROL_TRANSCEIVER                                                           |
+| HmIP-eTRV-B             | Radiator thermostat compact                             |   ✅   |               |                   |     ✅      |     ✅     | HEATING_CLIMATECONTROL_TRANSCEIVER                                                           |
+| HmIP-eTRV-C             | Radiator thermostat compact 2                           |   ✅   |               |                   |     ✅      |     ✅     | HEATING_CLIMATECONTROL_TRANSCEIVER                                                           |
+| HmIP-eTRV-E             | Radiator thermostat – Evo (2024)                        |   🔬   |               |                   |     ✅      |     ✅     | Roadmap HM-14; expected to use same channel type as eTRV-2                                   |
+| HmIP-FALMOT-C12         | 12-channel floor heating motorized actuator             |   🔬   |               |                   |     ✅      |     ✅     | Thermostat zones via VirtualDevices; verify channel type on real hardware                    |
+| HmIP-FROLL              | Roller shutter actuator, flush-mount                    |   ✅   |               |                   |     ✅      |     ✅     | BLIND_TRANSMITTER → BLIND_VIRTUAL_RECEIVER                                                   |
+| HmIP-FSM                | Full switch and meter                                   |   ✅   |               |                   |     ✅      |     ✅     | SWITCH + power meter; mains-powered                                                          |
+| HmIP-FSM16              | Full switch and meter, 16 A                             |   ✅   |               |                   |     ✅      |     ✅     | SWITCH + power meter; mains-powered                                                          |
+| HmIP-HEATING            | Virtual thermostat (VirtualDevices)                     |   ✅   |               |                   |     ✅      |     ✅     | HEATING_CLIMATECONTROL_TRANSCEIVER; channel 5 (internal) is skipped                          |
+| HmIP-MOD-HO             | Garage door / gate motor                                |   🔲   |               |                   |             |            | Roadmap HM-7; DOOR_STATE / DOOR_COMMAND channel type unknown — verify first                  |
+| HmIP-MOD-OC8            | 8-channel open-collector relay                          |   ✅   |               |                   |     ✅      |     ✅     | SWITCH_TRANSMITTER → SWITCH_VIRTUAL_RECEIVER                                                 |
+| HmIP-MOD-TM             | Gate motor (alias for MOD-HO)                           |   🔲   |               |                   |             |            | Roadmap HM-7                                                                                 |
+| HmIP-PS                 | Plug switch                                             |   ✅   |               |                   |     ✅      |     ✅     | SWITCH channel mapper; mains-powered                                                         |
+| HmIP-PSM                | Plug switch and meter                                   |   ✅   |               |                   |     ✅      |     ✅     | SWITCH + power meter; mains-powered                                                          |
+| HmIP-SCI                | Contact interface (door / window)                       |   ✅   |               |                   |     ✅      |     ✅     | SHUTTER_CONTACT → contactSensor                                                              |
+| HmIP-SMI                | Motion detector, indoor                                 |   ✅   |               |                   |     ✅      |     ✅     | MOTION_DETECTOR → occupancySensor                                                            |
+| HmIP-SMI55              | Motion detector, indoor 55 mm                           |   ✅   |               |                   |     ✅      |     ✅     | MOTION_DETECTOR → occupancySensor                                                            |
+| HmIP-SMOKE              | Smoke detector                                          |   ✅   |               |                   |     ✅      |     ✅     | SMOKE_DETECTOR → smokeCoAlarmDevice                                                          |
+| HmIP-SPI                | Presence sensor (360°)                                  |   🔬   |               |                   |     ✅      |     ✅     | PRESENCE_DETECTOR channel type; likely same mapper as MOTION_DETECTOR → occupancySensor      |
+| HmIP-SRH                | Rotary handle sensor                                    |   ✅   |               |                   |     ✅      |     ✅     | ROTARY_HANDLE_SENSOR → contactSensor (closed=true, tilted/open=false)                        |
+| HmIP-STH                | Temperature + humidity sensor                           |   ⚠️   |               |                   |     ✅      |     ✅     | Roadmap HM-1; thermostat endpoint works; humidity endpoint missing                           |
+| HmIP-STHD               | Temperature + humidity sensor with display              |   ⚠️   |               |                   |     ✅      |     ✅     | Roadmap HM-1; thermostat endpoint works; humidity endpoint missing                           |
+| HmIP-STE2-PCB           | Temperature + humidity sensor, PCB variant              |   ✅   |               |                   |     ✅      |     ✅     | Each TEMPERATURE_HUMIDITY_TRANSMITTER channel maps independently                             |
+| HmIP-STE2+              | Temperature + humidity multi-probe                      |   ✅   |               |                   |     ✅      |     ✅     | Each TEMPERATURE_HUMIDITY_TRANSMITTER channel maps independently                             |
+| HmIP-SWDM               | Window / door contact                                   |   ✅   |               |                   |     ✅      |     ✅     | SHUTTER_CONTACT → contactSensor                                                              |
+| HmIP-SWDO               | Motorized window / door opener                          |   ⚠️   |               |                   |     ✅      |     ✅     | Works as contactSensor by default; roadmap HM-4 for optional garage door mode                |
+| HmIP-SWSD               | Smoke and water detector                                |   ✅   |               |                   |     ✅      |     ✅     | SMOKE_DETECTOR + ALARMSTATE → smokeCoAlarm + waterLeakDetector                               |
+| HmIP-SWO-B              | Weather and environment sensor                          |   ✅   |               |                   |     ✅      |     ✅     | WEATHER channel mapper; ALARMSTATE for rain / storm alerts                                   |
+| HmIP-WRC2               | 2-button wall remote                                    |   ✅   |               |                   |     ✅      |     ✅     | KEY_TRANSCEIVER → genericSwitch                                                              |
+| HmIP-WRC6               | 6-button wall remote                                    |   ✅   |               |                   |     ✅      |     ✅     | KEY_TRANSCEIVER → genericSwitch                                                              |
+| HmIP-WSM                | Watering actuator (2025)                                |   🔲   |               |                   |             |            | Roadmap HM-10; valve likely already works as onOff switch; flow measurement endpoint missing |
+| HmIP-WTH                | Wall thermostat with humidity                           |   ⚠️   |               |                   |     ✅      |     ✅     | Roadmap HM-1; thermostat endpoint works; humidity endpoint missing                           |
+| HmIP-WTH-2              | Wall thermostat with humidity v2                        |   ⚠️   |               |                   |     ✅      |     ✅     | Roadmap HM-1; thermostat endpoint works; humidity endpoint missing                           |
+| HmIP-WTH-B              | Wall thermostat with humidity (brand switch)            |   ⚠️   |               |                   |     ✅      |     ✅     | Roadmap HM-1; thermostat endpoint works; humidity endpoint missing                           |
+| HmIP-WTH-CO2            | Glass wall thermostat with CO2 sensor (2025)            |   🔲   |               |                   |             |            | Roadmap HM-11; CO2 endpoint missing; implement HM-1 first                                    |
+| HmIPW-BRC2              | Wired 2-button key interface                            |   🔬   |               |                   |     ✅      |     ✅     | Expected to use KEY channel type → genericSwitch; verify on real hardware                    |
+| HmIPW-DRI16             | Wired 16-channel digital input module                   |   🔬   |               |                   |     ✅      |     ✅     | Each channel likely SHUTTER_CONTACT → contactSensor; verify channel type                     |
+| HmIPW-DRI32             | Wired 32-channel digital input module                   |   🔬   |               |                   |     ✅      |     ✅     | Each channel likely SHUTTER_CONTACT → contactSensor; verify channel type                     |
+| HmIPW-DRBL4             | Wired 4-channel blind actuator                          |   🔬   |               |                   |     ✅      |     ✅     | Roadmap HM-14; expected to use BLIND channel type                                            |
+| HmIPW-DRD3              | Wired 3-channel dimmer                                  |   🔬   |               |                   |     ✅      |     ✅     | Roadmap HM-14; expected to use DIMMER channel type                                           |
+| HmIPW-DRS4              | Wired 4-channel switch actuator                         |   🔬   |               |                   |     ✅      |     ✅     | Expected to use SWITCH channel type; verify channel type on real hardware                    |
+| HmIPW-DRS8              | Wired 8-channel switch actuator                         |   🔬   |               |                   |     ✅      |     ✅     | Expected to use SWITCH channel type; verify channel type on real hardware                    |
+| HmIPW-FALMOT-C12        | Wired 12-channel floor heating actuator                 |   🔬   |               |                   |     ✅      |     ✅     | Roadmap HM-14; verify channel type on real hardware                                          |
+| HmIPW-SCTHD             | Wired temperature + humidity sensor                     |   🔬   |               |                   |     ✅      |     ✅     | Roadmap HM-14; verify channel type on real hardware                                          |
+| HmIPW-SMI55             | Wired motion + illuminance sensor                       |   🔬   |               |                   |     ✅      |     ✅     | Roadmap HM-14; verify channel type on real hardware                                          |
+| HmIPW-WTH-A             | Wired wall thermostat with humidity                     |   ⚠️   |               |                   |     ✅      |     ✅     | Roadmap HM-1 + HM-14; thermostat likely works; humidity endpoint missing                     |
+| HmW-IO-12-SW7-DR        | Classic wired 12-input / 7-switch DIN rail module       |   ✅   |               |                   |     ✅      |     ✅     | Each channel maps independently                                                              |
+| HmW-Sen-SC-12           | Classic wired 12-channel contact sensor                 |   ✅   |               |                   |     ✅      |     ✅     | Each channel maps independently                                                              |
 
 ---
 

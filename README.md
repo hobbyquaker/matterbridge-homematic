@@ -42,6 +42,8 @@ The following Homematic channel types are currently mapped to Matter device type
 
 Battery (`LOW_BAT` / `LOWBAT` / `OPERATING_VOLTAGE`) and availability (`UNREACH`) are handled for all device types on channel `:0`.
 
+For a full alphabetical list of known devices with support status and Apple Home compatibility, see [device-support.md](device-support.md). For planned features and future device mapper work, see [ROADMAP.md](ROADMAP.md).
+
 ## Installation
 
 1. Install Matterbridge and this plugin via npm or the Matterbridge frontend
