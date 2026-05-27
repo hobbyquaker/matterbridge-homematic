@@ -107,7 +107,7 @@ Rules:
 | `serialNumber`| `<interfaceName>:<shortType>:<channelAddress>`                   | `BidCos-RF:CONTACT:OEQ0854602:1`     |
 | `model`       | `channel.deviceType` if available, otherwise `channel.type`     | `HmIP-BSM`                           |
 
-Short type labels are defined in `CHANNEL_TYPE_LABEL` in `device-mapper.ts` (e.g. `SHUTTER_CONTACT` → `CONTACT`).
+Short type labels are defined in `CHANNEL_TYPE_LABEL` in `mapper-utils.ts` (e.g. `SHUTTER_CONTACT` → `CONTACT`).
 The endpoint id must remain stable across restarts. Never change the id format for an existing channel type.
 
 ## Power source classification
@@ -136,15 +136,49 @@ Overrides in `BATTERY_VOLTAGE_RANGES` (longest-prefix-first, first match wins):
 
 Add a new entry when a device uses a battery chemistry that deviates from the 2×AA default.
 
+## Source file structure for device mapping
+
+The mapping layer is split across several directories:
+
+| Path | Purpose |
+| ---- | ------- |
+| `src/ccu/device-mapper.ts` | Public dispatcher. Exports `createEndpointForChannel`, `getDeviceMapper`, `resolveChannelsForMatter`, `inferSwitchMatterTypeFromName`, `isSupportedChannelType`, `channelTypeLabel`, and `SUPPORTED_CHANNEL_TYPES`. |
+| `src/ccu/mapper-utils.ts` | Shared endpoint-building helpers: `buildEndpointId`, `buildSerialNumber`, `buildDisplayName`, `buildModel`, `finalizeEndpoint`, `channelTypeLabel`. |
+| `src/ccu/types.ts` | All shared CCU types including `CcuChannelInfo`, `ChannelMappingOptions`, `ChannelMapper`, `DeviceMapper`, `SUPPORTED_CHANNEL_TYPES`. |
+| `src/ccu/channel-mapper/<type>.ts` | One file per channel type (e.g. `shutter-contact.ts`). Each exports a `mapChannel: ChannelMapper` function. |
+| `src/ccu/channel-mapper/index.ts` | Registry `CHANNEL_MAPPERS` keyed by sanitized channel type + `channelTypeToKey` helper. |
+| `src/ccu/device-mapper/<model>.ts` | One file per device model (e.g. `hmip-bsm.ts`). Each exports a `mapDevice: DeviceMapper` function. |
+| `src/ccu/device-mapper/index.ts` | Registry `DEVICE_MAPPERS` keyed by sanitized device type + `deviceTypeToKey` helper. |
+
+### Key naming rules
+
+- **Channel type key**: `channelType.toLowerCase().replace(/_/g, '-')` — e.g. `SHUTTER_CONTACT` → `shutter-contact`
+- **Device type key**: `deviceType.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')` — e.g. `HmIP-BSM` → `hmip-bsm`, `HmIP-STE2+` → `hmip-ste2`
+
 ## Adding support for a new channel type
 
-1. Add the channel type string to `SUPPORTED_CHANNEL_TYPES` in `device-mapper.ts`.
-2. Add the `SupportedChannelType` union (it is derived automatically).
-3. Add a `case` in `createEndpointForChannel` with the correct Matter device type combination, Basic Information call, and default cluster servers.
-4. Call `finalizeEndpoint(ep, { ...options, batteryPowered: channel.batteryPowered })` at the end of the case.
-5. If the type abbreviates well, add an entry to `CHANNEL_TYPE_LABEL`.
-6. Update the `SUPPORTED_CHANNEL_TYPES` list in this file and in the README.
-7. Add unit tests in `test/` covering the new case in `createEndpointForChannel`.
+1. Add the channel type string to `SUPPORTED_CHANNEL_TYPES` in `src/ccu/types.ts`.
+2. Create `src/ccu/channel-mapper/<sanitized-key>.ts` exporting `mapChannel: ChannelMapper`:
+   - Call `buildEndpointId`, `buildDisplayName`, `buildSerialNumber`, `buildModel` from `mapper-utils.ts`.
+   - Create a `MatterbridgeEndpoint` with the correct Matter device type(s).
+   - Call `.createDefaultBridgedDeviceBasicInformationClusterServer(...)`.
+   - Add the relevant cluster server(s).
+   - Return `finalizeEndpoint(ep, { ...options, batteryPowered: channel.batteryPowered })`.
+   - If the type name abbreviates well, add an entry to `CHANNEL_TYPE_LABEL` in `mapper-utils.ts`.
+3. Register the new mapper in `src/ccu/channel-mapper/index.ts` under the sanitized key.
+4. Update the supported channel types table in this file and in `README.md`.
+5. Add unit tests in `vitest/` covering the new channel mapper (at minimum: produces a `MatterbridgeEndpoint`).
+
+## Adding support for a new device model (device-level mapper)
+
+Device mappers override the generic per-channel dispatch for specific device models. Use them when a device needs cross-channel logic or must always have a particular power source regardless of heuristics.
+
+1. Create `src/ccu/device-mapper/<sanitized-key>.ts` exporting `mapDevice: DeviceMapper`:
+   - Receives the full array of resolved channels for the device.
+   - Returns `MatterbridgeEndpoint[]` (may be empty, one, or many).
+   - Call the relevant channel mapper(s) from `src/ccu/channel-mapper/` or build endpoints directly.
+2. Register the mapper in `src/ccu/device-mapper/index.ts` under the sanitized device type key.
+3. Add unit tests in `vitest/` verifying `getDeviceMapper('<model>')` returns the mapper and it produces the expected endpoints.
 
 ## RPC event handling conventions
 

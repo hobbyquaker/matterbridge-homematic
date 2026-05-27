@@ -1,51 +1,20 @@
 /**
  * Maps Homematic channel types to Matterbridge endpoint instances.
+ * Dispatches to per-channel-type mappers in `./channel-mapper/` and per-device-type mappers
+ * in `./device-mapper/`. All public exports are preserved for backwards compatibility.
  *
  * @file device-mapper.ts
  */
 
-import {
-  contactSensor,
-  coverDevice,
-  dimmableLight,
-  doorLockDevice,
-  genericSwitch,
-  humiditySensor,
-  lightSensor,
-  MatterbridgeEndpoint,
-  occupancySensor,
-  onOffLight,
-  onOffOutlet,
-  onOffSwitch,
-  smokeCoAlarm,
-  temperatureSensor,
-  thermostatDevice,
-  waterLeakDetector,
-} from 'matterbridge';
+import { MatterbridgeEndpoint } from 'matterbridge';
 
-import { CcuChannelInfo, SwitchMatterType } from './types.js';
+import { CHANNEL_MAPPERS, channelTypeToKey } from './channel-mapper/index.js';
+import { DEVICE_MAPPERS, deviceTypeToKey } from './device-mapper/index.js';
+import { CcuChannelInfo, ChannelMappingOptions, SUPPORTED_CHANNEL_TYPES, SupportedChannelType, SwitchMatterType } from './types.js';
 
-/** Homematic channel types that are mapped to Matter devices by this plugin. */
-export const SUPPORTED_CHANNEL_TYPES = [
-  'ALARMSTATE',
-  'BLIND',
-  'DIMMER',
-  'HEATING_CLIMATECONTROL_TRANSCEIVER',
-  'KEY',
-  'KEYMATIC',
-  'KEY_TRANSCEIVER',
-  'MOTION_DETECTOR',
-  'ROTARY_HANDLE_SENSOR',
-  'SHUTTER_CONTACT',
-  'SMOKE_DETECTOR',
-  'SWITCH',
-  'TEMPERATURE_HUMIDITY_TRANSMITTER',
-  'THERMALCONTROL_TRANSMIT',
-  'WEATHER',
-] as const;
-
-/** Union of the Homematic channel type strings that this plugin supports. */
-export type SupportedChannelType = (typeof SUPPORTED_CHANNEL_TYPES)[number];
+export { channelTypeLabel } from './mapper-utils.js';
+export { SUPPORTED_CHANNEL_TYPES } from './types.js';
+export type { ChannelMappingOptions, SupportedChannelType, SwitchMatterType } from './types.js';
 
 /**
  * HmIP transmitter/virtual-receiver channel type pairs.
@@ -173,11 +142,6 @@ export function resolveChannelsForMatter(allChannels: CcuChannelInfo[]): CcuChan
   return result;
 }
 
-export interface ChannelMappingOptions {
-  switchMatterType?: SwitchMatterType;
-  batteryPowered?: boolean;
-}
-
 /**
  * Infer the best Matter device type for a SWITCH channel from the ReGa channel name.
  * Returns `undefined` when no keyword matches so the caller can fall back to the default ('light').
@@ -194,43 +158,6 @@ export function inferSwitchMatterTypeFromName(name: string | undefined): SwitchM
 }
 
 /**
- * Example function to map a device endpoint with options.
- *
- * @param {MatterbridgeEndpoint} endpoint The Matterbridge endpoint instance to map.
- * @param {object} options Options for mapping the endpoint.
- * @returns {void} Returns nothing.
- */
-function finalizeEndpoint(endpoint: MatterbridgeEndpoint, options: ChannelMappingOptions): MatterbridgeEndpoint {
-  if (options.batteryPowered) {
-    endpoint.createDefaultPowerSourceReplaceableBatteryClusterServer(100);
-  } else {
-    endpoint.createDefaultPowerSourceWiredClusterServer();
-  }
-  return endpoint.addRequiredClusterServers();
-}
-
-/** Short display labels for verbose channel type names used in the serial number column. */
-const CHANNEL_TYPE_LABEL: Partial<Record<SupportedChannelType, string>> = {
-  HEATING_CLIMATECONTROL_TRANSCEIVER: 'HEATING',
-  KEY_TRANSCEIVER: 'KEY',
-  MOTION_DETECTOR: 'MOTION',
-  SHUTTER_CONTACT: 'CONTACT',
-  SMOKE_DETECTOR: 'SMOKE',
-  THERMALCONTROL_TRANSMIT: 'THERMALCONTROL',
-};
-
-/**
- * Return a short human-readable label for a supported channel type.
- * Falls back to the type string itself when no abbreviation is defined.
- *
- * @param {SupportedChannelType} type Canonical channel type.
- * @returns {string} Display label.
- */
-export function channelTypeLabel(type: SupportedChannelType): string {
-  return CHANNEL_TYPE_LABEL[type] ?? type;
-}
-
-/**
  * Return whether a channel type string is handled by this plugin.
  *
  * @param {string} type Raw Homematic channel type.
@@ -241,7 +168,19 @@ export function isSupportedChannelType(type: string): type is SupportedChannelTy
 }
 
 /**
+ * Return the device mapper registered for the given Homematic device type, if any.
+ * The lookup is case-insensitive and sanitizes the device type the same way as file names.
+ *
+ * @param {string} deviceType Raw Homematic device type, e.g. `'HmIP-BSM'`.
+ * @returns {import('./types.js').DeviceMapper | undefined} Registered device mapper or undefined.
+ */
+export function getDeviceMapper(deviceType: string): import('./types.js').DeviceMapper | undefined {
+  return DEVICE_MAPPERS[deviceTypeToKey(deviceType)];
+}
+
+/**
  * Create a configured `MatterbridgeEndpoint` for a supported Homematic channel.
+ * Dispatches to the registered `ChannelMapper` for `channel.type`.
  *
  * @param {CcuChannelInfo & { type: SupportedChannelType }} channel Channel with a supported type.
  * @param {number} vendorId Matter vendor ID from the Matterbridge aggregator.
@@ -249,156 +188,10 @@ export function isSupportedChannelType(type: string): type is SupportedChannelTy
  * @returns {MatterbridgeEndpoint} Fully initialized endpoint ready to register.
  */
 export function createEndpointForChannel(channel: CcuChannelInfo & { type: SupportedChannelType }, vendorId: number, options: ChannelMappingOptions = {}): MatterbridgeEndpoint {
-  const displayName = channel.name ?? channel.address;
-  // Serial format: <interface>:<short-type>:<device>:<channel>
-  // channel.type is always a SupportedChannelType (raw types like BLIND_VIRTUAL_TRANSCEIVER are
-  // already remapped to their canonical name by resolveChannelsForMatter before we get here).
-  const serialNumber = `${channel.interfaceName}:${channelTypeLabel(channel.type)}:${channel.address}`;
-  // Keep endpoint id stable and filesystem-safe independent of serial format.
-  const id = `hm-${channel.address.replace(':', '-')}`;
-  // Use the Homematic device type (e.g. "HmIP-BSM") as the Matter model string shown in the Home app.
-  const model = channel.deviceType ?? channel.type;
-
-  switch (channel.type) {
-    case 'ALARMSTATE':
-      return finalizeEndpoint(
-        new MatterbridgeEndpoint(waterLeakDetector, { id })
-          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
-          // Default: no leak. stateValue=false=no leak, stateValue=true=leak detected.
-          .createDefaultBooleanStateClusterServer(false),
-        { ...options, batteryPowered: channel.batteryPowered },
-      );
-
-    case 'BLIND':
-      if (channel.tiltSupported) {
-        return finalizeEndpoint(
-          new MatterbridgeEndpoint(coverDevice, { id })
-            .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
-            // Default: fully closed position (10000), neutral tilt (5000). Updated from RPC on startup.
-            .createDefaultLiftTiltWindowCoveringClusterServer(10000, 5000),
-          { ...options, batteryPowered: channel.batteryPowered },
-        );
-      }
-      return finalizeEndpoint(
-        new MatterbridgeEndpoint(coverDevice, { id })
-          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
-          // Default: fully closed (10000 = 100.00%). Position is updated from RPC events on startup.
-          .createDefaultWindowCoveringClusterServer(10000),
-        { ...options, batteryPowered: channel.batteryPowered },
-      );
-
-    case 'DIMMER':
-      return finalizeEndpoint(
-        new MatterbridgeEndpoint(dimmableLight, { id }).createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model),
-        { ...options, batteryPowered: channel.batteryPowered },
-      );
-
-    case 'SWITCH': {
-      let ep: MatterbridgeEndpoint;
-      switch (options.switchMatterType ?? 'light') {
-        case 'outlet':
-          ep = new MatterbridgeEndpoint(onOffOutlet, { id }).createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model);
-          break;
-        case 'switch':
-          ep = new MatterbridgeEndpoint(onOffSwitch, { id }).createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model);
-          break;
-        case 'light':
-        default:
-          ep = new MatterbridgeEndpoint(onOffLight, { id }).createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model);
-          break;
-      }
-      if (channel.powerMeterChannelAddress) {
-        // A co-located power meter channel is merged onto this endpoint.
-        ep.createDefaultElectricalPowerMeasurementClusterServer();
-      }
-      return finalizeEndpoint(ep, { ...options, batteryPowered: channel.batteryPowered });
-    }
-
-    case 'SHUTTER_CONTACT':
-      return finalizeEndpoint(
-        new MatterbridgeEndpoint(contactSensor, { id })
-          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
-          .createDefaultBooleanStateClusterServer(true),
-        { ...options, batteryPowered: channel.batteryPowered },
-      );
-
-    case 'ROTARY_HANDLE_SENSOR':
-      return finalizeEndpoint(
-        new MatterbridgeEndpoint(contactSensor, { id })
-          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
-          // Default: closed (0). STATE 0=closed→stateValue=true, 1=tilted or 2=open→stateValue=false.
-          .createDefaultBooleanStateClusterServer(true),
-        { ...options, batteryPowered: channel.batteryPowered },
-      );
-
-    case 'MOTION_DETECTOR':
-      return finalizeEndpoint(
-        new MatterbridgeEndpoint([occupancySensor, lightSensor], { id })
-          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
-          // Default: unoccupied. Updated from RPC events.
-          .createDefaultOccupancySensingClusterServer(false)
-          // Default: null illuminance. Updated from ILLUMINATION RPC events.
-          .createDefaultIlluminanceMeasurementClusterServer(),
-        { ...options, batteryPowered: channel.batteryPowered },
-      );
-
-    case 'TEMPERATURE_HUMIDITY_TRANSMITTER':
-      return finalizeEndpoint(
-        new MatterbridgeEndpoint([temperatureSensor, humiditySensor], { id })
-          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
-          // null defaults: values are updated from RPC events on startup.
-          .createDefaultTemperatureMeasurementClusterServer()
-          .createDefaultRelativeHumidityMeasurementClusterServer(),
-        { ...options, batteryPowered: channel.batteryPowered },
-      );
-
-    case 'WEATHER':
-      return finalizeEndpoint(
-        new MatterbridgeEndpoint([temperatureSensor, humiditySensor, lightSensor], { id })
-          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
-          // Defaults null: values are updated from TEMPERATURE/HUMIDITY/BRIGHTNESS RPC events.
-          .createDefaultTemperatureMeasurementClusterServer()
-          .createDefaultRelativeHumidityMeasurementClusterServer()
-          .createDefaultIlluminanceMeasurementClusterServer(),
-        { ...options, batteryPowered: channel.batteryPowered },
-      );
-
-    case 'SMOKE_DETECTOR':
-      return finalizeEndpoint(
-        new MatterbridgeEndpoint(smokeCoAlarm, { id })
-          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
-          // Default: no alarm. Updated from SMOKE_DETECTOR_ALARM_STATUS RPC events.
-          .createSmokeOnlySmokeCOAlarmClusterServer(),
-        { ...options, batteryPowered: channel.batteryPowered },
-      );
-
-    case 'KEY':
-    case 'KEY_TRANSCEIVER':
-      return finalizeEndpoint(
-        new MatterbridgeEndpoint(genericSwitch, { id })
-          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
-          // Momentary switch: fires initialPress/shortRelease/longPress/longRelease events.
-          .createDefaultMomentarySwitchClusterServer(),
-        { ...options, batteryPowered: channel.batteryPowered },
-      );
-
-    case 'KEYMATIC':
-      return finalizeEndpoint(
-        new MatterbridgeEndpoint(doorLockDevice, { id })
-          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
-          // Default: locked. lockState is updated from RPC events on startup.
-          .createDefaultDoorLockClusterServer(),
-        { ...options, batteryPowered: channel.batteryPowered },
-      );
-
-    case 'HEATING_CLIMATECONTROL_TRANSCEIVER':
-    case 'THERMALCONTROL_TRANSMIT':
-      return finalizeEndpoint(
-        new MatterbridgeEndpoint(thermostatDevice, { id })
-          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
-          // localTemperature=23°C, occupiedHeatingSetpoint=21°C as defaults; updated from RPC on startup.
-          .createDefaultHeatingThermostatClusterServer(23, 21),
-        { ...options, batteryPowered: channel.batteryPowered },
-      );
+  const key = channelTypeToKey(channel.type);
+  const mapper = CHANNEL_MAPPERS[key];
+  if (!mapper) {
+    throw new Error(`No channel mapper registered for type: ${channel.type}`);
   }
+  return mapper(channel, vendorId, options);
 }

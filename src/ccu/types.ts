@@ -4,7 +4,34 @@
  * @file types.ts
  */
 
+import type { MatterbridgeEndpoint } from 'matterbridge';
+
 export type CcuInterfaceName = 'ReGaHSS' | 'BidCos-RF' | 'BidCos-Wired' | 'HmIP-RF' | 'VirtualDevices' | 'CUxD';
+
+/** Homematic channel types that are mapped to Matter devices by this plugin. */
+export const SUPPORTED_CHANNEL_TYPES = [
+  'ALARMSTATE',
+  'BLIND',
+  'DIMMER',
+  'HEATING_CLIMATECONTROL_TRANSCEIVER',
+  'KEY',
+  'KEYMATIC',
+  'KEY_TRANSCEIVER',
+  'MOTION_DETECTOR',
+  'ROTARY_HANDLE_SENSOR',
+  'SHUTTER_CONTACT',
+  'SMOKE_DETECTOR',
+  'SWITCH',
+  'TEMPERATURE_HUMIDITY_TRANSMITTER',
+  'THERMALCONTROL_TRANSMIT',
+  'WEATHER',
+] as const;
+
+/** Union of the Homematic channel type strings that this plugin supports. */
+export type SupportedChannelType = (typeof SUPPORTED_CHANNEL_TYPES)[number];
+
+/** Matter device type selection for Homematic SWITCH channels. */
+export type SwitchMatterType = 'light' | 'outlet' | 'switch';
 
 export interface CcuConnectionConfig {
   host: string;
@@ -125,9 +152,6 @@ export interface CcuChannelInfo {
   powerMeterIsHmIP?: boolean;
 }
 
-/** Matter device type selection for Homematic SWITCH channels. */
-export type SwitchMatterType = 'light' | 'outlet' | 'switch';
-
 /** Per-channel user override stored in plugin config. */
 export interface CcuChannelOverride {
   address: string;
@@ -141,3 +165,24 @@ export interface CcuDiscoveryCache {
   nameMap: Record<string, string>;
   timestamp: number;
 }
+
+/** Options forwarded to channel and device mappers. */
+export interface ChannelMappingOptions {
+  /** Override the Matter device type for a SWITCH channel. Defaults to `'light'`. */
+  switchMatterType?: SwitchMatterType;
+  /** Whether the parent device is battery powered; controls which PowerSource cluster is added. */
+  batteryPowered?: boolean;
+}
+
+/**
+ * Function signature for a channel-type mapper.
+ * Receives a single resolved channel and returns one Matterbridge endpoint.
+ */
+export type ChannelMapper = (channel: CcuChannelInfo, vendorId: number, options: ChannelMappingOptions) => MatterbridgeEndpoint;
+
+/**
+ * Function signature for a device-level mapper.
+ * Receives all resolved channels for one Homematic device and returns zero or more endpoints.
+ * Use this when a specific device type requires a mapping that differs from the generic channel-type fallback.
+ */
+export type DeviceMapper = (channels: CcuChannelInfo[], vendorId: number, options: ChannelMappingOptions) => MatterbridgeEndpoint[];
