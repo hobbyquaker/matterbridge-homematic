@@ -364,13 +364,13 @@ First-party Homematic IP RGBWW LED bulbs for E27 and GU10 sockets. Announced at 
 
 Several new eTRV form factors were released 2024–2025:
 
-| Model | Name |
-| --- | --- |
-| HmIP-eTRV-E | Radiator Thermostat – Evo (white / silver / anthracite) |
-| HmIP-eTRV-pure | Radiator Thermostat – pure |
-| HmIP-eTRV-basic | Radiator Thermostat – basic |
-| HmIP-eTRV-compact-2 | Radiator Thermostat – compact 2 |
-| HmIP-eTRV-compact-plus | Radiator Thermostat – compact plus |
+| Model                  | Name                                                    |
+| ---------------------- | ------------------------------------------------------- |
+| HmIP-eTRV-E            | Radiator Thermostat – Evo (white / silver / anthracite) |
+| HmIP-eTRV-pure         | Radiator Thermostat – pure                              |
+| HmIP-eTRV-basic        | Radiator Thermostat – basic                             |
+| HmIP-eTRV-compact-2    | Radiator Thermostat – compact 2                         |
+| HmIP-eTRV-compact-plus | Radiator Thermostat – compact plus                      |
 
 All use the same M30×1.5 valve thread and are expected to expose `HEATING_CLIMATECONTROL_TRANSCEIVER` on their functional channel — the same type already handled by the existing channel mapper. If confirmed on real hardware, no code changes are needed.
 
