@@ -21,6 +21,8 @@ Use this guide when adding support for new Homematic channel types, modifying de
 
 Consult these sources first when adding support for a new channel type or datapoint.
 
+**Device mapper roadmap**: see [ROADMAP.md](../../../ROADMAP.md) for the planned list of device-level mappers (humidity endpoint for WTH family, HM-CC-VG-1 group thermostat, HM-SEC-SIR-WM alarm panel, RGBW color light, garage door variants) including effort estimates, implementation notes, and a confirmed list of devices that already work without device mappers.
+
 ## CCU interfaces
 
 The plugin connects to the CCU via multiple interfaces. Each is represented by `CcuInterfaceName`:
