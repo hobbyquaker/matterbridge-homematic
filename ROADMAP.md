@@ -181,6 +181,35 @@ RedMatic prior art: `hmip-mod-ho.js` and `hmip-mod-tm.js` (alias for MOD-HO).
 
 ---
 
+#### 8 — ReGa program triggers as Matter switches
+
+**Effort: Medium**
+
+The CCU supports user-defined programs (Homematic scripts / automations). Expose selected programs as Matter `onOffSwitch` endpoints so any Matter controller or automation can fire a CCU program with a simple on/off command.
+
+**How CCU programs work:**
+- Programs are listed via ReGa script: `dom.GetObject(ID_PROGRAMS).EnumUsedIDs()` returns all program IDs with name and active state
+- A program is executed via: `dom.GetObject(<id>).ProgramExecute()`
+- The `homematic-rega` client (already used by the connection layer for channel name lookup) supports arbitrary script execution
+
+**Matter mapping:**
+- Each program → one `onOffSwitch` endpoint (or `genericSwitch` for momentary semantics)
+- `onOffSwitch`: turning ON executes the program; the attribute auto-resets to OFF after execution (stateless trigger semantic). This matches how scene/macro buttons work in other Matter plugins.
+- Alternatively `genericSwitch` with a short-press action would be more semantically correct but is less universally supported by Matter controllers
+
+**Implementation notes:**
+1. Add a `programs` section to `CcuConfig` / `matterbridge-homematic.schema.json` — either a list of program IDs/names to expose, or a flag to expose all active programs
+2. In `onStart`, query ReGa for the program list and create one endpoint per configured program; endpoint ID should be stable and based on the program ID (not name, since names can change)
+3. In `module.ts`, handle the `onOff` cluster `on` command by executing the ReGa `ProgramExecute()` call, then immediately resetting `onOff` to `false`
+4. No RPC event subscription needed — programs are fire-and-forget from the CCU side; there is no state to sync back
+5. Power source: always `createDefaultPowerSourceWiredClusterServer()` (virtual endpoint, not battery-powered)
+
+**Open questions:**
+- Should inactive/disabled programs be filtered out or exposed as disabled endpoints?
+- Should program execution errors (ReGa timeout, CCU unreachable) surface as a Matter fault state?
+
+---
+
 ## Homebrew (hb-) device summary
 
 Analyzed all `hb-` prefix devices from RedMatic-HomeKit. No new device mapper categories are needed specifically for homebrew devices.
