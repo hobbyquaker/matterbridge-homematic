@@ -13,8 +13,8 @@ import { DEVICE_MAPPERS, deviceTypeToKey } from './device-mapper/index.js';
 import { CcuChannelInfo, ChannelMappingOptions, SUPPORTED_CHANNEL_TYPES, SupportedChannelType, SwitchMatterType } from './types.js';
 
 export { channelTypeLabel } from './mapper-utils.js';
-export { SUPPORTED_CHANNEL_TYPES } from './types.js';
 export type { ChannelMappingOptions, SupportedChannelType, SwitchMatterType } from './types.js';
+export { SUPPORTED_CHANNEL_TYPES } from './types.js';
 
 /**
  * HmIP transmitter/virtual-receiver channel type pairs.

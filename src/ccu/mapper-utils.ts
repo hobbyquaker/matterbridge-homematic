@@ -6,7 +6,7 @@
 
 import { MatterbridgeEndpoint } from 'matterbridge';
 
-import { ChannelMappingOptions, CcuChannelInfo, SupportedChannelType } from './types.js';
+import { CcuChannelInfo, ChannelMappingOptions, SupportedChannelType } from './types.js';
 
 /** Short display labels for verbose channel type names used in the serial number column. */
 const CHANNEL_TYPE_LABEL: Partial<Record<SupportedChannelType, string>> = {

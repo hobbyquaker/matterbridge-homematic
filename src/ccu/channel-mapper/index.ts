@@ -42,7 +42,7 @@ export const CHANNEL_MAPPERS: Record<string, ChannelMapper> = {
   'rotary-handle-sensor': rotaryHandleSensor,
   'shutter-contact': shutterContact,
   'smoke-detector': smokeDetector,
-  switch: switchMapper,
+  'switch': switchMapper,
   'temperature-humidity-transmitter': temperatureHumidityTransmitter,
   'thermalcontrol-transmit': thermalcontrolTransmit,
   weather,

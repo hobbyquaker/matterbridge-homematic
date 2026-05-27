@@ -36,7 +36,7 @@ The channel-mapper registry and `resolveChannelsForMatter` handle all of the fol
 
 ### Priority: High
 
-#### HM-0 — Per-device / per-channel configuration web UI
+#### UI-0 — Per-device / per-channel configuration web UI
 
 **Effort: Medium** (frontend + backend, depends on upstream API)  
 **Status: BLOCKED** — waiting on [Luligu/matterbridge#561](https://github.com/Luligu/matterbridge/issues/561)
@@ -44,6 +44,7 @@ The channel-mapper registry and `resolveChannelsForMatter` handle all of the fol
 Users currently configure per-channel overrides (e.g. `switchMatterType`, `enabled`) by hand-editing the JSON config file. A web UI inside the Matterbridge frontend would make this accessible without touching raw JSON.
 
 **What is needed from Matterbridge (issue #561):**
+
 - A route registration API so plugins can attach REST handlers to Matterbridge's HTTP server (`this.matterbridge.registerRoute(method, path, handler)` or equivalent)
 - Optionally: an embedded config panel inside the SPA (iframe or side panel) so the UI does not open in a new tab
 
@@ -56,6 +57,7 @@ Luligu's response on the issue is positive — he was already considering a simi
 3. **Config schema** — the existing `matterbridge-homematic.schema.json` already describes the per-channel shape; the UI can be generated from it or built hand-coded
 
 **Design notes:**
+
 - Per-channel config is keyed by channel address (`CcuChannelInfo.address`) in `CcuConfig.channelOverrides`
 - After a config write the plugin needs to re-run `resolveChannelsForMatter` and re-register changed endpoints; Matterbridge's `unregisterDevice` / `registerDevice` cycle supports this
 - The REST layer should validate incoming JSON against the existing schema to avoid corrupt config
@@ -188,16 +190,19 @@ RedMatic prior art: `hmip-mod-ho.js` and `hmip-mod-tm.js` (alias for MOD-HO).
 The CCU supports user-defined programs (Homematic scripts / automations). Expose selected programs as Matter `onOffSwitch` endpoints so any Matter controller or automation can fire a CCU program with a simple on/off command.
 
 **How CCU programs work:**
+
 - Programs are listed via ReGa script: `dom.GetObject(ID_PROGRAMS).EnumUsedIDs()` returns all program IDs with name and active state
 - A program is executed via: `dom.GetObject(<id>).ProgramExecute()`
 - The `homematic-rega` client (already used by the connection layer for channel name lookup) supports arbitrary script execution
 
 **Matter mapping:**
+
 - Each program → one `onOffSwitch` endpoint (or `genericSwitch` for momentary semantics)
 - `onOffSwitch`: turning ON executes the program; the attribute auto-resets to OFF after execution (stateless trigger semantic). This matches how scene/macro buttons work in other Matter plugins.
 - Alternatively `genericSwitch` with a short-press action would be more semantically correct but is less universally supported by Matter controllers
 
 **Implementation notes:**
+
 1. Add a `programs` section to `CcuConfig` / `matterbridge-homematic.schema.json` — either a list of program IDs/names to expose, or a flag to expose all active programs
 2. In `onStart`, query ReGa for the program list and create one endpoint per configured program; endpoint ID should be stable and based on the program ID (not name, since names can change)
 3. In `module.ts`, handle the `onOff` cluster `on` command by executing the ReGa `ProgramExecute()` call, then immediately resetting `onOff` to `false`
@@ -205,6 +210,7 @@ The CCU supports user-defined programs (Homematic scripts / automations). Expose
 5. Power source: always `createDefaultPowerSourceWiredClusterServer()` (virtual endpoint, not battery-powered)
 
 **Open questions:**
+
 - Should inactive/disabled programs be filtered out or exposed as disabled endpoints?
 - Should program execution errors (ReGa timeout, CCU unreachable) surface as a Matter fault state?
 
@@ -218,7 +224,7 @@ Analyzed all `hb-` prefix devices from RedMatic-HomeKit. No new device mapper ca
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | hb-lc-bl1pbu-fm                                | Alias for HM-LC-Bl1PBU-FM → BLIND channel mapper handles it                                                                                                              |
 | hb-lc-sw1pbu-fm, hb-lc-sw2-fm, hb-lc-sw2pbu-fm | SWITCH channel mapper handles all                                                                                                                                        |
-| hb-uni-rgb-led-ctrl                            | Alias for hm-lc-rgbw-wm → covered by roadmap item HM-5                                                                                                                     |
+| hb-uni-rgb-led-ctrl                            | Alias for hm-lc-rgbw-wm → covered by roadmap item HM-5                                                                                                                   |
 | hb-uni-sen-press-sc                            | SHUTTER_CONTACT → contactSensor, already works                                                                                                                           |
 | hb-uni-sen-temp-ds18b20, hb-uni-sen-temp-ir    | Temperature-only probes; if channel type is TEMPERATURE_HUMIDITY_TRANSMITTER a humidity endpoint is created with no data — minor cosmetic issue, no device mapper needed |
 | hb-uni-sen-wea                                 | Uses `LUX` datapoint; WEATHER channel mapper uses `BRIGHTNESS`. May need a small fix to the WEATHER mapper to fall back to LUX, but no device mapper                     |

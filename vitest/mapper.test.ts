@@ -15,10 +15,10 @@
 import { MatterbridgeEndpoint } from 'matterbridge';
 
 import { CHANNEL_MAPPERS, channelTypeToKey } from '../src/ccu/channel-mapper/index.js';
-import { DEVICE_MAPPERS, deviceTypeToKey } from '../src/ccu/device-mapper/index.js';
 import { createEndpointForChannel, getDeviceMapper } from '../src/ccu/device-mapper.js';
-import { SUPPORTED_CHANNEL_TYPES } from '../src/ccu/types.js';
+import { DEVICE_MAPPERS, deviceTypeToKey } from '../src/ccu/device-mapper/index.js';
 import type { CcuChannelInfo, SupportedChannelType } from '../src/ccu/types.js';
+import { SUPPORTED_CHANNEL_TYPES } from '../src/ccu/types.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
