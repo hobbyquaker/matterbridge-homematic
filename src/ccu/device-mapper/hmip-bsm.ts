@@ -1,7 +1,13 @@
 /**
  * Device mapper for HmIP-BSM (Brand Switch and Meter) → Matter onOffLight/Outlet/Switch + ElectricalPowerMeasurement.
  *
- * HmIP-BSM is always mains-powered and always has a co-located energy meter channel.
+ * NOTE: This file exists as a proof-of-concept / reference example for writing device mappers.
+ * It is not strictly necessary: the HmIP-BSM is a mains-powered device that does not expose a
+ * LOW_BAT datapoint, so the connection layer already sets `batteryPowered = false` without any
+ * device mapper. The standard SWITCH channel mapper combined with `resolveChannelsForMatter` power-
+ * meter merging would produce the correct endpoint on its own. This mapper can be kept as a
+ * concrete example or removed once a more meaningful device mapper exists.
+ *
  * The `resolveChannelsForMatter` step already pairs the SWITCH_VIRTUAL_RECEIVER channel with the
  * ENERGIE_METER_TRANSMITTER and sets `powerMeterChannelAddress` on the SWITCH channel, so this
  * device mapper delegates to the standard SWITCH channel mapper with the mains-powered flag forced.
