@@ -157,6 +157,54 @@ RedMatic prior art: `hm-lc-rgbw-wm.js` (and `hb-uni-rgb-led-ctrl.js` which is an
 
 ---
 
+### Priority: Medium
+
+#### HM-9 — Garage door with combined contact sensor(s)
+
+**Effort: Medium–High**  
+**Status: Partially blocked** — Matter 1.5 has no native garage door device type; workaround via `doorLockDevice` is viable now and can be upgraded later when Matter adds a dedicated type.
+
+A complete garage door integration that combines the actuator channel (trigger/motor) with one or two contact sensor channels that prove the actual open/closed state. This supersedes and replaces the simpler HM-4 and HM-7 entries once implemented.
+
+**Typical hardware setup:**
+
+- Actuator: a SWITCH or SHUTTER_CONTACT channel that toggles the door (HmIP-SWDO, HmIP-MOD-HO/TM, or any relay output wired to the door motor)
+- Contact sensor(s): one or two SHUTTER_CONTACT channels reporting verified open / closed state (e.g. HmIP-SCI or HmIP-SWDO-I mounted at top and bottom of the door travel)
+
+**Garage door control patterns:**
+
+The device mapper must account for two common motor wiring patterns:
+
+1. **Dedicated open/close outputs** — separate relay channels for OPEN and CLOSE commands; straightforward mapping to `currentPosition`/`targetPosition`
+2. **Up-stop-down (toggle) pattern** — a single relay channel that cycles through open → stop → close → stop on each press. The controller must track current door state via the contact sensors and issue the correct number of pulses to reach the target state without overshooting
+
+**Config options to expose in `matterbridge-homematic.schema.json`:**
+
+| Option | Type | Purpose |
+|---|---|---|
+| `openContactAddress` | `string` | Channel address of the "fully open" contact sensor |
+| `closeContactAddress` | `string` | Channel address of the "fully closed" contact sensor |
+| `openingTimeMs` | `number` | Estimated full travel time open→close (ms); used for timeout detection |
+| `closingTimeMs` | `number` | Estimated full travel time close→open (ms); used for timeout detection |
+| `togglePattern` | `boolean` | Set `true` for up-stop-down motors; `false` for dedicated open/close outputs |
+
+**Matter mapping (workaround, Matter ≤ 1.5):**
+
+Use `doorLockDevice` as the interim device type:
+- `LockState.LOCKED` = door fully closed (confirmed by close contact)
+- `LockState.UNLOCKED` = door fully open (confirmed by open contact)
+- `LockState.NOT_FULLY_LOCKED` = door in motion or in an intermediate position
+
+Timeout detection: if neither contact fires within `openingTimeMs` / `closingTimeMs` after a command, set `LockState.NOT_FULLY_LOCKED` and raise a fault attribute so the controller knows the door is stuck.
+
+**Future upgrade path:** When Matter introduces a native garage door device type, the Matter mapping layer can be swapped out without changing the Homematic-side logic.
+
+**Relationship to other items:**
+- Replaces HM-4 (HmIP-SWDO simple mode) and HM-7 (HmIP-MOD-HO raw channel) once implemented
+- HM-4 / HM-7 can remain as lightweight fallbacks for setups without contact sensors
+
+---
+
 ### Priority: Low
 
 #### HM-4 — HmIP-SWDO optional garage door mode
