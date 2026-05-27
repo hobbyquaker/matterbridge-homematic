@@ -287,6 +287,9 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
     let enabledCount = 0;
     let registeredCount = 0;
+    // Tracks device addresses for which a device mapper was already invoked, so that device mappers
+    // are called at most once per device even when a device has multiple qualifying channels.
+    const deviceMapperHandled = new Set<string>();
 
     for (const channel of channels) {
       if (!isSupportedChannelType(channel.type)) continue;
@@ -511,11 +514,13 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
       // For HEATING_CLIMATECONTROL_TRANSCEIVER channels on devices with a registered device mapper
       // (HmIP-WTH, STHD, STH family), create and register a dedicated humiditySensor endpoint.
-      // The thermostat endpoint above handles temperature and setpoint events; this endpoint
-      // receives HUMIDITY events via wthHumidityChannels.
-      if (channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' && channel.deviceType) {
+      // The thermostat endpoint is already registered above via createEndpointForChannel; we only
+      // need the additional endpoints the device mapper produces (filtered by RelativeHumidityMeasurement).
+      // The deviceMapperHandled guard ensures we call the mapper at most once per physical device.
+      if (channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' && channel.deviceType && !deviceMapperHandled.has(channel.deviceAddress)) {
         const deviceMapper = getDeviceMapper(channel.deviceType);
         if (deviceMapper) {
+          deviceMapperHandled.add(channel.deviceAddress);
           const deviceChannels = channels.filter((c) => c.deviceAddress === channel.deviceAddress);
           const mappingOptions = {
             switchMatterType: override?.switchMatterType ?? inferSwitchMatterTypeFromName(channel.name),
@@ -523,6 +528,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
           };
           const deviceEndpoints = deviceMapper(deviceChannels, this.matterbridge.aggregatorVendorId, mappingOptions);
           for (const ep of deviceEndpoints) {
+            // Skip the thermostat endpoint — it has already been registered by createEndpointForChannel above.
             if (!ep.hasClusterServer('RelativeHumidityMeasurement')) continue;
             await this.registerDevice(ep);
             registeredCount++;
