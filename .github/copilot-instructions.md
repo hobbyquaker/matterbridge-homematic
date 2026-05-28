@@ -24,3 +24,4 @@
 - When bumping the package version, also update the `@version` tag in the file-level JSDoc comment at the top of `src/module.ts` to match.
 - Always commit completed changes unless the user explicitly asks not to commit.
 - Use this commit message convention: `<type>(<scope>): <short imperative summary>` where `type` is one of `feat|fix|refactor|docs|test|chore|build|ci|perf|revert`, `scope` is short and optional, and the summary is concise (preferably <= 72 characters).
+- When you finish implementing a roadmap item, mark it as done in `ROADMAP.md` directly under the item heading with the format `**Done:** [\`<sha>\`](https://github.com/hobbyquaker/matterbridge-homematic/commit/<sha>)`, where `<sha>` is the short hash of the implementing commit. Include this change in the same commit or a follow-up `docs` commit before pushing.

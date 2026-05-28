@@ -102,6 +102,8 @@ Each key maps to the raw paramset description object returned by the CCU. We sho
 
 #### OPS-0 — More granular logging controls
 
+**Done:** [`9bb5aa4`](https://github.com/hobbyquaker/matterbridge-homematic/commit/9bb5aa4)
+
 **Effort: Low-Medium**  
 **Goal:** keep useful diagnostic logging available without flooding the log with high-volume RPC transport noise.
 
@@ -116,21 +118,24 @@ These are useful when debugging RPC protocol problems, but they drown out higher
 **Planned approach:**
 
 1. Keep the existing `debug` switch as the master coarse switch for backward compatibility
-2. Add one or more narrower plugin config options for high-volume transport logging, for example:
-   - `logRpcEvents` (`boolean`) — gate per-event `RPC callback` / `RPC event` logging
-   - `logRpcPayloads` (`boolean`) — gate full request/response payload logging for heavy calls such as `getParamsetDescription`, `listDevices`, `newDevices`
-   - optionally `logRegaPayloads` (`boolean`) if ReGa result dumps also become noisy
+2. Add a small number of narrower plugin config options for high-volume transport logging:
+
+- `logRpcEvents` (`boolean`) — gate per-event `RPC callback` / `RPC event` logging
+- one payload-format option that indicates RPC and ReGa payloads are truncated so they fit in one line, instead of introducing separate `logRpcPayloads` / `logRegaPayloads` toggles
+
 3. Route noisy transport logs through small helper methods in the connection layer so they can be turned on/off consistently without scattering conditionals across every log call
-4. Keep summaries, warnings, and state-change logs visible under normal debug mode even when transport payload logging is disabled
+4. Keep summaries, warnings, and state-change logs visible under normal debug mode even when payload output is truncated
 
 **Design guidance:**
 
 - Prefer category toggles over inventing a second custom log-level system unless Matterbridge already provides a natural extension point. The real problem is log category volume, not lack of numeric severity levels
-- If multiple options are added, name them by source/category (`rpcEvents`, `rpcPayloads`, `regaPayloads`) rather than by ambiguous pseudo-levels like `verbose2`
-- For heavy payload logs, consider truncation/summarization even when enabled so huge `getParamsetDescription` or `newDevices` objects do not dominate the frontend log view
+- Prefer one shared payload-format/truncation option for both RPC and ReGa payloads rather than separate payload toggles per source
+- Heavy payload logs should be summarized/truncated into a single line so calls like `getParamsetDescription`, `listDevices`, `newDevices`, and ReGa script results do not dominate the frontend log view
 - The future config UI should surface these options under an "advanced diagnostics" section, not alongside normal end-user device settings
 
 #### CFG-0 — Split ReGa features into explicit config flags
+
+**Done:** [`9bb5aa4`](https://github.com/hobbyquaker/matterbridge-homematic/commit/9bb5aa4)
 
 **Effort: Medium**  
 **Goal:** replace the current coarse ReGa toggle with feature-specific options so users can independently enable channel-name sync, program endpoints, variable endpoints, polling, and pseudo-push behavior.
@@ -139,11 +144,11 @@ The current `regaEnabled` shape is too coarse. It mixes at least three separate 
 
 **Target config surface:**
 
-1. `createMatterDevicesForVariables` (`boolean`)
-2. `createMatterDevicesForPrograms` (`boolean`)
-3. `syncChannelNames` (`boolean`)
-4. `regaVariablesPollingInterval` (`number`, with `0` meaning no polling)
-5. `virtualKeyForRegaPseudoPush` (`string` or structured key reference)
+1. `createMatterDevicesForVariables` (`boolean`, default false)
+2. `createMatterDevicesForPrograms` (`boolean`, default false)
+3. `syncChannelNames` (`boolean`, default true)
+4. `regaVariablesPollingInterval` (`number`, with `0` meaning no polling, default 0)
+5. `virtualKeyForRegaPseudoPush` (`string` or structured key reference, default empty string)
 
 **Planned approach:**
 
