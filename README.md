@@ -15,8 +15,28 @@ A [Matterbridge](https://github.com/Luligu/matterbridge) plugin for Homematic
 
 This plugin bridges your Homematic CCU's devices to the Matter ecosystem
 
-> [!WARNING]
 > **Work in progress** — The plugin is functional but still under active development. Many Homematic device types already work out of the box; others are planned for upcoming releases. See [ROADMAP.md](ROADMAP.md) for what is coming next.
+
+## Table of Contents
+
+- [Supported Device Types](#supported-device-types)
+- [Installation](#installation)
+- [Configuration](#configuration)
+  - [RPC Server Configuration](#rpc-server-configuration)
+  - [Device Editor Configuration](#device-editor-configuration)
+- [Troubleshooting](#troubleshooting)
+- [Architecture](#architecture)
+  - [Three-Layer Design](#three-layer-design)
+  - [Discovery Caching](#discovery-caching)
+  - [Channel Mappers and Device Mappers](#channel-mappers-and-device-mappers)
+- [Development](#development)
+  - [Project Structure](#project-structure)
+  - [Running Locally](#running-locally)
+  - [Available Scripts](#available-scripts)
+  - [Contributing](#contributing)
+- [License](#license)
+- [References](#references)
+- [Support](#support)
 
 ## Supported Device Types
 
