@@ -117,6 +117,19 @@ describe('DEVICE_MAPPERS', () => {
     expect(DEVICE_MAPPERS).toHaveProperty('hmip-bsm');
     expect(typeof DEVICE_MAPPERS['hmip-bsm']).toBe('function');
   });
+
+  test('should contain device mappers for HmIP-WTH family', () => {
+    expect(DEVICE_MAPPERS).toHaveProperty('hmip-wth');
+    expect(DEVICE_MAPPERS).toHaveProperty('hmip-wth-2');
+    expect(DEVICE_MAPPERS).toHaveProperty('hmip-wth-b');
+    expect(typeof DEVICE_MAPPERS['hmip-wth']).toBe('function');
+  });
+
+  test('should contain device mappers for HmIP-STHD / STH family', () => {
+    expect(DEVICE_MAPPERS).toHaveProperty('hmip-sthd');
+    expect(DEVICE_MAPPERS).toHaveProperty('hmip-sth');
+    expect(typeof DEVICE_MAPPERS['hmip-sthd']).toBe('function');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -212,4 +225,102 @@ describe('channel mapper: KEYMATIC', () => {
     const ep = createEndpointForChannel(channel, VENDOR_ID);
     expect(ep).toBeInstanceOf(MatterbridgeEndpoint);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Device mapper: HmIP-WTH / WTH-2 / WTH-B
+// ---------------------------------------------------------------------------
+
+describe('device mapper: HmIP-WTH', () => {
+  function makeWthChannels(deviceType: string) {
+    return [
+      makeChannel({
+        type: 'HEATING_CLIMATECONTROL_TRANSCEIVER',
+        deviceType,
+        address: 'WTH123456:1',
+        deviceAddress: 'WTH123456',
+        channelIndex: 1,
+      }),
+    ];
+  }
+
+  for (const deviceType of ['HmIP-WTH', 'HmIP-WTH-2', 'HmIP-WTH-B']) {
+    test(`should be registered for ${deviceType}`, () => {
+      expect(getDeviceMapper(deviceType)).toBeDefined();
+    });
+
+    test(`should return two endpoints for ${deviceType}`, () => {
+      const mapper = getDeviceMapper(deviceType)!;
+      const channels = makeWthChannels(deviceType);
+      const endpoints = mapper(channels, VENDOR_ID, {});
+      expect(endpoints).toHaveLength(2);
+      expect(endpoints[0]).toBeInstanceOf(MatterbridgeEndpoint);
+      expect(endpoints[1]).toBeInstanceOf(MatterbridgeEndpoint);
+    });
+
+    test(`first endpoint for ${deviceType} should have Thermostat cluster`, () => {
+      const mapper = getDeviceMapper(deviceType)!;
+      const channels = makeWthChannels(deviceType);
+      const [thermostatEp] = mapper(channels, VENDOR_ID, {});
+      expect(thermostatEp.hasClusterServer('Thermostat')).toBe(true);
+    });
+
+    test(`second endpoint for ${deviceType} should have RelativeHumidityMeasurement cluster`, () => {
+      const mapper = getDeviceMapper(deviceType)!;
+      const channels = makeWthChannels(deviceType);
+      const [, humidityEp] = mapper(channels, VENDOR_ID, {});
+      expect(humidityEp.hasClusterServer('RelativeHumidityMeasurement')).toBe(true);
+    });
+
+    test(`humidity endpoint id for ${deviceType} should have '-humidity' suffix`, () => {
+      const mapper = getDeviceMapper(deviceType)!;
+      const channels = makeWthChannels(deviceType);
+      const [, humidityEp] = mapper(channels, VENDOR_ID, {});
+      expect(humidityEp.id).toMatch(/-humidity$/);
+    });
+  }
+
+  test('should return empty array when no HEATING_CLIMATECONTROL_TRANSCEIVER channel present', () => {
+    const mapper = getDeviceMapper('HmIP-WTH')!;
+    const endpoints = mapper([], VENDOR_ID, {});
+    expect(endpoints).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Device mapper: HmIP-STHD / STH
+// ---------------------------------------------------------------------------
+
+describe('device mapper: HmIP-STHD', () => {
+  function makeSthdChannels(deviceType: string) {
+    return [
+      makeChannel({
+        type: 'HEATING_CLIMATECONTROL_TRANSCEIVER',
+        deviceType,
+        address: 'STHD123456:1',
+        deviceAddress: 'STHD123456',
+        channelIndex: 1,
+      }),
+    ];
+  }
+
+  for (const deviceType of ['HmIP-STHD', 'HmIP-STH']) {
+    test(`should be registered for ${deviceType}`, () => {
+      expect(getDeviceMapper(deviceType)).toBeDefined();
+    });
+
+    test(`should return two endpoints for ${deviceType}`, () => {
+      const mapper = getDeviceMapper(deviceType)!;
+      const channels = makeSthdChannels(deviceType);
+      const endpoints = mapper(channels, VENDOR_ID, {});
+      expect(endpoints).toHaveLength(2);
+    });
+
+    test(`second endpoint for ${deviceType} should have RelativeHumidityMeasurement cluster`, () => {
+      const mapper = getDeviceMapper(deviceType)!;
+      const channels = makeSthdChannels(deviceType);
+      const [, humidityEp] = mapper(channels, VENDOR_ID, {});
+      expect(humidityEp.hasClusterServer('RelativeHumidityMeasurement')).toBe(true);
+    });
+  }
 });

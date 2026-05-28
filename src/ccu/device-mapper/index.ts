@@ -13,6 +13,8 @@
 
 import { DeviceMapper } from '../types.js';
 import { mapDevice as hmipBsm } from './hmip-bsm.js';
+import { mapDevice as hmipSthd } from './hmip-sthd.js';
+import { mapDevice as hmipWth } from './hmip-wth.js';
 
 /**
  * Map from sanitized device type key to its `DeviceMapper` function.
@@ -22,6 +24,13 @@ import { mapDevice as hmipBsm } from './hmip-bsm.js';
  */
 export const DEVICE_MAPPERS: Record<string, DeviceMapper> = {
   'hmip-bsm': hmipBsm,
+  // HmIP-WTH family — wall thermostats with HUMIDITY on the HEATING_CLIMATECONTROL_TRANSCEIVER channel.
+  'hmip-wth': hmipWth,
+  'hmip-wth-2': hmipWth,
+  'hmip-wth-b': hmipWth,
+  // HmIP-STHD / STH — same channel layout as WTH.
+  'hmip-sthd': hmipSthd,
+  'hmip-sth': hmipSthd,
 };
 
 /**

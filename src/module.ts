@@ -28,7 +28,7 @@ import { AnsiLogger, LogLevel } from 'matterbridge/logger';
 
 import { parseCcuConnectionConfig } from './ccu/config.js';
 import { CcuConnectionLayer } from './ccu/connection-layer.js';
-import { channelTypeLabel, createEndpointForChannel, inferSwitchMatterTypeFromName, isSupportedChannelType, resolveChannelsForMatter } from './ccu/device-mapper.js';
+import { channelTypeLabel, createEndpointForChannel, getDeviceMapper, inferSwitchMatterTypeFromName, isSupportedChannelType, resolveChannelsForMatter } from './ccu/device-mapper.js';
 import { getBatteryVoltageRange, getMatchingMainsPoweredPrefix, isAlwaysMainsPoweredDeviceType, MAINS_POWERED_DEVICE_TYPE_PREFIXES } from './ccu/device-power.js';
 import { CcuChannelInfo, CcuChannelOverride } from './ccu/types.js';
 
@@ -75,6 +75,14 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    * while BidCos POWERMETER reports it in amps (A), requiring different unit conversion.
    */
   private readonly energieMeterChannels = new Map<string, MatterbridgeEndpoint>();
+
+  /**
+   * Maps HEATING_CLIMATECONTROL_TRANSCEIVER channel addresses to their dedicated humiditySensor
+   * endpoints for devices that expose HUMIDITY on the same channel (HmIP-WTH, STHD, STH family).
+   * Kept separate from channelAddressToDevice so that HUMIDITY events can be routed to the
+   * humiditySensor endpoint without interfering with the thermostat endpoint stored there.
+   */
+  private readonly wthHumidityChannels = new Map<string, MatterbridgeEndpoint>();
 
   /**
    * Tracks the last value written to a Matter attribute from an incoming RPC event.
@@ -275,9 +283,13 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     this.channelAddressToDevice.clear();
     this.rotaryHandleChannels.clear();
     this.energieMeterChannels.clear();
+    this.wthHumidityChannels.clear();
 
     let enabledCount = 0;
     let registeredCount = 0;
+    // Tracks device addresses for which a device mapper was already invoked, so that device mappers
+    // are called at most once per device even when a device has multiple qualifying channels.
+    const deviceMapperHandled = new Set<string>();
 
     for (const channel of channels) {
       if (!isSupportedChannelType(channel.type)) continue;
@@ -497,6 +509,32 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
           });
         } catch (err) {
           this.log.warn(`Failed to subscribe Thermostat mode for ${channel.address}: ${String(err)}`);
+        }
+      }
+
+      // For HEATING_CLIMATECONTROL_TRANSCEIVER channels on devices with a registered device mapper
+      // (HmIP-WTH, STHD, STH family), create and register a dedicated humiditySensor endpoint.
+      // The thermostat endpoint is already registered above via createEndpointForChannel; we only
+      // need the additional endpoints the device mapper produces (filtered by RelativeHumidityMeasurement).
+      // The deviceMapperHandled guard ensures we call the mapper at most once per physical device.
+      if (channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' && channel.deviceType && !deviceMapperHandled.has(channel.deviceAddress)) {
+        const deviceMapper = getDeviceMapper(channel.deviceType);
+        if (deviceMapper) {
+          deviceMapperHandled.add(channel.deviceAddress);
+          const deviceChannels = channels.filter((c) => c.deviceAddress === channel.deviceAddress);
+          const mappingOptions = {
+            switchMatterType: override?.switchMatterType ?? inferSwitchMatterTypeFromName(channel.name),
+            batteryPowered: this.deviceBatteryHints.get(channel.deviceAddress) ?? channel.batteryPowered,
+          };
+          const deviceEndpoints = deviceMapper(deviceChannels, this.matterbridge.aggregatorVendorId, mappingOptions);
+          for (const ep of deviceEndpoints) {
+            // Skip the thermostat endpoint — it has already been registered by createEndpointForChannel above.
+            if (!ep.hasClusterServer('RelativeHumidityMeasurement')) continue;
+            await this.registerDevice(ep);
+            registeredCount++;
+            this.wthHumidityChannels.set(channel.address, ep);
+            this.log.debug(`Registered humiditySensor endpoint for ${channel.address} (${channel.deviceType})`);
+          }
         }
       }
 
@@ -1128,13 +1166,16 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     }
 
     // HUMIDITY
-    if (!endpoint.hasClusterServer('RelativeHumidityMeasurement')) return;
+    // For WTH/STHD devices the HUMIDITY datapoint arrives on a HEATING_CLIMATECONTROL_TRANSCEIVER
+    // channel address; route it to the dedicated humiditySensor endpoint when available.
+    const humidityEndpoint = this.wthHumidityChannels.get(channelAddress) ?? endpoint;
+    if (!humidityEndpoint.hasClusterServer('RelativeHumidityMeasurement')) return;
     // Matter RelativeHumidityMeasurement.measuredValue is in units of 0.01%.
     const measuredValue = Math.round((typeof event.value === 'number' ? event.value : 0) * 100);
     try {
-      const current = await endpoint.getAttribute('RelativeHumidityMeasurement', 'measuredValue');
+      const current = await humidityEndpoint.getAttribute('RelativeHumidityMeasurement', 'measuredValue');
       if (current !== measuredValue) {
-        await endpoint.updateAttribute('RelativeHumidityMeasurement', 'measuredValue', measuredValue);
+        await humidityEndpoint.updateAttribute('RelativeHumidityMeasurement', 'measuredValue', measuredValue);
         this.log.info(`HUMIDITY event: updated RelativeHumidityMeasurement for ${channelAddress} to ${measuredValue} (${measuredValue / 100}%)`);
       }
     } catch (err) {
