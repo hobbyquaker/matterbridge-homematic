@@ -539,7 +539,11 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
             this.wthHumidityChannels.set(channel.address, ep);
             this.log.debug(`Registered humiditySensor endpoint for ${channel.address} (${channel.deviceType})`);
           }
+        } else {
+          this.log.debug(`No device mapper for HEATING_CLIMATECONTROL_TRANSCEIVER channel=${channel.address} deviceType=${channel.deviceType}`);
         }
+      } else if (channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' && !channel.deviceType) {
+        this.log.debug(`No device mapper for HEATING_CLIMATECONTROL_TRANSCEIVER channel=${channel.address}: deviceType not reported by CCU`);
       }
 
       // Wire DoorLock commands for KEYMATIC channels.
@@ -1984,8 +1988,24 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     enabledInterfaces: readonly CcuInterfaceName[],
   ): Promise<void> {
     const enabledInterfaceSet = new Set(enabledInterfaces);
+    const disabledInterfacePrefixes = this.getDisabledInterfacePrefixes(enabledInterfaceSet);
     const blacklistEntriesToRemove = new Set<string>();
     let removedSelectDevices = 0;
+
+    for (const selectDevice of this.getSelectDevices()) {
+      if (!disabledInterfacePrefixes.some((prefix) => selectDevice.serial.startsWith(prefix))) continue;
+      await this.clearDeviceSelect(selectDevice.serial);
+      removedSelectDevices++;
+    }
+
+    const config = this.getPlatformConfig();
+    const currentBlackList = Array.isArray(config.blackList) ? config.blackList : [];
+    for (const entry of currentBlackList) {
+      if (typeof entry !== 'string') continue;
+      if (disabledInterfacePrefixes.some((prefix) => entry.startsWith(prefix))) {
+        blacklistEntriesToRemove.add(entry);
+      }
+    }
 
     for (const channel of channels) {
       if (enabledInterfaceSet.has(channel.interfaceName)) continue;
@@ -2008,8 +2028,6 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       }
     }
 
-    const config = this.getPlatformConfig();
-    const currentBlackList = Array.isArray(config.blackList) ? config.blackList : [];
     const nextBlackList = currentBlackList.filter((entry): entry is string => typeof entry === 'string' && !blacklistEntriesToRemove.has(entry));
     const removedBlacklistEntries = currentBlackList.length - nextBlackList.length;
 
@@ -2105,6 +2123,11 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       `${typeLabel}:${channel.address}`,
       `${channel.interfaceName}:${channel.type}:${channel.address}`,
     ].filter((key) => key !== selectSerial);
+  }
+
+  private getDisabledInterfacePrefixes(enabledInterfaceSet: ReadonlySet<CcuInterfaceName>): string[] {
+    const interfaces: Exclude<CcuInterfaceName, 'ReGaHSS'>[] = ['BidCos-RF', 'BidCos-Wired', 'HmIP-RF', 'VirtualDevices', 'CUxD'];
+    return interfaces.filter((iface) => !enabledInterfaceSet.has(iface)).map((iface) => `${iface}:`);
   }
 
   private logChannelMapperSelection(channel: Pick<CcuChannelInfo, 'address' | 'name' | 'type'>, displayName: string): void {

@@ -26,11 +26,18 @@ export const DEVICE_MAPPERS: Record<string, DeviceMapper> = {
   'hmip-bsm': hmipBsm,
   // HmIP-WTH family — wall thermostats with HUMIDITY on the HEATING_CLIMATECONTROL_TRANSCEIVER channel.
   'hmip-wth': hmipWth,
+  'hmip-wth-1': hmipWth,
   'hmip-wth-2': hmipWth,
   'hmip-wth-b': hmipWth,
+  // HmIP-BWTH family — brand-switch-form-factor wall thermostats, same channel layout as WTH.
+  'hmip-bwth': hmipWth,
+  'hmip-bwth-a': hmipWth,
+  'hmip-bwth24': hmipWth,
   // HmIP-STHD / STH — same channel layout as WTH.
   'hmip-sthd': hmipSthd,
+  'hmip-sthd-a': hmipSthd,
   'hmip-sth': hmipSthd,
+  'hmip-sth-a': hmipSthd,
 };
 
 /**
