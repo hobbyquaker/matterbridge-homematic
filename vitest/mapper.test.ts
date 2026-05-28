@@ -17,7 +17,7 @@ import { MatterbridgeEndpoint } from 'matterbridge';
 import { CHANNEL_MAPPERS, channelTypeToKey } from '../src/ccu/channel-mapper/index.js';
 import { createEndpointForChannel, getDeviceMapper } from '../src/ccu/device-mapper.js';
 import { DEVICE_MAPPERS, deviceTypeToKey } from '../src/ccu/device-mapper/index.js';
-import type { CcuChannelInfo, SupportedChannelType } from '../src/ccu/types.js';
+import type { CcuChannelInfo, DeviceMapper, SupportedChannelType } from '../src/ccu/types.js';
 import { SUPPORTED_CHANNEL_TYPES } from '../src/ccu/types.js';
 
 // ---------------------------------------------------------------------------
@@ -327,14 +327,14 @@ describe('device mapper: HmIP-DRSI4', () => {
   }
 
   test('should return one endpoint per switch output (SWITCH_TRANSMITTER → SWITCH_VIRTUAL_RECEIVER pair)', () => {
-    const mapper = getDeviceMapper('HmIP-DRSI4')!;
+    const mapper = getDeviceMapper('HmIP-DRSI4') as DeviceMapper;
     const channels = makeDrsiChannels('HmIP-DRSI4', 4);
     const results = mapper(channels, VENDOR_ID, {});
     expect(results).toHaveLength(4);
   });
 
   test('each result should be a MatterbridgeEndpoint', () => {
-    const mapper = getDeviceMapper('HmIP-DRSI4')!;
+    const mapper = getDeviceMapper('HmIP-DRSI4') as DeviceMapper;
     const channels = makeDrsiChannels('HmIP-DRSI4', 4);
     const results = mapper(channels, VENDOR_ID, {});
     for (const { endpoint } of results) {
@@ -343,7 +343,7 @@ describe('device mapper: HmIP-DRSI4', () => {
   });
 
   test('each result should carry exactly its own channel (first SWITCH_VIRTUAL_RECEIVER)', () => {
-    const mapper = getDeviceMapper('HmIP-DRSI4')!;
+    const mapper = getDeviceMapper('HmIP-DRSI4') as DeviceMapper;
     const channels = makeDrsiChannels('HmIP-DRSI4', 4);
     const results = mapper(channels, VENDOR_ID, {});
     for (let i = 0; i < 4; i++) {
@@ -355,7 +355,7 @@ describe('device mapper: HmIP-DRSI4', () => {
   });
 
   test('each endpoint should have OnOff cluster', () => {
-    const mapper = getDeviceMapper('HmIP-DRSI4')!;
+    const mapper = getDeviceMapper('HmIP-DRSI4') as DeviceMapper;
     const channels = makeDrsiChannels('HmIP-DRSI4', 4);
     const results = mapper(channels, VENDOR_ID, {});
     for (const { endpoint } of results) {
@@ -364,12 +364,12 @@ describe('device mapper: HmIP-DRSI4', () => {
   });
 
   test('should return empty array when no SWITCH_TRANSMITTER channels are present', () => {
-    const mapper = getDeviceMapper('HmIP-DRSI4')!;
+    const mapper = getDeviceMapper('HmIP-DRSI4') as DeviceMapper;
     expect(mapper([], VENDOR_ID, {})).toHaveLength(0);
   });
 
   test('should ignore non-switch channels (e.g. MULTI_MODE_INPUT_TRANSMITTER)', () => {
-    const mapper = getDeviceMapper('HmIP-DRSI4')!;
+    const mapper = getDeviceMapper('HmIP-DRSI4') as DeviceMapper;
     const channels = [
       ...makeDrsiChannels('HmIP-DRSI4', 2),
       // ch1-4 on a real DRSI4 are MULTI_MODE_INPUT_TRANSMITTER — the mapper must ignore them.
@@ -380,7 +380,7 @@ describe('device mapper: HmIP-DRSI4', () => {
   });
 
   test('should work for HmIP-DRSI1 with a single switch output', () => {
-    const mapper = getDeviceMapper('HmIP-DRSI1')!;
+    const mapper = getDeviceMapper('HmIP-DRSI1') as DeviceMapper;
     const channels = makeDrsiChannels('HmIP-DRSI1', 1);
     const results = mapper(channels, VENDOR_ID, {});
     expect(results).toHaveLength(1);
@@ -412,7 +412,7 @@ describe('device mapper: HmIP-WTH', () => {
     });
 
     test(`should return one combined endpoint for ${deviceType}`, () => {
-      const mapper = getDeviceMapper(deviceType)!;
+      const mapper = getDeviceMapper(deviceType) as DeviceMapper;
       const channels = makeWthChannels(deviceType);
       const results = mapper(channels, VENDOR_ID, {});
       expect(results).toHaveLength(1);
@@ -420,28 +420,28 @@ describe('device mapper: HmIP-WTH', () => {
     });
 
     test(`the endpoint for ${deviceType} should have Thermostat cluster`, () => {
-      const mapper = getDeviceMapper(deviceType)!;
+      const mapper = getDeviceMapper(deviceType) as DeviceMapper;
       const channels = makeWthChannels(deviceType);
       const [{ endpoint: ep }] = mapper(channels, VENDOR_ID, {});
       expect(ep.hasClusterServer('Thermostat')).toBe(true);
     });
 
     test(`the endpoint for ${deviceType} should have RelativeHumidityMeasurement cluster`, () => {
-      const mapper = getDeviceMapper(deviceType)!;
+      const mapper = getDeviceMapper(deviceType) as DeviceMapper;
       const channels = makeWthChannels(deviceType);
       const [{ endpoint: ep }] = mapper(channels, VENDOR_ID, {});
       expect(ep.hasClusterServer('RelativeHumidityMeasurement')).toBe(true);
     });
 
     test(`the combined endpoint id for ${deviceType} should use the standard channel id`, () => {
-      const mapper = getDeviceMapper(deviceType)!;
+      const mapper = getDeviceMapper(deviceType) as DeviceMapper;
       const channels = makeWthChannels(deviceType);
       const [{ endpoint: ep }] = mapper(channels, VENDOR_ID, {});
       expect(ep.id).not.toMatch(/-humidity$/);
     });
 
     test(`the result for ${deviceType} should associate the endpoint with the heating channel`, () => {
-      const mapper = getDeviceMapper(deviceType)!;
+      const mapper = getDeviceMapper(deviceType) as DeviceMapper;
       const channels = makeWthChannels(deviceType);
       const [{ channels: mappedChannels }] = mapper(channels, VENDOR_ID, {});
       expect(mappedChannels).toHaveLength(1);
@@ -450,7 +450,7 @@ describe('device mapper: HmIP-WTH', () => {
   }
 
   test('should return empty array when no HEATING_CLIMATECONTROL_TRANSCEIVER channel present', () => {
-    const mapper = getDeviceMapper('HmIP-WTH')!;
+    const mapper = getDeviceMapper('HmIP-WTH') as DeviceMapper;
     const results = mapper([], VENDOR_ID, {});
     expect(results).toHaveLength(0);
   });
@@ -479,14 +479,14 @@ describe('device mapper: HmIP-STHD', () => {
     });
 
     test(`should return one combined endpoint for ${deviceType}`, () => {
-      const mapper = getDeviceMapper(deviceType)!;
+      const mapper = getDeviceMapper(deviceType) as DeviceMapper;
       const channels = makeSthdChannels(deviceType);
       const results = mapper(channels, VENDOR_ID, {});
       expect(results).toHaveLength(1);
     });
 
     test(`the endpoint for ${deviceType} should have RelativeHumidityMeasurement cluster`, () => {
-      const mapper = getDeviceMapper(deviceType)!;
+      const mapper = getDeviceMapper(deviceType) as DeviceMapper;
       const channels = makeSthdChannels(deviceType);
       const [{ endpoint: ep }] = mapper(channels, VENDOR_ID, {});
       expect(ep.hasClusterServer('RelativeHumidityMeasurement')).toBe(true);

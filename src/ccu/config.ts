@@ -97,6 +97,12 @@ function parseLoggingConfig(cfg: Record<string, ConfigValue>): CcuLoggingConfig 
   };
 }
 
+/**
+ * Parses the platform configuration object into a validated {@link CcuConnectionConfig}.
+ *
+ * @param {PlatformConfig} config - The raw platform configuration from Matterbridge.
+ * @returns {CcuConnectionConfig} The parsed and validated CCU connection configuration.
+ */
 export function parseCcuConnectionConfig(config: PlatformConfig): CcuConnectionConfig {
   const cfg = config as Record<string, ConfigValue>;
 

@@ -164,6 +164,9 @@ export default defineConfig([
       '@typescript-eslint/promise-function-async': 'off', // Require Promise-returning functions to be async
       '@typescript-eslint/require-await': 'off', // Disallow async functions without any await expression
       'jsdoc/require-jsdoc': 'off', // Disable JSDoc rule in test files
+      'jsdoc/require-returns': 'off', // Disable @returns requirement in test files
+      'jsdoc/require-param-description': 'off', // Disable @param description requirement in test files
+      'jsdoc/require-param-type': 'off', // Disable @param type requirement in test files
     },
   },
   {
@@ -193,6 +196,9 @@ export default defineConfig([
       '@typescript-eslint/promise-function-async': 'off', // Require Promise-returning functions to be async
       '@typescript-eslint/require-await': 'off', // Disallow async functions without any await expression
       'jsdoc/require-jsdoc': 'off', // Disable JSDoc rule in test files
+      'jsdoc/require-returns': 'off', // Disable @returns requirement in test files
+      'jsdoc/require-param-description': 'off', // Disable @param description requirement in test files
+      'jsdoc/require-param-type': 'off', // Disable @param type requirement in test files
     },
   },
   {

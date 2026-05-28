@@ -14,7 +14,7 @@ This guide explains the two-level mapper system used by the plugin and tells you
 
 The plugin converts Homematic channels to Matter endpoints through two distinct layers:
 
-```
+```text
 Homematic CCU channels
     ↓ resolveChannelsForMatter()   (device-mapper.ts)
 Resolved channels (HmIP virtual-receiver pairing, power meter merging)
@@ -37,7 +37,7 @@ Matter endpoints registered in Matterbridge
 
 A **channel mapper** converts one resolved Homematic channel to one `MatterbridgeEndpoint`. It lives in `src/ccu/channel-mapper/<type>.ts` and is registered in `src/ccu/channel-mapper/index.ts`.
 
-```
+```text
 SWITCH channel → one onOffLight / outlet / switch endpoint
 BLIND channel  → one windowCovering endpoint
 DIMMER channel → one dimmableLight endpoint
@@ -50,6 +50,7 @@ A **device mapper** receives ALL resolved channels for one physical Homematic de
 Device mappers **always run before** the channel loop. A device whose type is registered in `DEVICE_MAPPERS` is never touched by the channel loop.
 
 Use a device mapper when:
+
 - The default channel-type mapping is wrong for a specific device model.
 - You want to combine multiple channels into one endpoint (e.g. thermostat + humidity).
 - You want to split a multi-channel device into separate endpoints per zone/output.
@@ -73,7 +74,7 @@ export type ChannelMapper = (
 
 ### File layout
 
-```
+```text
 src/ccu/channel-mapper/<type-key>.ts   e.g. switch.ts, blind.ts
 ```
 
@@ -135,16 +136,16 @@ export interface MappedDeviceEndpoint {
 
 ### Return value rules
 
-| Scenario | Return value |
-|---|---|
-| Required channel absent | `[]` (suppresses the device entirely) |
-| Single combined endpoint (e.g. WTH thermostat+humidity) | `[{ endpoint, channels: [heatingChannel] }]` |
-| Multiple endpoints (e.g. multi-zone floor heating) | one entry per zone, each with its channel |
-| Device mapper delegates fully to channel mapper | `[{ endpoint: mapSwitchChannel(...), channels: [switchChannel] }]` |
+| Scenario                                                | Return value                                                       |
+| ------------------------------------------------------- | ------------------------------------------------------------------ |
+| Required channel absent                                 | `[]` (suppresses the device entirely)                              |
+| Single combined endpoint (e.g. WTH thermostat+humidity) | `[{ endpoint, channels: [heatingChannel] }]`                       |
+| Multiple endpoints (e.g. multi-zone floor heating)      | one entry per zone, each with its channel                          |
+| Device mapper delegates fully to channel mapper         | `[{ endpoint: mapSwitchChannel(...), channels: [switchChannel] }]` |
 
 ### File layout
 
-```
+```text
 src/ccu/device-mapper/<device-key>.ts   e.g. hmip-wth.ts, hmip-bsm.ts
 ```
 
@@ -243,7 +244,7 @@ This pattern is the recommended way to reuse standard channel mapper logic while
 
 ## Architecture flow in `module.ts`
 
-```
+```text
 discoverDevices():
 
   1. resolveChannelsForMatter(rawChannels)
