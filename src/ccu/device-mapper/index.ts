@@ -14,7 +14,6 @@
 import { DeviceMapper } from '../types.js';
 import { mapDevice as hmipBsm } from './hmip-bsm.js';
 import { mapDevice as hmipDrsi4 } from './hmip-drsi4.js';
-import { mapDevice as hmipSthd } from './hmip-sthd.js';
 import { mapDevice as hmipWth } from './hmip-wth.js';
 
 /**
@@ -38,10 +37,10 @@ export const DEVICE_MAPPERS: Record<string, DeviceMapper> = {
   'hmip-bwth-a': hmipWth,
   'hmip-bwth24': hmipWth,
   // HmIP-STHD / STH — same channel layout as WTH.
-  'hmip-sthd': hmipSthd,
-  'hmip-sthd-a': hmipSthd,
-  'hmip-sth': hmipSthd,
-  'hmip-sth-a': hmipSthd,
+  'hmip-sthd': hmipWth,
+  'hmip-sthd-a': hmipWth,
+  'hmip-sth': hmipWth,
+  'hmip-sth-a': hmipWth,
 };
 
 /**
