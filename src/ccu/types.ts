@@ -149,6 +149,8 @@ export interface CcuChannelInfo {
   type: string;
   /** Homematic root device model/type string, e.g. `'HM-LC-Sw1-Pl-2'`. */
   deviceType?: string;
+  /** Firmware version of the root device as reported by `listDevices`, e.g. `'1.4.2'`. Used for paramset cache key construction. */
+  deviceFirmware?: string;
   /** RPC interface on which this channel was discovered. */
   interfaceName: Exclude<CcuInterfaceName, 'ReGaHSS'>;
   /** ReGa display name for the channel, if available. */

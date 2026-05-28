@@ -38,6 +38,7 @@ type RpcInterfaceName = Exclude<CcuInterfaceName, 'ReGaHSS'>;
 interface RpcDeviceDescription {
   ADDRESS: string;
   TYPE: string;
+  FIRMWARE?: string;
 }
 
 interface RpcInterfaceDefinition {
@@ -302,11 +303,15 @@ export class CcuConnectionLayer extends EventEmitter {
         try {
           const devices = (await this.callRpc(iface, 'listDevices', [])) as RpcDeviceDescription[];
           const deviceTypeByAddress = new Map<string, string>();
+          const deviceFirmwareByAddress = new Map<string, string>();
 
           for (const dev of devices) {
             if (typeof dev.ADDRESS !== 'string' || dev.ADDRESS.includes(':')) continue;
             if (typeof dev.TYPE !== 'string') continue;
             deviceTypeByAddress.set(dev.ADDRESS, dev.TYPE);
+            if (typeof dev.FIRMWARE === 'string' && dev.FIRMWARE.length > 0) {
+              deviceFirmwareByAddress.set(dev.ADDRESS, dev.FIRMWARE);
+            }
           }
 
           const channels: CcuChannelInfo[] = [];
@@ -324,6 +329,7 @@ export class CcuConnectionLayer extends EventEmitter {
               channelIndex,
               type: dev.TYPE,
               deviceType: deviceTypeByAddress.get(deviceAddress),
+              deviceFirmware: deviceFirmwareByAddress.get(deviceAddress),
               interfaceName: iface,
               name: nameMap.get(dev.ADDRESS),
               batteryPowered: this.deviceBatteryHints.get(deviceAddress),

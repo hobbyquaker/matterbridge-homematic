@@ -37,6 +37,7 @@ import {
   resolveChannelsForMatter,
 } from './ccu/device-mapper.js';
 import { getBatteryVoltageRange, getMatchingMainsPoweredPrefix, isAlwaysMainsPoweredDeviceType, MAINS_POWERED_DEVICE_TYPE_PREFIXES } from './ccu/device-power.js';
+import { ParamsetCache } from './ccu/paramset-cache.js';
 import { CcuChannelInfo, CcuChannelOverride, CcuInterfaceName } from './ccu/types.js';
 
 /**
@@ -140,6 +141,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
   private batteryRediscoveryTimer?: NodeJS.Timeout;
 
+  private paramsetCache?: ParamsetCache;
+
   constructor(matterbridge: PlatformMatterbridge, log: AnsiLogger, config: PlatformConfig) {
     // Always call super(matterbridge, log, config)
     super(matterbridge, log, config);
@@ -168,6 +171,10 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     const ccuConfig = parseCcuConnectionConfig(this.config);
     const cacheDir = path.join(os.homedir(), '.matterbridge');
     this.ccuConnection = new CcuConnectionLayer(ccuConfig, this.log, cacheDir);
+
+    this.paramsetCache = new ParamsetCache(this.log, cacheDir);
+    await this.paramsetCache.load();
+
     await this.ccuConnection.start();
 
     // Listen for channel updates and refresh device names when ReGa names arrive
@@ -755,17 +762,20 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     if (candidates.size === 0) return;
 
     let detectedCount = 0;
+    let cacheHits = 0;
     await Promise.all(
       [...candidates.entries()].map(async ([deviceAddress, iface]) => {
         const address = `${deviceAddress}:0`;
-        const valuesDescription = await this.getParamsetDescriptionSafe(iface, address, 'VALUES');
-        const masterDescription = valuesDescription ? undefined : await this.getParamsetDescriptionSafe(iface, address, 'MASTER');
-        const description = valuesDescription ?? masterDescription;
+        const rootChannel = channels.find((c) => c.deviceAddress === deviceAddress && c.channelIndex === 0);
+
+        // Consult the paramset cache before making live RPC calls.
+        const description = await this.getParamsetDescriptionCached(iface, address, rootChannel, (hit) => {
+          if (hit) cacheHits++;
+        });
 
         if (!description || !this.hasLowBatKey(description)) return;
 
         this.deviceBatteryHints.set(deviceAddress, true);
-        const rootChannel = channels.find((c) => c.deviceAddress === deviceAddress && c.channelIndex === 0);
         this.log.debug(
           `Battery classify startup <- device=${deviceAddress} channelType=${rootChannel?.type ?? 'unknown'} deviceType=${rootChannel?.deviceType ?? 'unknown'} classifierType=${rootChannel?.deviceType ?? rootChannel?.type ?? 'unknown'} mainsPrefix=none batteryHint=true source=getParamsetDescription`,
         );
@@ -782,6 +792,57 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     if (detectedCount > 0) {
       this.log.info(`Detected ${detectedCount} battery-powered devices from RPC paramset descriptions`);
     }
+    if (cacheHits > 0) {
+      this.log.debug(`Paramset cache: served ${cacheHits} battery-hint lookups from cache (no RPC call needed)`);
+    }
+
+    // Persist any newly learned overlay entries.
+    await this.paramsetCache?.save();
+  }
+
+  /**
+   * Retrieve a paramset description, consulting the cache first and falling back to live RPC.
+   * Successful RPC results are written through to the cache overlay.
+   *
+   * @param {string} iface RPC interface name.
+   * @param {string} address Full channel address (e.g. `'DEVICE:0'`).
+   * @param {CcuChannelInfo | undefined} channelInfo Channel info used to build the cache key (optional).
+   * @param {(hit: boolean) => void} [onCacheResult] Callback invoked with `true` on cache hit, `false` on miss.
+   * @returns {Promise<Record<string, unknown> | undefined>} Paramset description, or `undefined` if unavailable.
+   */
+  private async getParamsetDescriptionCached(
+    iface: 'BidCos-RF' | 'BidCos-Wired' | 'HmIP-RF' | 'VirtualDevices' | 'CUxD',
+    address: string,
+    channelInfo: CcuChannelInfo | undefined,
+    onCacheResult?: (hit: boolean) => void,
+  ): Promise<Record<string, unknown> | undefined> {
+    const channelIndex = parseInt(address.split(':')[1] ?? '0', 10);
+
+    for (const paramsetKey of ['VALUES', 'MASTER'] as const) {
+      // 1. Try cache.
+      if (this.paramsetCache && channelInfo?.deviceType) {
+        const cached = this.paramsetCache.lookup(iface, channelInfo.deviceType, channelInfo.deviceFirmware, channelIndex, channelInfo.type, paramsetKey);
+        if (cached) {
+          onCacheResult?.(true);
+          return cached;
+        }
+      }
+
+      // 2. Live RPC.
+      const result = await this.getParamsetDescriptionSafe(iface, address, paramsetKey);
+      onCacheResult?.(false);
+
+      if (!result) continue;
+
+      // 3. Write-through: store successful RPC result in overlay.
+      if (this.paramsetCache && channelInfo?.deviceType) {
+        this.paramsetCache.store(iface, channelInfo.deviceType, channelInfo.deviceFirmware, channelIndex, channelInfo.type, paramsetKey, result);
+      }
+
+      return result;
+    }
+
+    return undefined;
   }
 
   private updateMainsPoweredDeviceSet(channels: CcuChannelInfo[]): void {

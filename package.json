@@ -61,13 +61,14 @@
     "dist",
     "npm-shrinkwrap.json",
     "CHANGELOG.md",
+    "paramsets.json",
     "*.config.json",
     "*.schema.json"
   ],
   "scripts": {
     "start": "matterbridge",
-    "build": "tsc --project tsconfig.build.json",
-    "buildProduction": "tsc --project tsconfig.build.production.json",
+    "build": "tsc --project tsconfig.build.json && npx shx cp paramsets.json dist/",
+    "buildProduction": "tsc --project tsconfig.build.production.json && npx shx cp paramsets.json dist/",
     "clean": "npx shx rm -rf *.tsbuildinfo dist",
     "cleanBuild": "npm run clean && npm run build",
     "cleanBuildProduction": "npm run clean && npm run buildProduction",
