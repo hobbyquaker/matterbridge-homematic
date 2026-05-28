@@ -326,16 +326,48 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       enabledCount++;
       this.logChannelMapperSelection(channel, displayName);
 
-      const endpoint = createEndpointForChannel(channel as Parameters<typeof createEndpointForChannel>[0], this.matterbridge.aggregatorVendorId, {
-        switchMatterType: override?.switchMatterType ?? inferSwitchMatterTypeFromName(channel.name),
-        batteryPowered: this.deviceBatteryHints.get(channel.deviceAddress) ?? channel.batteryPowered,
-      });
+      // For HEATING_CLIMATECONTROL_TRANSCEIVER channels on devices with a registered device mapper
+      // (HmIP-WTH, STHD, STH family), the mapper returns a single combined endpoint with both the
+      // thermostat and humidity clusters. Use it instead of the standard channel mapper result so
+      // that both appear as one device — matching the HomeKit experience.
+      let deviceMapperEndpoint: MatterbridgeEndpoint | undefined;
+      if (channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' && channel.deviceType && !deviceMapperHandled.has(channel.deviceAddress)) {
+        const deviceMapper = getDeviceMapper(channel.deviceType);
+        if (deviceMapper) {
+          deviceMapperHandled.add(channel.deviceAddress);
+          const deviceChannels = channels.filter((c) => c.deviceAddress === channel.deviceAddress);
+          this.logDeviceMapperSelection(channel.deviceAddress, channel.deviceType, deviceChannels);
+          const mappingOptions = {
+            switchMatterType: override?.switchMatterType ?? inferSwitchMatterTypeFromName(channel.name),
+            batteryPowered: this.deviceBatteryHints.get(channel.deviceAddress) ?? channel.batteryPowered,
+          };
+          const deviceEndpoints = deviceMapper(deviceChannels, this.matterbridge.aggregatorVendorId, mappingOptions);
+          deviceMapperEndpoint = deviceEndpoints[0];
+        } else {
+          this.log.debug(`No device mapper for HEATING_CLIMATECONTROL_TRANSCEIVER channel=${channel.address} deviceType=${channel.deviceType}`);
+        }
+      } else if (channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' && !channel.deviceType) {
+        this.log.debug(`No device mapper for HEATING_CLIMATECONTROL_TRANSCEIVER channel=${channel.address}: deviceType not reported by CCU`);
+      }
+
+      const endpoint =
+        deviceMapperEndpoint ??
+        createEndpointForChannel(channel as Parameters<typeof createEndpointForChannel>[0], this.matterbridge.aggregatorVendorId, {
+          switchMatterType: override?.switchMatterType ?? inferSwitchMatterTypeFromName(channel.name),
+          batteryPowered: this.deviceBatteryHints.get(channel.deviceAddress) ?? channel.batteryPowered,
+        });
 
       await this.registerDevice(endpoint);
       registeredCount++;
 
       // Track device for availability monitoring (keyed by root device address).
       this.deviceAddressToDevice.set(channel.deviceAddress, endpoint);
+
+      // Track combined thermostat+humidity endpoint for RPC event routing.
+      if (deviceMapperEndpoint?.hasClusterServer('RelativeHumidityMeasurement')) {
+        this.wthHumidityChannels.set(channel.address, deviceMapperEndpoint);
+        this.log.debug(`Registered combined thermostat+humidity endpoint for ${channel.address} (${channel.deviceType})`);
+      }
 
       // Wire OnOff attribute for SWITCH channels
       if (channel.type === 'SWITCH' && this.ccuConnection) {
@@ -513,37 +545,6 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         } catch (err) {
           this.log.warn(`Failed to subscribe Thermostat mode for ${channel.address}: ${String(err)}`);
         }
-      }
-
-      // For HEATING_CLIMATECONTROL_TRANSCEIVER channels on devices with a registered device mapper
-      // (HmIP-WTH, STHD, STH family), create and register a dedicated humiditySensor endpoint.
-      // The thermostat endpoint is already registered above via createEndpointForChannel; we only
-      // need the additional endpoints the device mapper produces (filtered by RelativeHumidityMeasurement).
-      // The deviceMapperHandled guard ensures we call the mapper at most once per physical device.
-      if (channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' && channel.deviceType && !deviceMapperHandled.has(channel.deviceAddress)) {
-        const deviceMapper = getDeviceMapper(channel.deviceType);
-        if (deviceMapper) {
-          deviceMapperHandled.add(channel.deviceAddress);
-          const deviceChannels = channels.filter((c) => c.deviceAddress === channel.deviceAddress);
-          this.logDeviceMapperSelection(channel.deviceAddress, channel.deviceType, deviceChannels);
-          const mappingOptions = {
-            switchMatterType: override?.switchMatterType ?? inferSwitchMatterTypeFromName(channel.name),
-            batteryPowered: this.deviceBatteryHints.get(channel.deviceAddress) ?? channel.batteryPowered,
-          };
-          const deviceEndpoints = deviceMapper(deviceChannels, this.matterbridge.aggregatorVendorId, mappingOptions);
-          for (const ep of deviceEndpoints) {
-            // Skip the thermostat endpoint — it has already been registered by createEndpointForChannel above.
-            if (!ep.hasClusterServer('RelativeHumidityMeasurement')) continue;
-            await this.registerDevice(ep);
-            registeredCount++;
-            this.wthHumidityChannels.set(channel.address, ep);
-            this.log.debug(`Registered humiditySensor endpoint for ${channel.address} (${channel.deviceType})`);
-          }
-        } else {
-          this.log.debug(`No device mapper for HEATING_CLIMATECONTROL_TRANSCEIVER channel=${channel.address} deviceType=${channel.deviceType}`);
-        }
-      } else if (channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' && !channel.deviceType) {
-        this.log.debug(`No device mapper for HEATING_CLIMATECONTROL_TRANSCEIVER channel=${channel.address}: deviceType not reported by CCU`);
       }
 
       // Wire DoorLock commands for KEYMATIC channels.

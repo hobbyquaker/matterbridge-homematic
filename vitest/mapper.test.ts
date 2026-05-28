@@ -249,34 +249,33 @@ describe('device mapper: HmIP-WTH', () => {
       expect(getDeviceMapper(deviceType)).toBeDefined();
     });
 
-    test(`should return two endpoints for ${deviceType}`, () => {
+    test(`should return one combined endpoint for ${deviceType}`, () => {
       const mapper = getDeviceMapper(deviceType)!;
       const channels = makeWthChannels(deviceType);
       const endpoints = mapper(channels, VENDOR_ID, {});
-      expect(endpoints).toHaveLength(2);
+      expect(endpoints).toHaveLength(1);
       expect(endpoints[0]).toBeInstanceOf(MatterbridgeEndpoint);
-      expect(endpoints[1]).toBeInstanceOf(MatterbridgeEndpoint);
     });
 
-    test(`first endpoint for ${deviceType} should have Thermostat cluster`, () => {
+    test(`the endpoint for ${deviceType} should have Thermostat cluster`, () => {
       const mapper = getDeviceMapper(deviceType)!;
       const channels = makeWthChannels(deviceType);
-      const [thermostatEp] = mapper(channels, VENDOR_ID, {});
-      expect(thermostatEp.hasClusterServer('Thermostat')).toBe(true);
+      const [ep] = mapper(channels, VENDOR_ID, {});
+      expect(ep.hasClusterServer('Thermostat')).toBe(true);
     });
 
-    test(`second endpoint for ${deviceType} should have RelativeHumidityMeasurement cluster`, () => {
+    test(`the endpoint for ${deviceType} should have RelativeHumidityMeasurement cluster`, () => {
       const mapper = getDeviceMapper(deviceType)!;
       const channels = makeWthChannels(deviceType);
-      const [, humidityEp] = mapper(channels, VENDOR_ID, {});
-      expect(humidityEp.hasClusterServer('RelativeHumidityMeasurement')).toBe(true);
+      const [ep] = mapper(channels, VENDOR_ID, {});
+      expect(ep.hasClusterServer('RelativeHumidityMeasurement')).toBe(true);
     });
 
-    test(`humidity endpoint id for ${deviceType} should have '-humidity' suffix`, () => {
+    test(`the combined endpoint id for ${deviceType} should use the standard channel id`, () => {
       const mapper = getDeviceMapper(deviceType)!;
       const channels = makeWthChannels(deviceType);
-      const [, humidityEp] = mapper(channels, VENDOR_ID, {});
-      expect(humidityEp.id).toMatch(/-humidity$/);
+      const [ep] = mapper(channels, VENDOR_ID, {});
+      expect(ep.id).not.toMatch(/-humidity$/);
     });
   }
 
@@ -309,18 +308,18 @@ describe('device mapper: HmIP-STHD', () => {
       expect(getDeviceMapper(deviceType)).toBeDefined();
     });
 
-    test(`should return two endpoints for ${deviceType}`, () => {
+    test(`should return one combined endpoint for ${deviceType}`, () => {
       const mapper = getDeviceMapper(deviceType)!;
       const channels = makeSthdChannels(deviceType);
       const endpoints = mapper(channels, VENDOR_ID, {});
-      expect(endpoints).toHaveLength(2);
+      expect(endpoints).toHaveLength(1);
     });
 
-    test(`second endpoint for ${deviceType} should have RelativeHumidityMeasurement cluster`, () => {
+    test(`the endpoint for ${deviceType} should have RelativeHumidityMeasurement cluster`, () => {
       const mapper = getDeviceMapper(deviceType)!;
       const channels = makeSthdChannels(deviceType);
-      const [, humidityEp] = mapper(channels, VENDOR_ID, {});
-      expect(humidityEp.hasClusterServer('RelativeHumidityMeasurement')).toBe(true);
+      const [ep] = mapper(channels, VENDOR_ID, {});
+      expect(ep.hasClusterServer('RelativeHumidityMeasurement')).toBe(true);
     });
   }
 });

@@ -2,23 +2,22 @@
  * Device mapper for HmIP-WTH / WTH-2 / WTH-B wall thermostats.
  *
  * The HEATING_CLIMATECONTROL_TRANSCEIVER channel on these devices carries both temperature /
- * setpoint data and a HUMIDITY datapoint. The standard channel mapper creates only a
- * thermostatDevice endpoint. This device mapper additionally returns a dedicated
- * humiditySensor endpoint sourced from the same channel address.
+ * setpoint data and a HUMIDITY datapoint. This device mapper combines both into a single Matter
+ * endpoint with the thermostatDevice + humiditySensor device types, so that Home.app shows them
+ * as one device — matching the HomeKit experience.
  *
  * @file device-mapper/hmip-wth.ts
  */
 
-import { humiditySensor, MatterbridgeEndpoint } from 'matterbridge';
+import { humiditySensor, MatterbridgeEndpoint, thermostatDevice } from 'matterbridge';
 
-import { mapChannel as mapHeatingChannel } from '../channel-mapper/heating-climatecontrol-transceiver.js';
-import { buildDisplayName, buildEndpointId, buildModel, finalizeEndpoint } from '../mapper-utils.js';
+import { buildDisplayName, buildEndpointId, buildModel, buildSerialNumber, finalizeEndpoint } from '../mapper-utils.js';
 import { DeviceMapper } from '../types.js';
 
 /**
- * Device mapper for HmIP-WTH, HmIP-WTH-2, and HmIP-WTH-B.
- * Returns a thermostatDevice endpoint and a humiditySensor endpoint, both sourced from the
- * HEATING_CLIMATECONTROL_TRANSCEIVER channel.
+ * Device mapper for HmIP-WTH, HmIP-WTH-2, HmIP-WTH-B, HmIP-STHD, HmIP-STH, and related variants.
+ * Returns a single endpoint combining thermostatDevice and humiditySensor device types so that
+ * temperature control and humidity measurement appear as one accessory in the Matter home.
  *
  * @type {DeviceMapper}
  */
@@ -26,21 +25,19 @@ export const mapDevice: DeviceMapper = (channels, vendorId, options) => {
   const heatingChannel = channels.find((c) => c.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER');
   if (!heatingChannel) return [];
 
-  const thermostatEndpoint = mapHeatingChannel(heatingChannel, vendorId, options);
-
-  // Build a dedicated humiditySensor endpoint from the same channel address.
-  // The endpoint id gets a '-humidity' suffix so it is stable and distinct from the thermostat.
-  const humidityId = `${buildEndpointId(heatingChannel)}-humidity`;
-  const displayName = `${buildDisplayName(heatingChannel)} Humidity`;
+  const id = buildEndpointId(heatingChannel);
+  const displayName = buildDisplayName(heatingChannel);
+  const serialNumber = buildSerialNumber(heatingChannel, 'HEATING_CLIMATECONTROL_TRANSCEIVER');
   const model = buildModel(heatingChannel);
-  const serialNumber = `${heatingChannel.interfaceName}:HUMIDITY:${heatingChannel.address}`;
 
-  const humidityEndpoint = finalizeEndpoint(
-    new MatterbridgeEndpoint([humiditySensor], { id: humidityId })
-      .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
-      .createDefaultRelativeHumidityMeasurementClusterServer(),
-    { ...options, batteryPowered: heatingChannel.batteryPowered },
-  );
-
-  return [thermostatEndpoint, humidityEndpoint];
+  return [
+    finalizeEndpoint(
+      new MatterbridgeEndpoint([thermostatDevice, humiditySensor], { id })
+        .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
+        // localTemperature=23°C, occupiedHeatingSetpoint=21°C as defaults; updated from RPC on startup.
+        .createDefaultHeatingThermostatClusterServer(23, 21)
+        .createDefaultRelativeHumidityMeasurementClusterServer(),
+      { ...options, batteryPowered: heatingChannel.batteryPowered },
+    ),
+  ];
 };
