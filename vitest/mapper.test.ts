@@ -37,6 +37,20 @@ function makeChannel(overrides: Partial<CcuChannelInfo> & { type: SupportedChann
   } as CcuChannelInfo & { type: SupportedChannelType };
 }
 
+/** Like {@link makeChannel} but accepts any raw CCU channel type string, not just supported ones. */
+function makeRawChannel(overrides: Partial<CcuChannelInfo> & { type: string }): CcuChannelInfo {
+  return {
+    address: 'ABC123456:1',
+    deviceAddress: 'ABC123456',
+    deviceType: 'HmIP-TEST',
+    channelIndex: 1,
+    interfaceName: 'HmIP-RF',
+    batteryPowered: false,
+    name: 'Test Channel',
+    ...overrides,
+  } as CcuChannelInfo;
+}
+
 const VENDOR_ID = 0xfff1;
 
 // ---------------------------------------------------------------------------
@@ -232,19 +246,70 @@ describe('channel mapper: KEYMATIC', () => {
 // ---------------------------------------------------------------------------
 
 describe('device mapper: HmIP-DRSI4', () => {
-  /** Build N SWITCH channels for one device, simulating post-pairing resolved channels. */
+  /**
+   * Build raw Homematic channels for N switch outputs of one device, matching the real
+   * HmIP-DRSI4 layout: each output has one SWITCH_TRANSMITTER followed by three
+   * SWITCH_VIRTUAL_RECEIVER channels.
+   *
+   * Channel index layout (0-based group index i):
+   *   tx  → channelIndex: i*4 + 1
+   *   rx1 → channelIndex: i*4 + 2  (first VR — the one selected by the mapper)
+   *   rx2 → channelIndex: i*4 + 3
+   *   rx3 → channelIndex: i*4 + 4
+   *
+   * @param deviceType
+   * @param count
+   */
   function makeDrsiChannels(deviceType: string, count: number): CcuChannelInfo[] {
-    return Array.from({ length: count }, (_, i) =>
-      makeChannel({
-        type: 'SWITCH',
-        deviceType,
-        address: `DRSI4XXXXX:${i + 1}`,
-        deviceAddress: 'DRSI4XXXXX',
-        channelIndex: i + 1,
-        name: `Output ${i + 1}`,
-        batteryPowered: false,
-      }),
-    );
+    return Array.from({ length: count }, (_, i) => {
+      const txIndex = i * 4 + 1;
+      const rx1Index = i * 4 + 2;
+      const rx2Index = i * 4 + 3;
+      const rx3Index = i * 4 + 4;
+      return [
+        makeRawChannel({
+          type: 'SWITCH_TRANSMITTER',
+          deviceType,
+          address: `DRSI4XXXXX:${txIndex}`,
+          deviceAddress: 'DRSI4XXXXX',
+          channelIndex: txIndex,
+          name: `Output ${i + 1} TX`,
+          batteryPowered: false,
+        }),
+        makeRawChannel({
+          type: 'SWITCH_VIRTUAL_RECEIVER',
+          deviceType,
+          address: `DRSI4XXXXX:${rx1Index}`,
+          deviceAddress: 'DRSI4XXXXX',
+          channelIndex: rx1Index,
+          name: `Output ${i + 1}`,
+          batteryPowered: false,
+        }),
+        makeRawChannel({
+          type: 'SWITCH_VIRTUAL_RECEIVER',
+          deviceType,
+          address: `DRSI4XXXXX:${rx2Index}`,
+          deviceAddress: 'DRSI4XXXXX',
+          channelIndex: rx2Index,
+          name: `Output ${i + 1} VR2`,
+          batteryPowered: false,
+        }),
+        makeRawChannel({
+          type: 'SWITCH_VIRTUAL_RECEIVER',
+          deviceType,
+          address: `DRSI4XXXXX:${rx3Index}`,
+          deviceAddress: 'DRSI4XXXXX',
+          channelIndex: rx3Index,
+          name: `Output ${i + 1} VR3`,
+          batteryPowered: false,
+        }),
+      ];
+    }).flat();
+  }
+
+  /** Address of the first SWITCH_VIRTUAL_RECEIVER for output i (0-based). */
+  function drsiRxAddress(i: number): string {
+    return `DRSI4XXXXX:${i * 4 + 2}`;
   }
 
   for (const deviceType of ['HmIP-DRSI4', 'HmIP-DRSI1', 'MOD-OC8']) {
@@ -253,7 +318,7 @@ describe('device mapper: HmIP-DRSI4', () => {
     });
   }
 
-  test('should return one endpoint per SWITCH channel', () => {
+  test('should return one endpoint per switch output (SWITCH_TRANSMITTER → SWITCH_VIRTUAL_RECEIVER pair)', () => {
     const mapper = getDeviceMapper('HmIP-DRSI4')!;
     const channels = makeDrsiChannels('HmIP-DRSI4', 4);
     const results = mapper(channels, VENDOR_ID, {});
@@ -269,13 +334,15 @@ describe('device mapper: HmIP-DRSI4', () => {
     }
   });
 
-  test('each result should carry exactly its own channel', () => {
+  test('each result should carry exactly its own channel (first SWITCH_VIRTUAL_RECEIVER)', () => {
     const mapper = getDeviceMapper('HmIP-DRSI4')!;
     const channels = makeDrsiChannels('HmIP-DRSI4', 4);
     const results = mapper(channels, VENDOR_ID, {});
     for (let i = 0; i < 4; i++) {
       expect(results[i].channels).toHaveLength(1);
-      expect(results[i].channels[0].address).toBe(`DRSI4XXXXX:${i + 1}`);
+      // The returned channel is the first SWITCH_VIRTUAL_RECEIVER, re-typed to SWITCH.
+      expect(results[i].channels[0].address).toBe(drsiRxAddress(i));
+      expect(results[i].channels[0].type).toBe('SWITCH');
     }
   });
 
@@ -288,27 +355,29 @@ describe('device mapper: HmIP-DRSI4', () => {
     }
   });
 
-  test('should return empty array when no SWITCH channels are present', () => {
+  test('should return empty array when no SWITCH_TRANSMITTER channels are present', () => {
     const mapper = getDeviceMapper('HmIP-DRSI4')!;
     expect(mapper([], VENDOR_ID, {})).toHaveLength(0);
   });
 
-  test('should ignore non-SWITCH channels', () => {
+  test('should ignore non-switch channels (e.g. MULTI_MODE_INPUT_TRANSMITTER)', () => {
     const mapper = getDeviceMapper('HmIP-DRSI4')!;
     const channels = [
       ...makeDrsiChannels('HmIP-DRSI4', 2),
-      makeChannel({ type: 'KEY', deviceType: 'HmIP-DRSI4', address: 'DRSI4XXXXX:5', deviceAddress: 'DRSI4XXXXX', channelIndex: 5 }),
+      // ch1-4 on a real DRSI4 are MULTI_MODE_INPUT_TRANSMITTER — the mapper must ignore them.
+      makeRawChannel({ type: 'MULTI_MODE_INPUT_TRANSMITTER', deviceType: 'HmIP-DRSI4', address: 'DRSI4XXXXX:100', deviceAddress: 'DRSI4XXXXX', channelIndex: 100 }),
     ];
     const results = mapper(channels, VENDOR_ID, {});
     expect(results).toHaveLength(2);
   });
 
-  test('should work for HmIP-DRSI1 with a single channel', () => {
+  test('should work for HmIP-DRSI1 with a single switch output', () => {
     const mapper = getDeviceMapper('HmIP-DRSI1')!;
     const channels = makeDrsiChannels('HmIP-DRSI1', 1);
     const results = mapper(channels, VENDOR_ID, {});
     expect(results).toHaveLength(1);
-    expect(results[0].channels[0].address).toBe('DRSI4XXXXX:1');
+    // First SWITCH_VIRTUAL_RECEIVER of the single output.
+    expect(results[0].channels[0].address).toBe(drsiRxAddress(0));
   });
 
   test('should work for MOD-OC8 with eight channels', () => {

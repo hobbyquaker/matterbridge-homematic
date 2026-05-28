@@ -4,19 +4,43 @@
  *
  * **Multi-endpoint pattern** — this mapper is the canonical example for producing more than
  * one `MappedDeviceEndpoint` from a single physical device. The HmIP-DRSI4 exposes four
- * independent output channels, each of which must become its own Matter on/off device:
+ * independent output channels, each of which becomes its own Matter on/off device.
+ *
+ * ## Real HmIP-DRSI4 channel structure
  *
  * ```
- * HmIP-DRSI4 (one CCU device)
- *   SWITCH ch 1  →  MappedDeviceEndpoint { endpoint, channels: [ch1] }
- *   SWITCH ch 2  →  MappedDeviceEndpoint { endpoint, channels: [ch2] }
- *   SWITCH ch 3  →  MappedDeviceEndpoint { endpoint, channels: [ch3] }
- *   SWITCH ch 4  →  MappedDeviceEndpoint { endpoint, channels: [ch4] }
+ * ch0   MAINTENANCE                        — housekeeping (not exposed)
+ * ch1   MULTI_MODE_INPUT_TRANSMITTER       — input button 1 (SENDER)
+ * ch2   MULTI_MODE_INPUT_TRANSMITTER       — input button 2 (SENDER)
+ * ch3   MULTI_MODE_INPUT_TRANSMITTER       — input button 3 (SENDER)
+ * ch4   MULTI_MODE_INPUT_TRANSMITTER       — input button 4 (SENDER)
+ * ch5   SWITCH_TRANSMITTER                 — output 1 physical relay state (NONE)
+ * ch6   SWITCH_VIRTUAL_RECEIVER            — output 1 control ch, 1st VR (RECEIVER) ← used
+ * ch7   SWITCH_VIRTUAL_RECEIVER            — output 1 control ch, 2nd VR (RECEIVER)
+ * ch8   SWITCH_VIRTUAL_RECEIVER            — output 1 control ch, 3rd VR (RECEIVER)
+ * ch9   SWITCH_TRANSMITTER                 — output 2 physical relay state (NONE)
+ * ch10  SWITCH_VIRTUAL_RECEIVER            — output 2 control ch, 1st VR (RECEIVER) ← used
+ * ch11  SWITCH_VIRTUAL_RECEIVER            — output 2 control ch, 2nd VR (RECEIVER)
+ * ch12  SWITCH_VIRTUAL_RECEIVER            — output 2 control ch, 3rd VR (RECEIVER)
+ * ch13  SWITCH_TRANSMITTER                 — output 3 physical relay state (NONE)
+ * ch14  SWITCH_VIRTUAL_RECEIVER            — output 3 control ch, 1st VR (RECEIVER) ← used
+ * ch15  SWITCH_VIRTUAL_RECEIVER            — output 3 control ch, 2nd VR (RECEIVER)
+ * ch16  SWITCH_VIRTUAL_RECEIVER            — output 3 control ch, 3rd VR (RECEIVER)
+ * ch17  SWITCH_TRANSMITTER                 — output 4 physical relay state (NONE)
+ * ch18  SWITCH_VIRTUAL_RECEIVER            — output 4 control ch, 1st VR (RECEIVER) ← used
+ * ch19  SWITCH_VIRTUAL_RECEIVER            — output 4 control ch, 2nd VR (RECEIVER)
+ * ch20  SWITCH_VIRTUAL_RECEIVER            — output 4 control ch, 3rd VR (RECEIVER)
+ * ch21  SWITCH_WEEK_PROFILE                — weekly timer profile (not exposed)
  * ```
  *
- * `resolveChannelsForMatter` already pairs the `SWITCH_TRANSMITTER` channels with their
- * `SWITCH_VIRTUAL_RECEIVER` counterparts and renames them to type `SWITCH`, so by the time
- * this mapper is called, each output is already a canonical `SWITCH` channel.
+ * Each output has exactly one `SWITCH_TRANSMITTER` (reports the physical relay state) followed
+ * by three `SWITCH_VIRTUAL_RECEIVER` channels (the addressable control endpoints). We pair each
+ * transmitter with the first virtual receiver that follows it — that channel carries the
+ * user-assigned name (e.g. "Lichterkette Garten") and is what CCU programs and automations
+ * typically address.
+ *
+ * The paired `SWITCH_VIRTUAL_RECEIVER` is re-typed to `SWITCH` before being returned so that
+ * `wireChannelEndpoint` and `mapSwitchChannel` can process it with the standard switch logic.
  *
  * The device is always mains-powered; `batteryPowered` is forced to `false` regardless of
  * what the discovery layer inferred.
@@ -28,24 +52,36 @@
  */
 
 import { mapChannel as mapSwitchChannel } from '../channel-mapper/switch.js';
-import { DeviceMapper } from '../types.js';
+import { CcuChannelInfo, DeviceMapper } from '../types.js';
 
 /**
  * Device mapper for multi-channel DIN rail switch actuators (HmIP-DRSI4 family).
  *
- * Returns one {@link MappedDeviceEndpoint} per resolved SWITCH channel — one per output.
- * Returns an empty array when no SWITCH channels are present, suppressing the device.
+ * Pairs each `SWITCH_TRANSMITTER` with the first `SWITCH_VIRTUAL_RECEIVER` that follows it
+ * (by channel index) and returns one {@link MappedDeviceEndpoint} per output.
+ * Returns an empty array when no `SWITCH_TRANSMITTER` channels are present, suppressing
+ * the device entirely.
  *
  * @type {DeviceMapper}
  */
 export const mapDevice: DeviceMapper = (channels, vendorId, options) => {
-  const switchChannels = channels.filter((c) => c.type === 'SWITCH');
-  if (switchChannels.length === 0) return [];
+  // Each output consists of one SWITCH_TRANSMITTER (physical relay state) followed by three
+  // SWITCH_VIRTUAL_RECEIVER channels. We use the first virtual receiver after each transmitter
+  // — it carries the user-assigned name and is the canonical control endpoint.
+  const transmitters = channels.filter((c) => c.type === 'SWITCH_TRANSMITTER').sort((a, b) => a.channelIndex - b.channelIndex);
 
-  // Each switch output becomes an independent Matter endpoint.
-  // batteryPowered is forced to false: DIN rail switch actuators are always mains-powered.
-  return switchChannels.map((channel) => ({
-    endpoint: mapSwitchChannel(channel, vendorId, { ...options, batteryPowered: false }),
-    channels: [channel],
-  }));
+  if (transmitters.length === 0) return [];
+
+  return transmitters.flatMap((tx) => {
+    const rx = channels.find((c) => c.type === 'SWITCH_VIRTUAL_RECEIVER' && c.channelIndex > tx.channelIndex);
+    if (!rx) return [];
+    // Normalize to the canonical SWITCH type expected by wireChannelEndpoint and mapSwitchChannel.
+    const switchChannel: CcuChannelInfo = { ...rx, type: 'SWITCH' };
+    return [
+      {
+        endpoint: mapSwitchChannel(switchChannel, vendorId, { ...options, batteryPowered: false }),
+        channels: [switchChannel],
+      },
+    ];
+  });
 };

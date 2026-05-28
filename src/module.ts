@@ -300,7 +300,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     let enabledCount = 0;
     let registeredCount = 0;
 
-    // Group channels by device address for the device mapper pre-pass.
+    // Group resolved channels by device address (used by the channel loop and select/enabled logic).
     const channelsByDevice = new Map<string, CcuChannelInfo[]>();
     for (const ch of channels) {
       const list = channelsByDevice.get(ch.deviceAddress);
@@ -311,15 +311,34 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       }
     }
 
+    // Group raw channels by device address for the device mapper pre-pass.
+    // Device mappers receive raw channels so they can reference real Homematic channel types
+    // (e.g. SWITCH_TRANSMITTER, SWITCH_VIRTUAL_RECEIVER) rather than pre-processed types.
+    const rawChannelsByDevice = new Map<string, CcuChannelInfo[]>();
+    for (const ch of rawChannels) {
+      const list = rawChannelsByDevice.get(ch.deviceAddress);
+      if (list) {
+        list.push(ch);
+      } else {
+        rawChannelsByDevice.set(ch.deviceAddress, [ch]);
+      }
+    }
+
     // Device mapper pre-pass: handle devices with registered device mappers before the channel loop.
     // Device mappers take full priority over channel mappers — all channels of a mapped device are
     // handled exclusively by the device mapper. The channel loop below skips these devices entirely.
     const deviceMapperHandled = new Set<string>();
-    for (const [deviceAddress, deviceChannels] of channelsByDevice) {
-      const primaryChannel = deviceChannels.find((c) => isSupportedChannelType(c.type));
-      if (!primaryChannel || !primaryChannel.deviceType) continue;
-      const mapper = getDeviceMapper(primaryChannel.deviceType);
+    for (const [deviceAddress, rawDeviceChannels] of rawChannelsByDevice) {
+      // Look up device mapper by device type (shared across all channels in the group).
+      const deviceType = rawDeviceChannels.find((c) => c.deviceType)?.deviceType;
+      if (!deviceType) continue;
+      const mapper = getDeviceMapper(deviceType);
       if (!mapper) continue;
+
+      // Use the first resolved supported channel for select/enabled/display logic.
+      const resolvedDeviceChannels = channelsByDevice.get(deviceAddress) ?? [];
+      const primaryChannel = resolvedDeviceChannels.find((c) => isSupportedChannelType(c.type));
+      if (!primaryChannel) continue;
 
       const displayName = this.getChannelDisplayName(primaryChannel);
       const override = this.getChannelOverride(primaryChannel.address);
@@ -342,8 +361,9 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         switchMatterType: override?.switchMatterType ?? inferSwitchMatterTypeFromName(primaryChannel.name),
         batteryPowered: this.deviceBatteryHints.get(deviceAddress) ?? primaryChannel.batteryPowered,
       };
-      this.logDeviceMapperSelection(deviceAddress, primaryChannel.deviceType, deviceChannels);
-      const results = mapper(deviceChannels, this.matterbridge.aggregatorVendorId, mappingOptions);
+      // Pass raw channels — device mappers see real Homematic channel types.
+      this.logDeviceMapperSelection(deviceAddress, deviceType, rawDeviceChannels);
+      const results = mapper(rawDeviceChannels, this.matterbridge.aggregatorVendorId, mappingOptions);
       for (const { endpoint, channels: mappedChannels } of results) {
         await this.registerDevice(endpoint);
         registeredCount++;
