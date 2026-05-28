@@ -61,6 +61,10 @@ Luligu's response on the issue is positive — he was already considering a simi
 - Per-channel config is keyed by channel address (`CcuChannelInfo.address`) in `CcuConfig.channelOverrides`
 - After a config write the plugin needs to re-run `resolveChannelsForMatter` and re-register changed endpoints; Matterbridge's `unregisterDevice` / `registerDevice` cycle supports this
 - The REST layer should validate incoming JSON against the existing schema to avoid corrupt config
+- Future-facing mapper API note: once the UI supports richer per-device configuration, some device mappers will need read access to plugin config during endpoint creation. The current `DeviceMapper` signature only receives `channels`, `vendorId`, and `options`, so plan for a small mapper context object rather than reaching back into `module.ts` globals. Likely contents: resolved device/channel overrides, logger, and possibly a narrow config read API. Keep this read-only at mapping time; config writes should stay in the platform/UI layer.
+- Device-type-specific options should be owned by the device mapper layer, not by a flat global schema section. In practice that means each `src/ccu/device-mapper/*.ts` file should be able to declare the extra options it understands plus UI metadata for those options, and the config UI should show them only for matching Homematic device types.
+- Example: `HmIP-WTH` currently always exposes a humidity endpoint. A future config UI should be able to offer a mapper-defined option like `exposeHumidityEndpoint` (default `true`) only for the WTH / STH / STHD family.
+- This should be designed together with the mapper-context item above: if mappers define device-specific config options, they also need a typed way to read the resolved config values at mapping time without introducing direct platform coupling.
 
 ---
 
@@ -74,7 +78,7 @@ Luligu's response on the issue is positive — he was already considering a simi
 
 The `HEATING_CLIMATECONTROL_TRANSCEIVER` channel on HmIP-WTH, WTH-2, WTH-B, STHD, STH also carries a `HUMIDITY` datapoint. The current channel mapper creates only a thermostat endpoint. A device mapper should additionally return a `humiditySensor` endpoint built from the same channel address.
 
-RedMatic prior art: `hmip-wth.js`, `hmip-sthd.js` — both offer an optional `HumiditySensor` service. In Matter we always include it (no reason not to).
+RedMatic prior art: `hmip-wth.js`, `hmip-sthd.js` — both offer an optional `HumiditySensor` service. Today we always include it. In a future config UI, this is a good candidate for a device-type-specific mapper option (`exposeHumidityEndpoint: true|false`).
 
 **Implementation notes:**
 

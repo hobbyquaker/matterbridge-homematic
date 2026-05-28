@@ -257,7 +257,16 @@ export class CcuConnectionLayer extends EventEmitter {
       this.log.warn(`Failed to refresh channel cache: ${String(err)}`);
     });
 
-    return this.cache.channels;
+    const enabledInterfaces = new Set(this.getEnabledInterfaces());
+    const filteredChannels = this.cache.channels.filter((channel) => enabledInterfaces.has(channel.interfaceName));
+
+    if (filteredChannels.length !== this.cache.channels.length) {
+      this.log.debug(
+        `discoverChannels: filtered cached channels from ${this.cache.channels.length} to ${filteredChannels.length} using enabled interfaces ${[...enabledInterfaces].join(',')}`,
+      );
+    }
+
+    return filteredChannels;
   }
 
   /**
