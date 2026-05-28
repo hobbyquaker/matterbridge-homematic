@@ -4,6 +4,7 @@ import { MatterbridgeEndpoint, PlatformConfig, PlatformMatterbridge } from 'matt
 import { AnsiLogger, LogLevel } from 'matterbridge/logger';
 import { VendorId } from 'matterbridge/matter';
 
+import type { CcuChannelInfo } from '../src/ccu/types.js';
 import { TemplatePlatform } from '../src/module.js';
 
 const mockLog = {
@@ -147,5 +148,28 @@ describe('Matterbridge Plugin Template', () => {
     // @ts-expect-error Accessing private method for testing purposes
     expect(mockMatterbridge.removeAllBridgedEndpoints).toHaveBeenCalled();
     mockConfig.unregisterOnShutdown = false;
+  });
+
+  it('should validate enabled channels using the current select serial format', async () => {
+    const channel: CcuChannelInfo = {
+      address: '000A1B2C3D:1',
+      deviceAddress: '000A1B2C3D',
+      channelIndex: 1,
+      type: 'SWITCH',
+      deviceType: 'HmIP-BSM',
+      interfaceName: 'HmIP-RF',
+      name: 'Kitchen Light',
+      batteryPowered: false,
+    };
+
+    const validateDevice = vi.fn((candidates: string[]) => candidates.includes('HmIP-RF:SWITCH:000A1B2C3D:1'));
+    // @ts-expect-error Accessing inherited method for testing purposes
+    instance.validateDevice = validateDevice;
+
+    // @ts-expect-error Accessing private method for testing purposes
+    const enabled = instance.isChannelEnabled(channel, undefined, 'Kitchen Light');
+
+    expect(enabled).toBe(true);
+    expect(validateDevice).toHaveBeenCalledWith(expect.arrayContaining(['HmIP-RF:SWITCH:000A1B2C3D:1']), false);
   });
 });

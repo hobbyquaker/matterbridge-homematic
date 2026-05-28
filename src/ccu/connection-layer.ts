@@ -281,6 +281,15 @@ export class CcuConnectionLayer extends EventEmitter {
   }
 
   /**
+   * Return the current cached discovery channels, including channels from disabled interfaces.
+   *
+   * @returns {CcuChannelInfo[]} Snapshot of the discovery cache.
+   */
+  getCachedChannels(): CcuChannelInfo[] {
+    return [...this.cache.channels];
+  }
+
+  /**
    * Refresh the channel cache from RPC and ReGa (runs in background).
    *
    * @returns {Promise<void>} Promise that resolves when refresh is complete.

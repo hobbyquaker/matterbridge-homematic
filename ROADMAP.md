@@ -130,6 +130,28 @@ These are useful when debugging RPC protocol problems, but they drown out higher
 - For heavy payload logs, consider truncation/summarization even when enabled so huge `getParamsetDescription` or `newDevices` objects do not dominate the frontend log view
 - The future config UI should surface these options under an "advanced diagnostics" section, not alongside normal end-user device settings
 
+#### CFG-0 — Separate `regaNameSync` config flag
+
+**Effort: Low-Medium**  
+**Goal:** decouple ReGa-based channel-name synchronization from the existing coarse `regaEnabled` switch so users can keep stable name migration without enabling broader ReGa features.
+
+The plugin now migrates address-based `whiteList` / `blackList` entries to ReGa channel names once those names are known. That behavior is useful even for installations that do not want normal ReGa integration enabled all the time. Today the plugin only resolves channel names when `regaEnabled` is on, which couples config-name sync to the broader ReGa feature set.
+
+**Planned approach:**
+
+1. Add a new boolean config flag such as `regaNameSync` with a default that preserves current behavior for existing users
+2. Treat `regaNameSync` as the switch for channel-name lookup and config migration, independent from `regaEnabled`
+3. Ensure name-sync still works when `regaEnabled` is `false`, as long as `regaNameSync` is `true`
+4. Keep the rest of the current ReGa-dependent behavior behind `regaEnabled` unless a given feature is explicitly split out the same way
+
+**Design notes:**
+
+- `regaEnabled` currently covers more than one concern: channel display-name lookup, program/script usage, and any future broader ReGa integration
+- `regaNameSync` should only enable the minimal ReGa calls required to fetch channel names and migrate config entries; it should not implicitly enable program support, polling, or other ReGa-backed features
+- This likely requires splitting the current connection-layer ReGa initialization path into smaller capabilities instead of treating ReGa as all-or-nothing
+- Config migration should continue to work for both startup discovery and later delayed ReGa-name arrival events under the new flag
+- Schema and README documentation should describe the difference clearly: `regaEnabled` = general ReGa integration, `regaNameSync` = channel-name discovery/migration only
+
 ---
 
 ## Planned device mappers

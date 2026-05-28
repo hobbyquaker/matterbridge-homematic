@@ -37,7 +37,7 @@ import {
   resolveChannelsForMatter,
 } from './ccu/device-mapper.js';
 import { getBatteryVoltageRange, getMatchingMainsPoweredPrefix, isAlwaysMainsPoweredDeviceType, MAINS_POWERED_DEVICE_TYPE_PREFIXES } from './ccu/device-power.js';
-import { CcuChannelInfo, CcuChannelOverride } from './ccu/types.js';
+import { CcuChannelInfo, CcuChannelOverride, CcuInterfaceName } from './ccu/types.js';
 
 /**
  * This is the standard interface for Matterbridge plugins.
@@ -173,6 +173,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     // Listen for channel updates and refresh device names when ReGa names arrive
     this.ccuConnection.on('channelsUpdated', (updatedChannels: CcuChannelInfo[]) => {
       this.log.debug(`Channels updated event received with ${updatedChannels.length} channels`);
+      this.syncChannelListEntriesWithRegaNames(updatedChannels);
       this.refreshDeviceNames(updatedChannels);
     });
 
@@ -273,8 +274,11 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     }
 
     const rawChannels = await this.ccuConnection.discoverChannels();
+    const cachedChannels = this.ccuConnection.getCachedChannels();
+    const enabledInterfaces = this.ccuConnection.getStatusSnapshot().enabledInterfaces;
     this.updateMainsPoweredDeviceSet(rawChannels);
     await this.primeBatteryHintsFromRpc(rawChannels);
+    this.syncChannelListEntriesWithRegaNames(cachedChannels, enabledInterfaces);
     const channels = resolveChannelsForMatter(rawChannels);
     this.discoveredChannels = channels;
     const channelsWithNames = channels.filter((c) => c.name).length;
@@ -1982,8 +1986,76 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     }
   }
 
-  private getChannelSelectSerial(channelAddress: string): string {
-    return channelAddress;
+  private syncChannelListEntriesWithRegaNames(channels: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'name'>[], enabledInterfaces?: readonly CcuInterfaceName[]): void {
+    const enabledInterfaceSet = enabledInterfaces ? new Set(enabledInterfaces) : undefined;
+    const channelMap = new Map<string, Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'name'>>();
+    for (const channel of channels) {
+      channelMap.set(channel.address, channel);
+    }
+
+    let changed = false;
+    let migrated = 0;
+    let skippedNoName = 0;
+    let skippedDisabledInterface = 0;
+
+    for (const listKey of ['whiteList', 'blackList'] as const) {
+      const entries = this.getPlatformConfig()[listKey];
+      if (!Array.isArray(entries)) continue;
+
+      for (const entry of entries) {
+        if (typeof entry !== 'string' || !entry.includes(':')) continue;
+
+        const channel = channelMap.get(entry);
+        if (!channel) continue;
+
+        if (enabledInterfaceSet && !enabledInterfaceSet.has(channel.interfaceName)) {
+          skippedDisabledInterface++;
+          continue;
+        }
+
+        const regaName = channel.name?.trim();
+        if (!regaName || regaName === channel.address) {
+          skippedNoName++;
+          continue;
+        }
+
+        if (this.migrateChannelListEntry(listKey, channel.address, regaName)) {
+          changed = true;
+          migrated++;
+        }
+      }
+    }
+
+    if (migrated > 0 || skippedNoName > 0 || skippedDisabledInterface > 0) {
+      this.log.info(`ReGa list sync summary: migrated=${migrated} skippedNoName=${skippedNoName} skippedDisabledInterface=${skippedDisabledInterface}`);
+    }
+
+    if (changed) {
+      this.saveConfig(this.getPlatformConfig());
+    }
+  }
+
+  private migrateChannelListEntry(listKey: 'whiteList' | 'blackList', channelAddress: string, regaName: string): boolean {
+    const config = this.getPlatformConfig();
+    const currentEntries = config[listKey];
+
+    if (!Array.isArray(currentEntries) || !currentEntries.includes(channelAddress)) {
+      return false;
+    }
+
+    const nextEntries = currentEntries.filter((entry): entry is string => typeof entry === 'string' && entry !== channelAddress);
+    if (!nextEntries.includes(regaName)) {
+      nextEntries.push(regaName);
+    }
+
+    config[listKey] = nextEntries;
+    this.log.info(`Migrated ${listKey} entry from ${channelAddress} to ${regaName}`);
+    return true;
+  }
+
+  private getChannelSelectSerial(channel: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'type'>): string {
+    const typeLabel = isSupportedChannelType(channel.type) ? channelTypeLabel(channel.type) : channel.type;
+    return `${channel.interfaceName}:${typeLabel}:${channel.address}`;
   }
 
   private getPlatformConfig(): HomematicPlatformConfig {
@@ -2004,7 +2076,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       return override.enabled;
     }
     // Fall back to Matterbridge whitelist/blacklist validation used by Home checkbox selections.
-    const candidates = [this.getChannelSelectSerial(channel.address), channel.address, channel.name?.trim(), displayName].filter(
+    const candidates = [this.getChannelSelectSerial(channel), channel.address, channel.name?.trim(), displayName].filter(
       (value): value is string => typeof value === 'string' && value.length > 0,
     );
     return this.validateDevice(candidates, false);
