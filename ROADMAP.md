@@ -499,6 +499,29 @@ All use the same M30×1.5 valve thread and are expected to expose `HEATING_CLIMA
 
 ---
 
+#### HM-15 — HmIP-DRSI4 optional ACTUAL_TEMPERATURE endpoint (ch0 MAINTENANCE)
+
+**Effort: Low**  
+**Status: BLOCKED** — requires UI-0 (per-device config UI); default off
+
+Channel 0 of the HmIP-DRSI4 (and HmIP-DRSI1) is a `MAINTENANCE` channel that exposes an `ACTUAL_TEMPERATURE` datapoint — the ambient temperature measured by the device's internal sensor. The current device mapper ignores channel 0 entirely (as housekeeping), which is correct for most users who just want the four switch outputs.
+
+When the per-device config UI (UI-0) is available, this mapper should gain an opt-in option (e.g. `exposeActualTemperature: boolean`, default `false`) that causes the mapper to additionally return a `temperatureSensor` endpoint built from the `MAINTENANCE` channel. Most users will never enable this, but it is useful in installations where the DIN rail module happens to be placed in a location where its temperature reading is meaningful.
+
+**Implementation notes (for when UI-0 is available):**
+
+- The `MAINTENANCE` channel address is `<deviceAddress>:0`; find it via `channels.find((c) => c.type === 'MAINTENANCE')`
+- Build a `temperatureSensor` endpoint from that channel using `TemperatureMeasurement` cluster
+- Add the endpoint to `results` only when the mapper-context option is truthy
+- Wire the `ACTUAL_TEMPERATURE` RPC event to the `measuredValue` attribute on that endpoint in `module.ts`
+- The `MAINTENANCE` channel must be added to the `MappedDeviceEndpoint.channels` list so `wireChannelEndpoint` picks it up
+
+**Why we skipped it before:**
+
+Home.app and most Matter controllers do not show a separate temperature sensor when attached to an on/off switch device, and the internal sensor accuracy is modest. The feature was prototyped but reverted because defaulting it on produced unwanted clutter. An explicit opt-in under the per-device config UI is the right UX.
+
+---
+
 ## Homebrew (hb-) device summary
 
 Analyzed all `hb-` prefix devices from RedMatic-HomeKit. No new device mapper categories are needed specifically for homebrew devices.
