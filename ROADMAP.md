@@ -3,35 +3,6 @@
 > Last reviewed: May 2026  
 > Reference prior-art: https://github.com/rdmtc/RedMatic-HomeKit/tree/master/homematic-devices
 
----
-
-## What already works without device mappers
-
-The channel-mapper registry and `resolveChannelsForMatter` handle all of the following correctly out of the box:
-
-| Device family                                  | Reason                                                                                |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------- |
-| HmIP-DRSI1/4, MOD-OC8                          | `SWITCH_TRANSMITTER → SWITCH_VIRTUAL_RECEIVER` pairing                                |
-| HmIP-BBL, BROLL, FROLL, DRBLI4                 | `BLIND_TRANSMITTER → BLIND_VIRTUAL_RECEIVER` pairing                                  |
-| HmIP-BDT                                       | `DIMMER_TRANSMITTER → DIMMER_VIRTUAL_RECEIVER` pairing                                |
-| HmIP-FSM, FSM16, PS, PSM, BSM                  | No LOW_BAT marker → `batteryPowered = false` automatically; power-meter merging works |
-| HmIP-BWTH                                      | BLIND + THERMALCONTROL_TRANSMIT → two independent endpoints                           |
-| HmIP-STE2-PCB, STE2+                           | Each TEMPERATURE_HUMIDITY_TRANSMITTER channel maps independently                      |
-| HmIP-HEATING (VirtualDevices)                  | Uses HEATING_CLIMATECONTROL_TRANSCEIVER; channel 5 is already skipped                 |
-| HmIP-eTRV, HmIP-eTRV-2/B/C                     | HEATING_CLIMATECONTROL_TRANSCEIVER channel mapper                                     |
-| HM-CC-RT-DN                                    | THERMALCONTROL_TRANSMIT channel mapper (basic thermostat)                             |
-| HmIP-BSL                                       | KEY + SWITCH channels map independently                                               |
-| HmW-Sen-SC-12, HmW-IO-12-SW7-DR                | Each channel maps independently                                                       |
-| hb-lc-bl1pbu-fm                                | Alias for HM-LC-Bl1PBU-FM → BLIND channel mapper                                      |
-| hb-lc-sw1pbu-fm, hb-lc-sw2-fm, hb-lc-sw2pbu-fm | All SWITCH channels → SWITCH channel mapper                                           |
-| hb-uni-senact-4-4-rc/sc and 8-8 variants       | SWITCH + SHUTTER_CONTACT channels → standard mappers                                  |
-| hb-uni-sen-press-sc                            | SHUTTER_CONTACT on ch2 → contactSensor                                                |
-| hb-uni-sen-temp-ds18b20, hb-uni-sen-temp-ir    | Multi-probe TEMPERATURE channels; each maps independently                             |
-| hb-uni-dmx-master                              | ch1 SWITCH + ch2-3 KEY-like; standard channel types                                   |
-| hb-uni-sen-wea                                 | WEATHER channel mapper (minor: uses LUX instead of BRIGHTNESS for light sensor)       |
-
----
-
 ## Planned features
 
 ### Priority: High
@@ -65,6 +36,8 @@ Luligu's response on the issue is positive — he was already considering a simi
 - Device-type-specific options should be owned by the device mapper layer, not by a flat global schema section. In practice that means each `src/ccu/device-mapper/*.ts` file should be able to declare the extra options it understands plus UI metadata for those options, and the config UI should show them only for matching Homematic device types.
 - Example: `HmIP-WTH` currently always exposes a humidity endpoint. A future config UI should be able to offer a mapper-defined option like `exposeHumidityEndpoint` (default `true`) only for the WTH / STH / STHD family.
 - This should be designed together with the mapper-context item above: if mappers define device-specific config options, they also need a typed way to read the resolved config values at mapping time without introducing direct platform coupling.
+
+---
 
 #### PERF-0 — Device description / paramset cache
 
@@ -100,6 +73,8 @@ Each key maps to the raw paramset description object returned by the CCU. We sho
 - Future device mappers and a config UI may need richer paramset metadata to decide which datapoints, features, or device-specific config options are available
 - A shared paramset cache creates one authoritative source for these capabilities instead of scattering ad-hoc RPC probes across startup and mapper code
 
+---
+
 #### OPS-0 — More granular logging controls
 
 **Done:** [`9bb5aa4`](https://github.com/hobbyquaker/matterbridge-homematic/commit/9bb5aa4)
@@ -132,6 +107,8 @@ These are useful when debugging RPC protocol problems, but they drown out higher
 - Prefer one shared payload-format/truncation option for both RPC and ReGa payloads rather than separate payload toggles per source
 - Heavy payload logs should be summarized/truncated into a single line so calls like `getParamsetDescription`, `listDevices`, `newDevices`, and ReGa script results do not dominate the frontend log view
 - The future config UI should surface these options under an "advanced diagnostics" section, not alongside normal end-user device settings
+
+---
 
 #### CFG-0 — Split ReGa features into explicit config flags
 
@@ -174,26 +151,6 @@ The current `regaEnabled` shape is too coarse. It mixes at least three separate 
 
 ### Priority: High
 
-#### HM-1 — Wall thermostat humidity endpoint (HmIP-WTH / STH / STHD family)
-
-**Done:** [`df5337a`](https://github.com/hobbyquaker/matterbridge-homematic/commit/df5337a)
-
-**Effort: Low** (~40 LOC + tests)
-
-The `HEATING_CLIMATECONTROL_TRANSCEIVER` channel on HmIP-WTH, WTH-2, WTH-B, STHD, STH also carries a `HUMIDITY` datapoint. The current channel mapper creates only a thermostat endpoint. A device mapper should additionally return a `humiditySensor` endpoint built from the same channel address.
-
-RedMatic prior art: `hmip-wth.js`, `hmip-sthd.js` — both offer an optional `HumiditySensor` service. Today we always include it. In a future config UI, this is a good candidate for a device-type-specific mapper option (`exposeHumidityEndpoint: true|false`).
-
-**Implementation notes:**
-
-- Device mapper calls `mapHeatingClimateControlTransceiverChannel(switchChannel, vendorId, options)` for the thermostat endpoint
-- Builds a second `MatterbridgeEndpoint([humiditySensor])` from the same channel address, with `HumidityMeasurement` cluster
-- Returns both endpoints from `mapDevice`
-- Device mapper files: `src/ccu/device-mapper/hmip-wth.ts` (covers WTH, WTH-2, WTH-B)  
-  and `src/ccu/device-mapper/hmip-sthd.ts` (covers STHD, STH) — or one shared helper
-
----
-
 #### HM-3 — HM-CC-VG-1 virtual thermostat group
 
 **Effort: Low–Medium** (endpoint creation is easy; event routing needs research)
@@ -233,6 +190,26 @@ RedMatic prior art: `hm-sec-sir-wm.js` maps to a HomeKit `SecuritySystem` with `
 1. Add the ARMSTATE channel type to `SUPPORTED_CHANNEL_TYPES` (or handle it only inside the device mapper)
 2. The device mapper intercepts all channels for this device and returns a single endpoint representing the security system state
 3. `module.ts` event handling needs to aggregate zone states and ARMSTATE into the cluster attribute
+
+---
+
+#### HM-1 — Wall thermostat humidity endpoint (HmIP-WTH / STH / STHD family)
+
+**Done:** [`df5337a`](https://github.com/hobbyquaker/matterbridge-homematic/commit/df5337a)
+
+**Effort: Low** (~40 LOC + tests)
+
+The `HEATING_CLIMATECONTROL_TRANSCEIVER` channel on HmIP-WTH, WTH-2, WTH-B, STHD, STH also carries a `HUMIDITY` datapoint. The current channel mapper creates only a thermostat endpoint. A device mapper should additionally return a `humiditySensor` endpoint built from the same channel address.
+
+RedMatic prior art: `hmip-wth.js`, `hmip-sthd.js` — both offer an optional `HumiditySensor` service. Today we always include it. In a future config UI, this is a good candidate for a device-type-specific mapper option (`exposeHumidityEndpoint: true|false`).
+
+**Implementation notes:**
+
+- Device mapper calls `mapHeatingClimateControlTransceiverChannel(switchChannel, vendorId, options)` for the thermostat endpoint
+- Builds a second `MatterbridgeEndpoint([humiditySensor])` from the same channel address, with `HumidityMeasurement` cluster
+- Returns both endpoints from `mapDevice`
+- Device mapper files: `src/ccu/device-mapper/hmip-wth.ts` (covers WTH, WTH-2, WTH-B)  
+  and `src/ccu/device-mapper/hmip-sthd.ts` (covers STHD, STH) — or one shared helper
 
 ---
 
@@ -499,29 +476,6 @@ All use the same M30×1.5 valve thread and are expected to expose `HEATING_CLIMA
 
 ---
 
-#### HM-15 — HmIP-DRSI4 optional ACTUAL_TEMPERATURE endpoint (ch0 MAINTENANCE)
-
-**Effort: Low**  
-**Status: BLOCKED** — requires UI-0 (per-device config UI); default off
-
-Channel 0 of the HmIP-DRSI4 (and HmIP-DRSI1) is a `MAINTENANCE` channel that exposes an `ACTUAL_TEMPERATURE` datapoint — the ambient temperature measured by the device's internal sensor. The current device mapper ignores channel 0 entirely (as housekeeping), which is correct for most users who just want the four switch outputs.
-
-When the per-device config UI (UI-0) is available, this mapper should gain an opt-in option (e.g. `exposeActualTemperature: boolean`, default `false`) that causes the mapper to additionally return a `temperatureSensor` endpoint built from the `MAINTENANCE` channel. Most users will never enable this, but it is useful in installations where the DIN rail module happens to be placed in a location where its temperature reading is meaningful.
-
-**Implementation notes (for when UI-0 is available):**
-
-- The `MAINTENANCE` channel address is `<deviceAddress>:0`; find it via `channels.find((c) => c.type === 'MAINTENANCE')`
-- Build a `temperatureSensor` endpoint from that channel using `TemperatureMeasurement` cluster
-- Add the endpoint to `results` only when the mapper-context option is truthy
-- Wire the `ACTUAL_TEMPERATURE` RPC event to the `measuredValue` attribute on that endpoint in `module.ts`
-- The `MAINTENANCE` channel must be added to the `MappedDeviceEndpoint.channels` list so `wireChannelEndpoint` picks it up
-
-**Why we skipped it before:**
-
-Home.app and most Matter controllers do not show a separate temperature sensor when attached to an on/off switch device, and the internal sensor accuracy is modest. The feature was prototyped but reverted because defaulting it on produced unwanted clutter. An explicit opt-in under the per-device config UI is the right UX.
-
----
-
 ## Homebrew (hb-) device summary
 
 Analyzed all `hb-` prefix devices from RedMatic-HomeKit. No new device mapper categories are needed specifically for homebrew devices.
@@ -549,3 +503,4 @@ Analyzed all `hb-` prefix devices from RedMatic-HomeKit. No new device mapper ca
 - Conventions (key sanitization, endpoint ID format, serial number format): see `homematic.instructions.md`
 - Tests go in `vitest/` as `.test.ts` files; follow patterns in `vitest/mapper.test.ts`
 - When implementing a device mapper: always check if the channel type it intercepts would otherwise produce duplicate endpoints via the generic dispatcher, and make sure `resolveChannelsForMatter` still feeds the right channels to it
+- When marking a roadmap item as **Done**: move it to the end of its priority section, below all remaining not-done items in that group. This applies within every priority group (High, Medium, Low, and the post-2021 additions groups).
