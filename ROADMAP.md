@@ -66,6 +66,70 @@ Luligu's response on the issue is positive — he was already considering a simi
 - Example: `HmIP-WTH` currently always exposes a humidity endpoint. A future config UI should be able to offer a mapper-defined option like `exposeHumidityEndpoint` (default `true`) only for the WTH / STH / STHD family.
 - This should be designed together with the mapper-context item above: if mappers define device-specific config options, they also need a typed way to read the resolved config values at mapping time without introducing direct platform coupling.
 
+#### PERF-0 — Device description / paramset cache
+
+**Effort: Medium**  
+**Goal:** reduce startup RPC load by avoiding repeated `getParamsetDescription` / device-description lookups for device types and firmware versions that are already known.
+
+The plugin currently calls `getParamsetDescription` during startup in `primeBatteryHintsFromRpc()` to detect `LOWBAT` / `LOW_BAT` markers for battery classification. On installations with many devices this creates a burst of RPC calls on every startup even though the paramset description for a given Homematic interface + device type + firmware version is effectively static.
+
+`node-red-contrib-ccu` already solves this by shipping a `paramsets.json` file keyed in a flat, compatibility-friendly format like:
+
+- `HmIP-RF/HmIP-SMI/1.0.3/1/MOTIONDETECTOR_TRANSCEIVER/VALUES`
+- `BidCos-RF/HM-RCV-50/2.31.25/6/VIRTUAL_KEY/MASTER`
+
+Each key maps to the raw paramset description object returned by the CCU. We should stay compatible with that format so upstream data can be imported directly and future updates can be merged without conversion.
+
+**Planned approach:**
+
+1. **Bundle a seed database** — vendor the latest upstream `paramsets.json` from `node-red-contrib-ccu` into this plugin unchanged (or as unchanged as practical) and include it in the npm package
+2. **Add a writable runtime overlay** — keep a second writable cache file for newly learned paramsets discovered from live RPC calls
+3. **Lookup before RPC** — when startup code needs a paramset/device description, first resolve the compatibility key and consult the bundled seed + runtime overlay before falling back to `getParamsetDescription`
+4. **Write-through learning** — when a live RPC call is still needed, persist the result into the runtime overlay using the same key format so the next startup is cheaper
+
+**Open design points:**
+
+- **Key material:** the cache should be keyed by at least interface name, Homematic device type, firmware version, channel index, channel type, and paramset key (`MASTER` / `VALUES` / `LINK` / `SERVICE`) to stay compatible with `node-red-contrib-ccu`
+- **Firmware availability:** confirm which firmware/version field is available from `listDevices` / `getDeviceDescription` and carry it through discovery so the cache can distinguish incompatible firmware revisions
+- **Storage location:** do not treat the npm-installed package directory as writable runtime storage. Best option is a writable file under the same Matterbridge runtime area already used for discovery cache (for example a plugin-specific file under `~/.matterbridge`). If Matterbridge exposes the plugin-config directory as a supported writable location, colocating the runtime overlay there is also reasonable
+- **Package distribution:** the bundled seed file should ship read-only with the npm package via the `files` list. No first-start copy is required for the seed file if the plugin can read it directly from its installed package path; only the writable overlay needs to be created on first write
+- **Update strategy:** keep the vendored file compatible with upstream `node-red-contrib-ccu` so future refreshes can be done by replacing it with a newer upstream snapshot instead of maintaining a forked schema
+
+**Why this matters beyond battery detection:**
+
+- Future device mappers and a config UI may need richer paramset metadata to decide which datapoints, features, or device-specific config options are available
+- A shared paramset cache creates one authoritative source for these capabilities instead of scattering ad-hoc RPC probes across startup and mapper code
+
+#### OPS-0 — More granular logging controls
+
+**Effort: Low-Medium**  
+**Goal:** keep useful diagnostic logging available without flooding the log with high-volume RPC transport noise.
+
+The current plugin config only exposes a single coarse `debug` boolean. In practice the noisiest log lines come from the CCU transport layer, especially:
+
+- incoming `RPC callback` / `RPC event` lines for every event
+- large `RPC result` payloads for calls such as `getParamsetDescription`
+- verbose `newDevices` payload/classification logging during startup or interface re-init
+
+These are useful when debugging RPC protocol problems, but they drown out higher-value mapping and state-sync logs during normal troubleshooting.
+
+**Planned approach:**
+
+1. Keep the existing `debug` switch as the master coarse switch for backward compatibility
+2. Add one or more narrower plugin config options for high-volume transport logging, for example:
+   - `logRpcEvents` (`boolean`) — gate per-event `RPC callback` / `RPC event` logging
+   - `logRpcPayloads` (`boolean`) — gate full request/response payload logging for heavy calls such as `getParamsetDescription`, `listDevices`, `newDevices`
+   - optionally `logRegaPayloads` (`boolean`) if ReGa result dumps also become noisy
+3. Route noisy transport logs through small helper methods in the connection layer so they can be turned on/off consistently without scattering conditionals across every log call
+4. Keep summaries, warnings, and state-change logs visible under normal debug mode even when transport payload logging is disabled
+
+**Design guidance:**
+
+- Prefer category toggles over inventing a second custom log-level system unless Matterbridge already provides a natural extension point. The real problem is log category volume, not lack of numeric severity levels
+- If multiple options are added, name them by source/category (`rpcEvents`, `rpcPayloads`, `regaPayloads`) rather than by ambiguous pseudo-levels like `verbose2`
+- For heavy payload logs, consider truncation/summarization even when enabled so huge `getParamsetDescription` or `newDevices` objects do not dominate the frontend log view
+- The future config UI should surface these options under an "advanced diagnostics" section, not alongside normal end-user device settings
+
 ---
 
 ## Planned device mappers

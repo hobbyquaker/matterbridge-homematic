@@ -537,20 +537,26 @@ export class CcuConnectionLayer extends EventEmitter {
       const deviceType = deviceTypeByAddress.get(deviceAddress) ?? channelType;
       const mainsMatchPrefix = getMatchingMainsPoweredPrefix(deviceType);
       const hasLowBatMarker = this.containsLowBatMarker(entry);
-      const batteryPowered = !isAlwaysMainsPoweredDeviceType(deviceType) && hasLowBatMarker;
+      const batteryHint = isAlwaysMainsPoweredDeviceType(deviceType) ? false : hasLowBatMarker ? true : undefined;
       const previous = this.deviceBatteryHints.get(deviceAddress);
 
       this.log.debug(
-        `RPC newDevices classify <- iface=${iface ?? 'unknown'} device=${deviceAddress} channelType=${channelType ?? 'unknown'} deviceType=${deviceType ?? 'unknown'} mainsPrefix=${mainsMatchPrefix ?? 'none'} hasLowBatMarker=${hasLowBatMarker} batteryPowered=${batteryPowered} previous=${String(previous)}`,
+        `RPC newDevices classify <- iface=${iface ?? 'unknown'} device=${deviceAddress} channelType=${channelType ?? 'unknown'} deviceType=${deviceType ?? 'unknown'} mainsPrefix=${mainsMatchPrefix ?? 'none'} hasLowBatMarker=${hasLowBatMarker} batteryHint=${batteryHint === undefined ? 'unknown' : String(batteryHint)} previous=${String(previous)}`,
       );
 
-      if (previous !== batteryPowered) {
-        this.deviceBatteryHints.set(deviceAddress, batteryPowered);
-        this.log.debug(`RPC newDevices battery hint <- iface=${iface ?? 'unknown'} device=${deviceAddress} batteryPowered=${batteryPowered}`);
+      // Absence of a LOWBAT marker in newDevices is not reliable evidence that a device is mains-powered.
+      // Many battery devices (for example HmIP-WRC2) do not expose the marker in this callback payload.
+      // Only persist a positive hint or a forced mains classification here; let startup paramset probing
+      // decide ambiguous cases.
+      if (batteryHint === undefined) continue;
+
+      if (previous !== batteryHint) {
+        this.deviceBatteryHints.set(deviceAddress, batteryHint);
+        this.log.debug(`RPC newDevices battery hint <- iface=${iface ?? 'unknown'} device=${deviceAddress} batteryPowered=${batteryHint}`);
         this.emit('deviceBatteryHint', {
           iface,
           deviceAddress,
-          batteryPowered,
+          batteryPowered: batteryHint,
         });
       }
     }

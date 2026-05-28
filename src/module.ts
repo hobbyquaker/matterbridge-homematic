@@ -28,7 +28,14 @@ import { AnsiLogger, LogLevel } from 'matterbridge/logger';
 
 import { parseCcuConnectionConfig } from './ccu/config.js';
 import { CcuConnectionLayer } from './ccu/connection-layer.js';
-import { channelTypeLabel, createEndpointForChannel, getDeviceMapper, inferSwitchMatterTypeFromName, isSupportedChannelType, resolveChannelsForMatter } from './ccu/device-mapper.js';
+import {
+  channelTypeLabel,
+  createEndpointForChannel,
+  getDeviceMapper,
+  inferSwitchMatterTypeFromName,
+  isSupportedChannelType,
+  resolveChannelsForMatter,
+} from './ccu/device-mapper.js';
 import { getBatteryVoltageRange, getMatchingMainsPoweredPrefix, isAlwaysMainsPoweredDeviceType, MAINS_POWERED_DEVICE_TYPE_PREFIXES } from './ccu/device-power.js';
 import { CcuChannelInfo, CcuChannelOverride } from './ccu/types.js';
 
@@ -666,7 +673,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         this.deviceBatteryHints.set(channel.deviceAddress, false);
         continue;
       }
-      if (this.deviceBatteryHints.has(channel.deviceAddress)) continue;
+      if (this.deviceBatteryHints.get(channel.deviceAddress) === true) continue;
       if (channel.interfaceName !== 'BidCos-RF' && channel.interfaceName !== 'HmIP-RF') continue;
       candidates.set(channel.deviceAddress, channel.interfaceName);
     }
