@@ -41,6 +41,8 @@ Luligu's response on the issue is positive — he was already considering a simi
 
 #### PERF-0 — Device description / paramset cache
 
+**Done:** [`c3cd169`](https://github.com/hobbyquaker/matterbridge-homematic/commit/c3cd169)
+
 **Effort: Medium**  
 **Goal:** reduce startup RPC load by avoiding repeated `getParamsetDescription` / device-description lookups for device types and firmware versions that are already known.
 
