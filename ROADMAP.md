@@ -176,6 +176,8 @@ The current `regaEnabled` shape is too coarse. It mixes at least three separate 
 
 #### HM-1 — Wall thermostat humidity endpoint (HmIP-WTH / STH / STHD family)
 
+**Done:** [`df5337a`](https://github.com/hobbyquaker/matterbridge-homematic/commit/df5337a)
+
 **Effort: Low** (~40 LOC + tests)
 
 The `HEATING_CLIMATECONTROL_TRANSCEIVER` channel on HmIP-WTH, WTH-2, WTH-B, STHD, STH also carries a `HUMIDITY` datapoint. The current channel mapper creates only a thermostat endpoint. A device mapper should additionally return a `humiditySensor` endpoint built from the same channel address.
