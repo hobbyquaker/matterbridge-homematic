@@ -182,6 +182,49 @@
       },
       "default": []
     },
+    "syncChannelNames": {
+      "title": "Sync Channel Names",
+      "description": "Fetch ReGa channel names and migrate address-based whitelist/blacklist entries to ReGa names. Works independently of the general ReGa toggle.",
+      "type": "boolean",
+      "default": true
+    },
+    "createMatterDevicesForVariables": {
+      "title": "Create Matter Devices for Variables",
+      "description": "Expose boolean ReGa system variables as stateful Matter devices.",
+      "type": "boolean",
+      "default": false
+    },
+    "createMatterDevicesForPrograms": {
+      "title": "Create Matter Devices for Programs",
+      "description": "Expose CCU programs as Matter trigger devices (on = execute, auto-reset to off).",
+      "type": "boolean",
+      "default": false
+    },
+    "regaVariablesPollingInterval": {
+      "title": "ReGa Variables Polling Interval (s)",
+      "description": "Polling interval in seconds for ReGa variable state refresh. Set to 0 to disable polling.",
+      "type": "integer",
+      "default": 0,
+      "minimum": 0
+    },
+    "virtualKeyForRegaPseudoPush": {
+      "title": "Virtual Key for ReGa Pseudo-Push",
+      "description": "Virtual key address used to trigger low-latency ReGa variable state refresh without aggressive polling.",
+      "type": "string",
+      "default": ""
+    },
+    "logRpcEvents": {
+      "title": "Log RPC Events",
+      "description": "Log individual RPC callback/event lines. Disable to reduce log volume during normal operation.",
+      "type": "boolean",
+      "default": false
+    },
+    "truncatePayloadsToSingleLine": {
+      "title": "Truncate Payloads to Single Line",
+      "description": "Compact and truncate RPC and ReGa payloads so each debug log entry fits on one line.",
+      "type": "boolean",
+      "default": false
+    },
     "whiteList": {
       "title": "White List",
       "description": "Only the devices in the list will be exposed. If the list is empty, all the devices will be exposed.",

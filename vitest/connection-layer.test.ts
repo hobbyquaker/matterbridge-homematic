@@ -32,6 +32,17 @@ function makeConfig(overrides: Partial<CcuConnectionConfig> = {}): CcuConnection
     password: '',
     queueTimeout: 5000,
     queuePause: 250,
+    rega: {
+      enabled: false,
+      syncChannelNames: true,
+      createMatterDevicesForVariables: false,
+      createMatterDevicesForPrograms: false,
+      variablesPollingInterval: 0,
+      virtualKeyForPseudoPush: '',
+      legacyPollEnabled: false,
+      legacyPollInterval: 30,
+    },
+    logging: { logRpcEvents: false, truncatePayloadsToSingleLine: false },
     ...overrides,
   };
 }

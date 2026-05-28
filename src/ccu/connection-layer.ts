@@ -133,7 +133,7 @@ export class CcuConnectionLayer extends EventEmitter {
    */
   public async putChannelParamsetValues(iface: RpcInterfaceName, channelAddress: string, values: Record<string, unknown>, timeoutMs = this.getRequestTimeoutMs()): Promise<void> {
     await this.callRpc(iface, 'putParamset', [channelAddress, 'VALUES', values], timeoutMs);
-    this.log.debug(`putChannelParamsetValues -> iface=${iface} channel=${channelAddress} values=${JSON.stringify(values)}`);
+    this.log.debug(`putChannelParamsetValues -> iface=${iface} channel=${channelAddress} values=${this.formatPayload(values)}`);
   }
 
   /**
@@ -213,7 +213,7 @@ export class CcuConnectionLayer extends EventEmitter {
     }
 
     const started = Date.now();
-    this.log.debug(`RPC call -> iface=${iface} method=${method} timeoutMs=${timeoutMs} params=${JSON.stringify(parameters)}`);
+    this.log.debug(`RPC call -> iface=${iface} method=${method} timeoutMs=${timeoutMs} params=${this.formatPayload(parameters)}`);
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -232,7 +232,7 @@ export class CcuConnectionLayer extends EventEmitter {
           reject(error);
           return;
         }
-        this.log.debug(`RPC result <- iface=${iface} method=${method} durationMs=${duration} result=${JSON.stringify(result)}`);
+        this.log.debug(`RPC result <- iface=${iface} method=${method} durationMs=${duration} result=${this.formatPayload(result)}`);
         resolve(result);
       });
     });
@@ -355,10 +355,10 @@ export class CcuConnectionLayer extends EventEmitter {
   private async getRegaChannelNameMap(): Promise<Map<string, string>> {
     const nameMap = new Map<string, string>();
 
-    this.log.debug(`getRegaChannelNameMap check <- regaClient=${this.regaClient ? 'initialized' : 'null'} regaEnabled=${this.config.regaEnabled}`);
+    this.log.debug(`getRegaChannelNameMap check <- regaClient=${this.regaClient ? 'initialized' : 'null'} syncChannelNames=${this.config.rega.syncChannelNames}`);
 
-    if (!this.regaClient || !this.config.regaEnabled) {
-      this.log.debug(`getRegaChannelNameMap early return <- reason=${!this.regaClient ? 'regaClient not initialized' : 'regaEnabled is false'}`);
+    if (!this.regaClient || !this.config.rega.syncChannelNames) {
+      this.log.debug(`getRegaChannelNameMap early return <- reason=${!this.regaClient ? 'regaClient not initialized' : 'syncChannelNames is false'}`);
       return nameMap;
     }
 
@@ -404,7 +404,7 @@ export class CcuConnectionLayer extends EventEmitter {
         }
       }
 
-      this.log.debug(`ReGa channel names summary <- total=${nameMap.size} entries=${JSON.stringify(Object.fromEntries(nameMap))}`);
+      this.log.debug(`ReGa channel names summary <- total=${nameMap.size} entries=${this.formatPayload(Object.fromEntries(nameMap))}`);
     } catch (err) {
       this.log.warn(`ReGa channel name fetch via getChannels failed: ${String(err)}`);
     }
@@ -467,8 +467,17 @@ export class CcuConnectionLayer extends EventEmitter {
     }
   }
 
+  private formatPayload(value: unknown): string {
+    const raw = this.toJsonSafe(value);
+    if (!this.config.logging.truncatePayloadsToSingleLine) return raw;
+    const compact = raw.replace(/[\r\n\s]+/g, ' ').trim();
+    return compact.length > 200 ? `${compact.slice(0, 200)}\u2026` : compact;
+  }
+
   private handleRpcCallback(method: string, parameters: unknown[]): unknown {
-    this.log.debug(`RPC callback <- method=${method} params=${this.toJsonSafe(parameters)}`);
+    if (this.config.logging.logRpcEvents) {
+      this.log.debug(`RPC callback <- method=${method} params=${this.formatPayload(parameters)}`);
+    }
     this.emit('rpcCallback', method, parameters);
 
     if (method === 'newDevices') {
@@ -857,8 +866,8 @@ export class CcuConnectionLayer extends EventEmitter {
    * @returns {Promise<CcuReGaDatapoint[]>} Array of current datapoint values.
    */
   async fetchInitialValues(): Promise<CcuReGaDatapoint[]> {
-    if (!this.regaClient || !this.config.regaEnabled) {
-      this.log.debug(`fetchInitialValues early return <- reason=${!this.regaClient ? 'regaClient not initialized' : 'regaEnabled is false'}`);
+    if (!this.regaClient || !this.config.rega.enabled) {
+      this.log.debug(`fetchInitialValues early return <- reason=${!this.regaClient ? 'regaClient not initialized' : 'rega.enabled is false'}`);
       return [];
     }
 
@@ -943,7 +952,7 @@ export class CcuConnectionLayer extends EventEmitter {
   }
 
   private initRegaClient(): void {
-    if (!this.config.regaEnabled) return;
+    if (!this.config.rega.enabled && !this.config.rega.syncChannelNames) return;
 
     this.log.debug(`ReGa client init -> host=${this.config.host} port=${this.config.tls ? 48181 : 8181} tls=${this.config.tls} auth=${this.config.authentication}`);
 
@@ -957,7 +966,7 @@ export class CcuConnectionLayer extends EventEmitter {
       pass: this.config.password,
     });
 
-    this.connectedInterfaces.add('ReGaHSS');
+    if (this.config.rega.enabled) this.connectedInterfaces.add('ReGaHSS');
   }
 
   private initRpcClients(): void {
@@ -1002,7 +1011,7 @@ export class CcuConnectionLayer extends EventEmitter {
   private getEnabledInterfaces(): CcuInterfaceName[] {
     const enabled: CcuInterfaceName[] = [];
 
-    if (this.config.regaEnabled) enabled.push('ReGaHSS');
+    if (this.config.rega.enabled) enabled.push('ReGaHSS');
     if (this.config.bcrfEnabled) enabled.push('BidCos-RF');
     if (this.config.bcwiEnabled) enabled.push('BidCos-Wired');
     if (this.config.iprfEnabled) enabled.push('HmIP-RF');

@@ -76,4 +76,70 @@ describe('CCU config parser', () => {
     expect(parsed.queueTimeout).toBe(7000);
     expect(parsed.queuePause).toBe(300);
   });
+
+  test('should populate rega sub-object with defaults when no rega fields are set', () => {
+    const config = { name: 'matterbridge-homematic', type: 'DynamicPlatform', version: '0.0.1' } as PlatformConfig;
+
+    const parsed = parseCcuConnectionConfig(config);
+
+    expect(parsed.rega.enabled).toBe(true);
+    expect(parsed.rega.syncChannelNames).toBe(true);
+    expect(parsed.rega.createMatterDevicesForVariables).toBe(false);
+    expect(parsed.rega.createMatterDevicesForPrograms).toBe(false);
+    expect(parsed.rega.variablesPollingInterval).toBe(0);
+    expect(parsed.rega.virtualKeyForPseudoPush).toBe('');
+    expect(parsed.rega.legacyPollEnabled).toBe(true);
+    expect(parsed.rega.legacyPollInterval).toBe(30);
+  });
+
+  test('should populate rega sub-object from legacy and new fields when overrides are provided', () => {
+    const config = {
+      name: 'matterbridge-homematic',
+      type: 'DynamicPlatform',
+      version: '0.0.1',
+      regaEnabled: false,
+      regaPoll: false,
+      regaInterval: 15,
+      syncChannelNames: false,
+      createMatterDevicesForVariables: true,
+      createMatterDevicesForPrograms: true,
+      regaVariablesPollingInterval: 60,
+      virtualKeyForRegaPseudoPush: 'CUxD.CUX2801001:1.PRESS_SHORT',
+    } as unknown as PlatformConfig;
+
+    const parsed = parseCcuConnectionConfig(config);
+
+    expect(parsed.rega.enabled).toBe(false);
+    expect(parsed.rega.syncChannelNames).toBe(false);
+    expect(parsed.rega.createMatterDevicesForVariables).toBe(true);
+    expect(parsed.rega.createMatterDevicesForPrograms).toBe(true);
+    expect(parsed.rega.variablesPollingInterval).toBe(60);
+    expect(parsed.rega.virtualKeyForPseudoPush).toBe('CUxD.CUX2801001:1.PRESS_SHORT');
+    expect(parsed.rega.legacyPollEnabled).toBe(false);
+    expect(parsed.rega.legacyPollInterval).toBe(15);
+  });
+
+  test('should populate logging sub-object with defaults when no logging fields are set', () => {
+    const config = { name: 'matterbridge-homematic', type: 'DynamicPlatform', version: '0.0.1' } as PlatformConfig;
+
+    const parsed = parseCcuConnectionConfig(config);
+
+    expect(parsed.logging.logRpcEvents).toBe(false);
+    expect(parsed.logging.truncatePayloadsToSingleLine).toBe(false);
+  });
+
+  test('should populate logging sub-object from explicit fields when overrides are provided', () => {
+    const config = {
+      name: 'matterbridge-homematic',
+      type: 'DynamicPlatform',
+      version: '0.0.1',
+      logRpcEvents: true,
+      truncatePayloadsToSingleLine: true,
+    } as unknown as PlatformConfig;
+
+    const parsed = parseCcuConnectionConfig(config);
+
+    expect(parsed.logging.logRpcEvents).toBe(true);
+    expect(parsed.logging.truncatePayloadsToSingleLine).toBe(true);
+  });
 });

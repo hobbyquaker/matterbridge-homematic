@@ -33,6 +33,22 @@ export type SupportedChannelType = (typeof SUPPORTED_CHANNEL_TYPES)[number];
 /** Matter device type selection for Homematic SWITCH channels. */
 export type SwitchMatterType = 'light' | 'outlet' | 'switch';
 
+export interface CcuRegaFeatureConfig {
+  enabled: boolean;
+  createMatterDevicesForVariables: boolean;
+  createMatterDevicesForPrograms: boolean;
+  syncChannelNames: boolean;
+  variablesPollingInterval: number;
+  virtualKeyForPseudoPush: string;
+  legacyPollEnabled: boolean;
+  legacyPollInterval: number;
+}
+
+export interface CcuLoggingConfig {
+  logRpcEvents: boolean;
+  truncatePayloadsToSingleLine: boolean;
+}
+
 export interface CcuConnectionConfig {
   host: string;
   regaEnabled: boolean;
@@ -55,6 +71,8 @@ export interface CcuConnectionConfig {
   password: string;
   queueTimeout: number;
   queuePause: number;
+  rega: CcuRegaFeatureConfig;
+  logging: CcuLoggingConfig;
 }
 
 export interface CcuLogger {
