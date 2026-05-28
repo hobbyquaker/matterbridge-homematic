@@ -92,6 +92,13 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   private readonly wthHumidityChannels = new Map<string, MatterbridgeEndpoint>();
 
   /**
+   * Maps a MAINTENANCE channel address (ch0) to all Matter endpoints that expose its
+   * ACTUAL_TEMPERATURE datapoint (e.g. the four switch endpoints of an HmIP-DRSI4).
+   * One-to-many: a single maintenance channel can serve multiple endpoints.
+   */
+  private readonly maintenanceTemperatureChannels = new Map<string, MatterbridgeEndpoint[]>();
+
+  /**
    * Tracks the last value written to a Matter attribute from an incoming RPC event.
    * Used to suppress the echo setValue that the subscribeAttribute callback would otherwise send back.
    */
@@ -296,6 +303,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     this.rotaryHandleChannels.clear();
     this.energieMeterChannels.clear();
     this.wthHumidityChannels.clear();
+    this.maintenanceTemperatureChannels.clear();
 
     let enabledCount = 0;
     let registeredCount = 0;
@@ -459,6 +467,12 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
           // BidCos POWERMETER: CURRENT reported in A, handled by handleRpcEventPowerMeter.
           this.channelAddressToDevice.set(channel.powerMeterChannelAddress, endpoint);
         }
+      }
+      if (channel.temperatureChannelAddress) {
+        // One MAINTENANCE channel can serve multiple switch endpoints (e.g. HmIP-DRSI4 ch0 → 4 outputs).
+        const list = this.maintenanceTemperatureChannels.get(channel.temperatureChannelAddress) ?? [];
+        list.push(endpoint);
+        this.maintenanceTemperatureChannels.set(channel.temperatureChannelAddress, list);
       }
     }
 
@@ -1194,6 +1208,25 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
     const channelAddress = typeof event.channel === 'string' ? event.channel : undefined;
     if (!channelAddress) return;
+
+    // Fan out ACTUAL_TEMPERATURE from a shared MAINTENANCE channel (e.g. HmIP-DRSI4 ch0)
+    // to all switch endpoints that registered for it.
+    if ((datapoint === 'ACTUAL_TEMPERATURE' || datapoint === 'TEMPERATURE') && this.maintenanceTemperatureChannels.has(channelAddress)) {
+      const measuredValue = Math.round((typeof event.value === 'number' ? event.value : 0) * 100);
+      for (const ep of this.maintenanceTemperatureChannels.get(channelAddress)!) {
+        if (!ep.hasClusterServer('TemperatureMeasurement')) continue;
+        try {
+          const current = await ep.getAttribute('TemperatureMeasurement', 'measuredValue');
+          if (current !== measuredValue) {
+            await ep.updateAttribute('TemperatureMeasurement', 'measuredValue', measuredValue);
+          }
+        } catch (err) {
+          this.log.warn(`Failed to update TemperatureMeasurement for ${channelAddress}: ${String(err)}`);
+        }
+      }
+      this.log.info(`TEMPERATURE event: updated TemperatureMeasurement for ${channelAddress} to ${measuredValue} (${measuredValue / 100}°C)`);
+      return;
+    }
 
     const endpoint = this.channelAddressToDevice.get(channelAddress);
     if (!endpoint) return;

@@ -9,7 +9,7 @@
  * ## Real HmIP-DRSI4 channel structure
  *
  * ```
- * ch0   MAINTENANCE                        — housekeeping (not exposed)
+ * ch0   MAINTENANCE                        — housekeeping; exposes ACTUAL_TEMPERATURE datapoint
  * ch1   MULTI_MODE_INPUT_TRANSMITTER       — input button 1 (SENDER)
  * ch2   MULTI_MODE_INPUT_TRANSMITTER       — input button 2 (SENDER)
  * ch3   MULTI_MODE_INPUT_TRANSMITTER       — input button 3 (SENDER)
@@ -52,7 +52,7 @@
  */
 
 import { mapChannel as mapSwitchChannel } from '../channel-mapper/switch.js';
-import { CcuChannelInfo, DeviceMapper } from '../types.js';
+import { CcuChannelInfo, DeviceMapper, MappedDeviceEndpoint } from '../types.js';
 
 /**
  * Device mapper for multi-channel DIN rail switch actuators (HmIP-DRSI4 family).
@@ -68,20 +68,35 @@ export const mapDevice: DeviceMapper = (channels, vendorId, options) => {
   // Each output consists of one SWITCH_TRANSMITTER (physical relay state) followed by three
   // SWITCH_VIRTUAL_RECEIVER channels. We use the first virtual receiver after each transmitter
   // — it carries the user-assigned name and is the canonical control endpoint.
+
+  // Collect the state channels (one per output), in ascending channel index order.
   const transmitters = channels.filter((c) => c.type === 'SWITCH_TRANSMITTER').sort((a, b) => a.channelIndex - b.channelIndex);
 
   if (transmitters.length === 0) return [];
 
-  return transmitters.flatMap((tx) => {
+  // The MAINTENANCE channel (ch0) carries an ACTUAL_TEMPERATURE datapoint for the device’s
+  // internal temperature. Attach its address to every switch endpoint so the switch mapper
+  // adds a TemperatureMeasurement cluster and wireChannelEndpoint routes events to all outputs.
+  const maintenanceChannel = channels.find((c) => c.type === 'MAINTENANCE');
+
+  const results: MappedDeviceEndpoint[] = [];
+
+  for (const tx of transmitters) {
+    // Find the first SWITCH_VIRTUAL_RECEIVER that comes after this transmitter.
     const rx = channels.find((c) => c.type === 'SWITCH_VIRTUAL_RECEIVER' && c.channelIndex > tx.channelIndex);
-    if (!rx) return [];
+    if (!rx) continue;
+
     // Normalize to the canonical SWITCH type expected by wireChannelEndpoint and mapSwitchChannel.
-    const switchChannel: CcuChannelInfo = { ...rx, type: 'SWITCH' };
-    return [
-      {
-        endpoint: mapSwitchChannel(switchChannel, vendorId, { ...options, batteryPowered: false }),
-        channels: [switchChannel],
-      },
-    ];
-  });
+    // Carry the MAINTENANCE channel address so switch.ts adds a TemperatureMeasurement cluster
+    // and wireChannelEndpoint registers the ch0 address → this endpoint for ACTUAL_TEMPERATURE events.
+    const switchChannel: CcuChannelInfo = { ...rx, type: 'SWITCH', temperatureChannelAddress: maintenanceChannel?.address };
+    // One MappedDeviceEndpoint per output: the endpoint is the Matter on/off device,
+    // and channels contains the single switch channel that wireChannelEndpoint will wire up.
+    results.push({
+      endpoint: mapSwitchChannel(switchChannel, vendorId, { ...options, batteryPowered: false }),
+      channels: [switchChannel],
+    });
+  }
+
+  return results;
 };
