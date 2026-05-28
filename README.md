@@ -15,6 +15,9 @@ A [Matterbridge](https://github.com/Luligu/matterbridge) plugin for Homematic
 
 This plugin bridges your Homematic CCU's devices to the Matter ecosystem
 
+> [!WARNING]
+> **Work in progress** — The plugin is functional but still under active development. Many Homematic device types already work out of the box; others are planned for upcoming releases. See [ROADMAP.md](ROADMAP.md) for what is coming next.
+
 ## Supported Device Types
 
 For a full alphabetical list of known devices with support status and Apple Home compatibility, see [device-support.md](device-support.md). For planned features and future device mapper work, see [ROADMAP.md](ROADMAP.md).
@@ -177,21 +180,40 @@ To minimize startup time, the plugin caches discovered devices:
 - **Background Refresh**: Updates cache asynchronously from live RPC/ReGa data
 - **Persistence**: Survives plugin restarts and Matterbridge updates
 
+### Channel Mappers and Device Mappers
+
+The plugin uses a two-tier mapping system to translate Homematic channels into Matter endpoints.
+
+**Channel mappers** (`src/ccu/channel-mapper/`) handle the common case: a single Homematic channel becomes a single Matter endpoint. Each mapper is keyed by the Homematic channel type string (e.g. `SWITCH`, `BLIND`, `HEATING_CLIMATECONTROL_TRANSCEIVER`). When the channel type is found in the registry, the corresponding mapper function creates the right `MatterbridgeEndpoint` with the correct device type and cluster servers.
+
+**Device mappers** (`src/ccu/device-mapper/`) handle multi-channel devices where a physical device must be split into more than one Matter endpoint, or where channels need to be combined. A device mapper receives all channels for a physical Homematic device and returns zero or more endpoints. Device mappers take priority over channel mappers for the device types they cover.
+
+**Example:** The HmIP-DRSI4 has four independent relay outputs. Its device mapper pairs each `SWITCH_TRANSMITTER` with the first `SWITCH_VIRTUAL_RECEIVER` that follows it, returning four separate Matter on/off endpoints — one per relay output. Without a device mapper the generic channel loop would create endpoints for every individual channel instead.
+
+For a detailed architecture reference, conventions, and a guide to writing new mappers, see [mapper.instructions.md](.github/instructions/homematic/mapper.instructions.md).
+
 ## Development
 
 ### Project Structure
 
 ```text
 src/
-├── module.ts                 # Main plugin entry & platform class
-├── ccu/
-│   ├── connection-layer.ts  # RPC/ReGa communication & callbacks
-│   ├── device-mapper.ts     # Channel → Matter device conversion
-│   ├── config.ts            # Configuration parsing
-│   └── types.ts             # TypeScript interfaces
-test/
-├── module.test.ts           # Platform lifecycle tests
-└── ccu-config.test.ts       # Configuration parsing tests
+├── module.ts                        # Main plugin entry & platform class
+└── ccu/
+    ├── connection-layer.ts          # RPC/ReGa communication & callbacks
+    ├── device-mapper.ts             # Device mapper dispatcher
+    ├── device-power.ts              # Battery/power classification
+    ├── mapper-utils.ts              # Shared endpoint builder helpers
+    ├── config.ts                    # Configuration parsing
+    ├── types.ts                     # TypeScript interfaces
+    ├── channel-mapper/              # Per channel-type mapper functions
+    │   ├── switch.ts, blind.ts, dimmer.ts, ...
+    │   └── index.ts                 # Channel mapper registry
+    └── device-mapper/               # Per device-type mapper functions
+        ├── hmip-bsm.ts, hmip-drsi4.ts, hmip-wth.ts, ...
+        └── index.ts                 # Device mapper registry
+vitest/                              # Vitest unit tests
+test/                                # Jest integration tests
 ```
 
 ### Running Locally
