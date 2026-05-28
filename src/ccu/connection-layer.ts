@@ -494,10 +494,12 @@ export class CcuConnectionLayer extends EventEmitter {
       }
       // PONG events only serve the watchdog — do not forward to subscribers.
       if (typeof channel === 'string' && channel.includes('CENTRAL') && datapoint === 'PONG') {
-        this.log.debug(`RPC PONG <- iface=${iface ?? 'unknown'}`);
+        if (this.config.logging.logRpcEvents) this.log.debug(`RPC PONG <- iface=${iface ?? 'unknown'}`);
         return '';
       }
-      this.log.debug(`RPC event <- iface=${iface ?? 'unknown'} channel=${String(channel ?? '')} datapoint=${String(datapoint ?? '')} value=${this.toJsonSafe(value)}`);
+      if (this.config.logging.logRpcEvents) {
+        this.log.debug(`RPC event <- iface=${iface ?? 'unknown'} channel=${String(channel ?? '')} datapoint=${String(datapoint ?? '')} value=${this.formatPayload(value)}`);
+      }
       this.emit('rpcEvent', {
         iface,
         idInit,
