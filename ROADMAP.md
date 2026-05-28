@@ -1,11 +1,11 @@
-# Device Mapper Roadmap
+# Roadmap
 
 > Last reviewed: May 2026  
 > Reference prior-art: https://github.com/rdmtc/RedMatic-HomeKit/tree/master/homematic-devices
 
 ## Planned features
 
-### Priority: High
+### Todo
 
 #### UI-0 — Per-device / per-channel configuration web UI
 
@@ -75,82 +75,6 @@ Each key maps to the raw paramset description object returned by the CCU. We sho
 
 ---
 
-#### OPS-0 — More granular logging controls
-
-**Done:** [`9bb5aa4`](https://github.com/hobbyquaker/matterbridge-homematic/commit/9bb5aa4)
-
-**Effort: Low-Medium**  
-**Goal:** keep useful diagnostic logging available without flooding the log with high-volume RPC transport noise.
-
-The current plugin config only exposes a single coarse `debug` boolean. In practice the noisiest log lines come from the CCU transport layer, especially:
-
-- incoming `RPC callback` / `RPC event` lines for every event
-- large `RPC result` payloads for calls such as `getParamsetDescription`
-- verbose `newDevices` payload/classification logging during startup or interface re-init
-
-These are useful when debugging RPC protocol problems, but they drown out higher-value mapping and state-sync logs during normal troubleshooting.
-
-**Planned approach:**
-
-1. Keep the existing `debug` switch as the master coarse switch for backward compatibility
-2. Add a small number of narrower plugin config options for high-volume transport logging:
-
-- `logRpcEvents` (`boolean`) — gate per-event `RPC callback` / `RPC event` logging
-- one payload-format option that indicates RPC and ReGa payloads are truncated so they fit in one line, instead of introducing separate `logRpcPayloads` / `logRegaPayloads` toggles
-
-3. Route noisy transport logs through small helper methods in the connection layer so they can be turned on/off consistently without scattering conditionals across every log call
-4. Keep summaries, warnings, and state-change logs visible under normal debug mode even when payload output is truncated
-
-**Design guidance:**
-
-- Prefer category toggles over inventing a second custom log-level system unless Matterbridge already provides a natural extension point. The real problem is log category volume, not lack of numeric severity levels
-- Prefer one shared payload-format/truncation option for both RPC and ReGa payloads rather than separate payload toggles per source
-- Heavy payload logs should be summarized/truncated into a single line so calls like `getParamsetDescription`, `listDevices`, `newDevices`, and ReGa script results do not dominate the frontend log view
-- The future config UI should surface these options under an "advanced diagnostics" section, not alongside normal end-user device settings
-
----
-
-#### CFG-0 — Split ReGa features into explicit config flags
-
-**Done:** [`9bb5aa4`](https://github.com/hobbyquaker/matterbridge-homematic/commit/9bb5aa4)
-
-**Effort: Medium**  
-**Goal:** replace the current coarse ReGa toggle with feature-specific options so users can independently enable channel-name sync, program endpoints, variable endpoints, polling, and pseudo-push behavior.
-
-The current `regaEnabled` shape is too coarse. It mixes at least three separate concerns: channel-name lookup, program/script execution, and future ReGa-backed virtual entities. The roadmap should move toward explicit switches for each user-visible ReGa feature.
-
-**Target config surface:**
-
-1. `createMatterDevicesForVariables` (`boolean`, default false)
-2. `createMatterDevicesForPrograms` (`boolean`, default false)
-3. `syncChannelNames` (`boolean`, default true)
-4. `regaVariablesPollingInterval` (`number`, with `0` meaning no polling, default 0)
-5. `virtualKeyForRegaPseudoPush` (`string` or structured key reference, default empty string)
-
-**Planned approach:**
-
-1. Keep compatibility for existing installs by mapping the current `regaEnabled` behavior onto sensible defaults for the new flags during migration
-2. Treat `syncChannelNames` as the switch for channel-name lookup and blacklist/whitelist migration, independent from program and variable exposure
-3. Allow `syncChannelNames` to work even when the broader historical `regaEnabled` path is disabled
-4. Gate program endpoint creation behind `createMatterDevicesForPrograms`
-5. Gate ReGa boolean-variable endpoint creation behind `createMatterDevicesForVariables`
-6. Use `regaVariablesPollingInterval` only for ReGa variable state refresh; `0` should disable polling entirely
-7. Use `virtualKeyForRegaPseudoPush` to support a pseudo-push mechanism for faster refresh without requiring aggressive polling
-
-**Design notes:**
-
-- `syncChannelNames` should only enable the minimal ReGa calls required to fetch channel names and migrate config entries; it should not implicitly enable program support or variable polling
-- Variable and program support should be modeled as separate endpoint families so users can enable one without the other
-- `virtualKeyForRegaPseudoPush` should be documented as an optimization path for ReGa-backed state refresh, not as a mandatory dependency for variables/programs
-- The connection layer will likely need smaller ReGa capability slices instead of a single all-or-nothing initialization path
-- Schema and README documentation should describe the five options explicitly and explain how they interact with the legacy `regaEnabled` setting during the transition period
-
----
-
-## Planned device mappers
-
-### Priority: High
-
 #### HM-3 — HM-CC-VG-1 virtual thermostat group
 
 **Effort: Low–Medium** (endpoint creation is easy; event routing needs research)
@@ -192,28 +116,6 @@ RedMatic prior art: `hm-sec-sir-wm.js` maps to a HomeKit `SecuritySystem` with `
 3. `module.ts` event handling needs to aggregate zone states and ARMSTATE into the cluster attribute
 
 ---
-
-#### HM-1 — Wall thermostat humidity endpoint (HmIP-WTH / STH / STHD family)
-
-**Done:** [`df5337a`](https://github.com/hobbyquaker/matterbridge-homematic/commit/df5337a)
-
-**Effort: Low** (~40 LOC + tests)
-
-The `HEATING_CLIMATECONTROL_TRANSCEIVER` channel on HmIP-WTH, WTH-2, WTH-B, STHD, STH also carries a `HUMIDITY` datapoint. The current channel mapper creates only a thermostat endpoint. A device mapper should additionally return a `humiditySensor` endpoint built from the same channel address.
-
-RedMatic prior art: `hmip-wth.js`, `hmip-sthd.js` — both offer an optional `HumiditySensor` service. Today we always include it. In a future config UI, this is a good candidate for a device-type-specific mapper option (`exposeHumidityEndpoint: true|false`).
-
-**Implementation notes:**
-
-- Device mapper calls `mapHeatingClimateControlTransceiverChannel(switchChannel, vendorId, options)` for the thermostat endpoint
-- Builds a second `MatterbridgeEndpoint([humiditySensor])` from the same channel address, with `HumidityMeasurement` cluster
-- Returns both endpoints from `mapDevice`
-- Device mapper files: `src/ccu/device-mapper/hmip-wth.ts` (covers WTH, WTH-2, WTH-B)  
-  and `src/ccu/device-mapper/hmip-sthd.ts` (covers STHD, STH) — or one shared helper
-
----
-
-### Priority: Medium
 
 #### HM-5 — HM-LC-RGBW-WM / hb-uni-rgb-led-ctrl color light
 
@@ -476,20 +378,97 @@ All use the same M30×1.5 valve thread and are expected to expose `HEATING_CLIMA
 
 ---
 
-## Homebrew (hb-) device summary
+### Done
 
-Analyzed all `hb-` prefix devices from RedMatic-HomeKit. No new device mapper categories are needed specifically for homebrew devices.
+#### HM-1 — Wall thermostat humidity endpoint (HmIP-WTH / STH / STHD family)
 
-| Device                                         | Verdict                                                                                                                                                                  |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| hb-lc-bl1pbu-fm                                | Alias for HM-LC-Bl1PBU-FM → BLIND channel mapper handles it                                                                                                              |
-| hb-lc-sw1pbu-fm, hb-lc-sw2-fm, hb-lc-sw2pbu-fm | SWITCH channel mapper handles all                                                                                                                                        |
-| hb-uni-rgb-led-ctrl                            | Alias for hm-lc-rgbw-wm → covered by roadmap item HM-5                                                                                                                   |
-| hb-uni-sen-press-sc                            | SHUTTER_CONTACT → contactSensor, already works                                                                                                                           |
-| hb-uni-sen-temp-ds18b20, hb-uni-sen-temp-ir    | Temperature-only probes; if channel type is TEMPERATURE_HUMIDITY_TRANSMITTER a humidity endpoint is created with no data — minor cosmetic issue, no device mapper needed |
-| hb-uni-sen-wea                                 | Uses `LUX` datapoint; WEATHER channel mapper uses `BRIGHTNESS`. May need a small fix to the WEATHER mapper to fall back to LUX, but no device mapper                     |
-| hb-uni-dmx-master                              | ch1 SWITCH (STATE) + ch2-3 KEY-like (PRESS_SHORT) → standard channel types                                                                                               |
-| hb-uni-senact-4-4-rc/sc and 8-8 variants       | SWITCH + SHUTTER_CONTACT — all standard mappers                                                                                                                          |
+**Done:** [`df5337a`](https://github.com/hobbyquaker/matterbridge-homematic/commit/df5337a)
+
+**Effort: Low** (~40 LOC + tests)
+
+The `HEATING_CLIMATECONTROL_TRANSCEIVER` channel on HmIP-WTH, WTH-2, WTH-B, STHD, STH also carries a `HUMIDITY` datapoint. The current channel mapper creates only a thermostat endpoint. A device mapper should additionally return a `humiditySensor` endpoint built from the same channel address.
+
+RedMatic prior art: `hmip-wth.js`, `hmip-sthd.js` — both offer an optional `HumiditySensor` service. Today we always include it. In a future config UI, this is a good candidate for a device-type-specific mapper option (`exposeHumidityEndpoint: true|false`).
+
+**Implementation notes:**
+
+- Device mapper calls `mapHeatingClimateControlTransceiverChannel(switchChannel, vendorId, options)` for the thermostat endpoint
+- Builds a second `MatterbridgeEndpoint([humiditySensor])` from the same channel address, with `HumidityMeasurement` cluster
+- Returns both endpoints from `mapDevice`
+- Device mapper files: `src/ccu/device-mapper/hmip-wth.ts` (covers WTH, WTH-2, WTH-B)  
+  and `src/ccu/device-mapper/hmip-sthd.ts` (covers STHD, STH) — or one shared helper
+
+---
+
+#### OPS-0 — More granular logging controls
+
+**Done:** [`9bb5aa4`](https://github.com/hobbyquaker/matterbridge-homematic/commit/9bb5aa4)
+
+**Effort: Low-Medium**  
+**Goal:** keep useful diagnostic logging available without flooding the log with high-volume RPC transport noise.
+
+The current plugin config only exposes a single coarse `debug` boolean. In practice the noisiest log lines come from the CCU transport layer, especially:
+
+- incoming `RPC callback` / `RPC event` lines for every event
+- large `RPC result` payloads for calls such as `getParamsetDescription`
+- verbose `newDevices` payload/classification logging during startup or interface re-init
+
+These are useful when debugging RPC protocol problems, but they drown out higher-value mapping and state-sync logs during normal troubleshooting.
+
+**Planned approach:**
+
+1. Keep the existing `debug` switch as the master coarse switch for backward compatibility
+2. Add a small number of narrower plugin config options for high-volume transport logging:
+
+- `logRpcEvents` (`boolean`) — gate per-event `RPC callback` / `RPC event` logging
+- one payload-format option that indicates RPC and ReGa payloads are truncated so they fit in one line, instead of introducing separate `logRpcPayloads` / `logRegaPayloads` toggles
+
+3. Route noisy transport logs through small helper methods in the connection layer so they can be turned on/off consistently without scattering conditionals across every log call
+4. Keep summaries, warnings, and state-change logs visible under normal debug mode even when payload output is truncated
+
+**Design guidance:**
+
+- Prefer category toggles over inventing a second custom log-level system unless Matterbridge already provides a natural extension point. The real problem is log category volume, not lack of numeric severity levels
+- Prefer one shared payload-format/truncation option for both RPC and ReGa payloads rather than separate payload toggles per source
+- Heavy payload logs should be summarized/truncated into a single line so calls like `getParamsetDescription`, `listDevices`, `newDevices`, and ReGa script results do not dominate the frontend log view
+- The future config UI should surface these options under an "advanced diagnostics" section, not alongside normal end-user device settings
+
+---
+
+#### CFG-0 — Split ReGa features into explicit config flags
+
+**Done:** [`9bb5aa4`](https://github.com/hobbyquaker/matterbridge-homematic/commit/9bb5aa4)
+
+**Effort: Medium**  
+**Goal:** replace the current coarse ReGa toggle with feature-specific options so users can independently enable channel-name sync, program endpoints, variable endpoints, polling, and pseudo-push behavior.
+
+The current `regaEnabled` shape is too coarse. It mixes at least three separate concerns: channel-name lookup, program/script execution, and future ReGa-backed virtual entities. The roadmap should move toward explicit switches for each user-visible ReGa feature.
+
+**Target config surface:**
+
+1. `createMatterDevicesForVariables` (`boolean`, default false)
+2. `createMatterDevicesForPrograms` (`boolean`, default false)
+3. `syncChannelNames` (`boolean`, default true)
+4. `regaVariablesPollingInterval` (`number`, with `0` meaning no polling, default 0)
+5. `virtualKeyForRegaPseudoPush` (`string` or structured key reference, default empty string)
+
+**Planned approach:**
+
+1. Keep compatibility for existing installs by mapping the current `regaEnabled` behavior onto sensible defaults for the new flags during migration
+2. Treat `syncChannelNames` as the switch for channel-name lookup and blacklist/whitelist migration, independent from program and variable exposure
+3. Allow `syncChannelNames` to work even when the broader historical `regaEnabled` path is disabled
+4. Gate program endpoint creation behind `createMatterDevicesForPrograms`
+5. Gate ReGa boolean-variable endpoint creation behind `createMatterDevicesForVariables`
+6. Use `regaVariablesPollingInterval` only for ReGa variable state refresh; `0` should disable polling entirely
+7. Use `virtualKeyForRegaPseudoPush` to support a pseudo-push mechanism for faster refresh without requiring aggressive polling
+
+**Design notes:**
+
+- `syncChannelNames` should only enable the minimal ReGa calls required to fetch channel names and migrate config entries; it should not implicitly enable program support or variable polling
+- Variable and program support should be modeled as separate endpoint families so users can enable one without the other
+- `virtualKeyForRegaPseudoPush` should be documented as an optimization path for ReGa-backed state refresh, not as a mandatory dependency for variables/programs
+- The connection layer will likely need smaller ReGa capability slices instead of a single all-or-nothing initialization path
+- Schema and README documentation should describe the five options explicitly and explain how they interact with the legacy `regaEnabled` setting during the transition period
 
 ---
 
