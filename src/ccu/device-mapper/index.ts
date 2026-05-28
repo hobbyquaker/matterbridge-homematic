@@ -13,6 +13,7 @@
 
 import { DeviceMapper } from '../types.js';
 import { mapDevice as hmipBsm } from './hmip-bsm.js';
+import { mapDevice as hmipDrsi4 } from './hmip-drsi4.js';
 import { mapDevice as hmipSthd } from './hmip-sthd.js';
 import { mapDevice as hmipWth } from './hmip-wth.js';
 
@@ -24,6 +25,11 @@ import { mapDevice as hmipWth } from './hmip-wth.js';
  */
 export const DEVICE_MAPPERS: Record<string, DeviceMapper> = {
   'hmip-bsm': hmipBsm,
+  // HmIP-DRSI family — multi-channel DIN rail switch actuators (mains-powered, one endpoint per output).
+  'hmip-drsi1': hmipDrsi4,
+  'hmip-drsi4': hmipDrsi4,
+  // MOD-OC8 — 8-channel relay module, same multi-switch pattern.
+  'mod-oc8': hmipDrsi4,
   // HmIP-WTH family — wall thermostats with HUMIDITY on the HEATING_CLIMATECONTROL_TRANSCEIVER channel.
   'hmip-wth': hmipWth,
   'hmip-wth-1': hmipWth,

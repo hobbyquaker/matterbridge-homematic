@@ -228,6 +228,98 @@ describe('channel mapper: KEYMATIC', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Device mapper: HmIP-DRSI4 (multi-endpoint pattern)
+// ---------------------------------------------------------------------------
+
+describe('device mapper: HmIP-DRSI4', () => {
+  /** Build N SWITCH channels for one device, simulating post-pairing resolved channels. */
+  function makeDrsiChannels(deviceType: string, count: number): CcuChannelInfo[] {
+    return Array.from({ length: count }, (_, i) =>
+      makeChannel({
+        type: 'SWITCH',
+        deviceType,
+        address: `DRSI4XXXXX:${i + 1}`,
+        deviceAddress: 'DRSI4XXXXX',
+        channelIndex: i + 1,
+        name: `Output ${i + 1}`,
+        batteryPowered: false,
+      }),
+    );
+  }
+
+  for (const deviceType of ['HmIP-DRSI4', 'HmIP-DRSI1', 'MOD-OC8']) {
+    test(`should be registered for ${deviceType}`, () => {
+      expect(getDeviceMapper(deviceType)).toBeDefined();
+    });
+  }
+
+  test('should return one endpoint per SWITCH channel', () => {
+    const mapper = getDeviceMapper('HmIP-DRSI4')!;
+    const channels = makeDrsiChannels('HmIP-DRSI4', 4);
+    const results = mapper(channels, VENDOR_ID, {});
+    expect(results).toHaveLength(4);
+  });
+
+  test('each result should be a MatterbridgeEndpoint', () => {
+    const mapper = getDeviceMapper('HmIP-DRSI4')!;
+    const channels = makeDrsiChannels('HmIP-DRSI4', 4);
+    const results = mapper(channels, VENDOR_ID, {});
+    for (const { endpoint } of results) {
+      expect(endpoint).toBeInstanceOf(MatterbridgeEndpoint);
+    }
+  });
+
+  test('each result should carry exactly its own channel', () => {
+    const mapper = getDeviceMapper('HmIP-DRSI4')!;
+    const channels = makeDrsiChannels('HmIP-DRSI4', 4);
+    const results = mapper(channels, VENDOR_ID, {});
+    for (let i = 0; i < 4; i++) {
+      expect(results[i].channels).toHaveLength(1);
+      expect(results[i].channels[0].address).toBe(`DRSI4XXXXX:${i + 1}`);
+    }
+  });
+
+  test('each endpoint should have OnOff cluster', () => {
+    const mapper = getDeviceMapper('HmIP-DRSI4')!;
+    const channels = makeDrsiChannels('HmIP-DRSI4', 4);
+    const results = mapper(channels, VENDOR_ID, {});
+    for (const { endpoint } of results) {
+      expect(endpoint.hasClusterServer('OnOff')).toBe(true);
+    }
+  });
+
+  test('should return empty array when no SWITCH channels are present', () => {
+    const mapper = getDeviceMapper('HmIP-DRSI4')!;
+    expect(mapper([], VENDOR_ID, {})).toHaveLength(0);
+  });
+
+  test('should ignore non-SWITCH channels', () => {
+    const mapper = getDeviceMapper('HmIP-DRSI4')!;
+    const channels = [
+      ...makeDrsiChannels('HmIP-DRSI4', 2),
+      makeChannel({ type: 'KEY', deviceType: 'HmIP-DRSI4', address: 'DRSI4XXXXX:5', deviceAddress: 'DRSI4XXXXX', channelIndex: 5 }),
+    ];
+    const results = mapper(channels, VENDOR_ID, {});
+    expect(results).toHaveLength(2);
+  });
+
+  test('should work for HmIP-DRSI1 with a single channel', () => {
+    const mapper = getDeviceMapper('HmIP-DRSI1')!;
+    const channels = makeDrsiChannels('HmIP-DRSI1', 1);
+    const results = mapper(channels, VENDOR_ID, {});
+    expect(results).toHaveLength(1);
+    expect(results[0].channels[0].address).toBe('DRSI4XXXXX:1');
+  });
+
+  test('should work for MOD-OC8 with eight channels', () => {
+    const mapper = getDeviceMapper('MOD-OC8')!;
+    const channels = makeDrsiChannels('MOD-OC8', 8);
+    const results = mapper(channels, VENDOR_ID, {});
+    expect(results).toHaveLength(8);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Device mapper: HmIP-WTH / WTH-2 / WTH-B
 // ---------------------------------------------------------------------------
 
