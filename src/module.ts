@@ -278,6 +278,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     const enabledInterfaces = this.ccuConnection.getStatusSnapshot().enabledInterfaces;
     this.updateMainsPoweredDeviceSet(rawChannels);
     await this.primeBatteryHintsFromRpc(rawChannels);
+    await this.cleanupDisabledInterfaceChannels(cachedChannels, enabledInterfaces);
     this.syncChannelListEntriesWithRegaNames(cachedChannels, enabledInterfaces);
     const channels = resolveChannelsForMatter(rawChannels);
     this.discoveredChannels = channels;
@@ -308,18 +309,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const displayName = this.getChannelDisplayName(channel);
       const override = this.getChannelOverride(channel.address);
       // Serial format: <interface>:<short-type>:<device>:<channel> — matches serialNumber in createEndpointForChannel.
-      const selectSerial = `${channel.interfaceName}:${channelTypeLabel(channel.type)}:${channel.address}`;
-      // Clear all known legacy key formats accumulated across migrations to avoid duplicate UI rows.
-      const legacySelectKeys = new Set(
-        [
-          channel.address.replace(':', '-'), // very old: dash-address
-          channel.address, // old: plain address
-          `${channel.type}:${channel.address}`, // pre-abbreviation: raw-type:address
-          `${channelTypeLabel(channel.type)}:${channel.address}`, // pre-interface: label:address
-          `${channel.interfaceName}:${channel.type}:${channel.address}`, // post-interface, pre-abbreviation
-        ].filter((k) => k !== selectSerial),
-      );
-      for (const oldKey of legacySelectKeys) {
+      const selectSerial = this.getChannelSelectSerial(channel);
+      for (const oldKey of this.getLegacyChannelSelectKeys(channel)) {
         if (this.getSelectDevice(oldKey) !== undefined) {
           await this.clearDeviceSelect(oldKey);
         }
@@ -333,6 +324,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       }
 
       enabledCount++;
+      this.logChannelMapperSelection(channel, displayName);
 
       const endpoint = createEndpointForChannel(channel as Parameters<typeof createEndpointForChannel>[0], this.matterbridge.aggregatorVendorId, {
         switchMatterType: override?.switchMatterType ?? inferSwitchMatterTypeFromName(channel.name),
@@ -533,6 +525,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         if (deviceMapper) {
           deviceMapperHandled.add(channel.deviceAddress);
           const deviceChannels = channels.filter((c) => c.deviceAddress === channel.deviceAddress);
+          this.logDeviceMapperSelection(channel.deviceAddress, channel.deviceType, deviceChannels);
           const mappingOptions = {
             switchMatterType: override?.switchMatterType ?? inferSwitchMatterTypeFromName(channel.name),
             batteryPowered: this.deviceBatteryHints.get(channel.deviceAddress) ?? channel.batteryPowered,
@@ -1986,6 +1979,50 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     }
   }
 
+  private async cleanupDisabledInterfaceChannels(
+    channels: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'name' | 'type'>[],
+    enabledInterfaces: readonly CcuInterfaceName[],
+  ): Promise<void> {
+    const enabledInterfaceSet = new Set(enabledInterfaces);
+    const blacklistEntriesToRemove = new Set<string>();
+    let removedSelectDevices = 0;
+
+    for (const channel of channels) {
+      if (enabledInterfaceSet.has(channel.interfaceName)) continue;
+
+      const removalKeys = [this.getChannelSelectSerial(channel), ...this.getLegacyChannelSelectKeys(channel)];
+      for (const key of removalKeys) {
+        if (this.getSelectDevice(key) === undefined) continue;
+        await this.clearDeviceSelect(key);
+        removedSelectDevices++;
+      }
+
+      blacklistEntriesToRemove.add(this.getChannelSelectSerial(channel));
+      blacklistEntriesToRemove.add(channel.address);
+      const regaName = channel.name?.trim();
+      if (regaName) {
+        blacklistEntriesToRemove.add(regaName);
+      }
+      for (const legacyKey of this.getLegacyChannelSelectKeys(channel)) {
+        blacklistEntriesToRemove.add(legacyKey);
+      }
+    }
+
+    const config = this.getPlatformConfig();
+    const currentBlackList = Array.isArray(config.blackList) ? config.blackList : [];
+    const nextBlackList = currentBlackList.filter((entry): entry is string => typeof entry === 'string' && !blacklistEntriesToRemove.has(entry));
+    const removedBlacklistEntries = currentBlackList.length - nextBlackList.length;
+
+    if (removedBlacklistEntries > 0) {
+      config.blackList = nextBlackList;
+      this.saveConfig(config);
+    }
+
+    if (removedSelectDevices > 0 || removedBlacklistEntries > 0) {
+      this.log.info(`Disabled interface cleanup summary: removedSelectDevices=${removedSelectDevices} removedBlacklistEntries=${removedBlacklistEntries}`);
+    }
+  }
+
   private syncChannelListEntriesWithRegaNames(channels: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'name'>[], enabledInterfaces?: readonly CcuInterfaceName[]): void {
     const enabledInterfaceSet = enabledInterfaces ? new Set(enabledInterfaces) : undefined;
     const channelMap = new Map<string, Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'name'>>();
@@ -2056,6 +2093,44 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   private getChannelSelectSerial(channel: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'type'>): string {
     const typeLabel = isSupportedChannelType(channel.type) ? channelTypeLabel(channel.type) : channel.type;
     return `${channel.interfaceName}:${typeLabel}:${channel.address}`;
+  }
+
+  private getLegacyChannelSelectKeys(channel: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'type'>): string[] {
+    const selectSerial = this.getChannelSelectSerial(channel);
+    const typeLabel = isSupportedChannelType(channel.type) ? channelTypeLabel(channel.type) : channel.type;
+    return [
+      channel.address.replace(':', '-'),
+      channel.address,
+      `${channel.type}:${channel.address}`,
+      `${typeLabel}:${channel.address}`,
+      `${channel.interfaceName}:${channel.type}:${channel.address}`,
+    ].filter((key) => key !== selectSerial);
+  }
+
+  private logChannelMapperSelection(channel: Pick<CcuChannelInfo, 'address' | 'name' | 'type'>, displayName: string): void {
+    this.log.info(`Channel mapper: channel=${channel.address} name="${displayName}" type=${channel.type} mapper=${this.getChannelMapperKey(channel.type)}`);
+  }
+
+  private logDeviceMapperSelection(deviceAddress: string, deviceType: string, deviceChannels: Pick<CcuChannelInfo, 'name'>[]): void {
+    this.log.info(
+      `Device mapper: device=${deviceAddress} names="${this.getDeviceMapperNames(deviceChannels)}" deviceType=${deviceType} mapper=${this.getDeviceMapperKey(deviceType)}`,
+    );
+  }
+
+  private getChannelMapperKey(channelType: string): string {
+    return channelType.toLowerCase().replace(/_/g, '-');
+  }
+
+  private getDeviceMapperKey(deviceType: string): string {
+    return deviceType
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
+  }
+
+  private getDeviceMapperNames(deviceChannels: Pick<CcuChannelInfo, 'name'>[]): string {
+    const names = [...new Set(deviceChannels.map((channel) => channel.name?.trim()).filter((name): name is string => typeof name === 'string' && name.length > 0))];
+    return names.join(' | ');
   }
 
   private getPlatformConfig(): HomematicPlatformConfig {

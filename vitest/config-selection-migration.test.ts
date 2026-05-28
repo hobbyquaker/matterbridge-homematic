@@ -67,6 +67,30 @@ function makePlatform(config: PlatformConfig = makeConfig()): TemplatePlatform {
 }
 
 describe('TemplatePlatform config selection migration', () => {
+  test('should remove disabled-interface channels from select devices and blacklist', async () => {
+    const config = makeConfig();
+    config.blackList = ['BidCos-RF:SWITCH:LEQ1234567:1', 'LEQ1234567:1', 'Legacy Switch'];
+
+    const instance = makePlatform(config);
+    const saveConfigSpy = vi.spyOn(instance, 'saveConfig').mockImplementation(() => {});
+    const logInfoSpy = vi.spyOn(instance.log, 'info');
+
+    instance.setSelectDevice('BidCos-RF:SWITCH:LEQ1234567:1', 'Legacy Switch', undefined, 'switch');
+    instance.setSelectDevice('SWITCH:LEQ1234567:1', 'Legacy Switch', undefined, 'switch');
+
+    const channels: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'name' | 'type'>[] = [
+      { address: 'LEQ1234567:1', interfaceName: 'BidCos-RF', name: 'Legacy Switch', type: 'SWITCH' },
+    ];
+
+    // @ts-expect-error Accessing private method for testing purposes
+    await instance.cleanupDisabledInterfaceChannels(channels, ['HmIP-RF']);
+
+    expect(config.blackList).toEqual([]);
+    expect(instance.getSelectDevices()).toEqual([]);
+    expect(saveConfigSpy).toHaveBeenCalledExactlyOnceWith(config);
+    expect(logInfoSpy).toHaveBeenCalledWith('Disabled interface cleanup summary: removedSelectDevices=2 removedBlacklistEntries=3');
+  });
+
   test('should migrate address-based whitelist and blacklist entries to ReGa names when discovered', () => {
     const config = makeConfig();
     config.whiteList = ['001558A99EFDBA:1'];
@@ -97,9 +121,7 @@ describe('TemplatePlatform config selection migration', () => {
     const instance = makePlatform(config);
     const saveConfigSpy = vi.spyOn(instance, 'saveConfig').mockImplementation(() => {});
 
-    const channels: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'name'>[] = [
-      { address: '00391F29B5C076:1', interfaceName: 'HmIP-RF', name: 'Thermostat Wohnzimmer:1' },
-    ];
+    const channels: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'name'>[] = [{ address: '00391F29B5C076:1', interfaceName: 'HmIP-RF', name: 'Thermostat Wohnzimmer:1' }];
 
     // @ts-expect-error Accessing private method for testing purposes
     instance.syncChannelListEntriesWithRegaNames(channels, ['HmIP-RF']);

@@ -130,27 +130,38 @@ These are useful when debugging RPC protocol problems, but they drown out higher
 - For heavy payload logs, consider truncation/summarization even when enabled so huge `getParamsetDescription` or `newDevices` objects do not dominate the frontend log view
 - The future config UI should surface these options under an "advanced diagnostics" section, not alongside normal end-user device settings
 
-#### CFG-0 — Separate `regaNameSync` config flag
+#### CFG-0 — Split ReGa features into explicit config flags
 
-**Effort: Low-Medium**  
-**Goal:** decouple ReGa-based channel-name synchronization from the existing coarse `regaEnabled` switch so users can keep stable name migration without enabling broader ReGa features.
+**Effort: Medium**  
+**Goal:** replace the current coarse ReGa toggle with feature-specific options so users can independently enable channel-name sync, program endpoints, variable endpoints, polling, and pseudo-push behavior.
 
-The plugin now migrates address-based `whiteList` / `blackList` entries to ReGa channel names once those names are known. That behavior is useful even for installations that do not want normal ReGa integration enabled all the time. Today the plugin only resolves channel names when `regaEnabled` is on, which couples config-name sync to the broader ReGa feature set.
+The current `regaEnabled` shape is too coarse. It mixes at least three separate concerns: channel-name lookup, program/script execution, and future ReGa-backed virtual entities. The roadmap should move toward explicit switches for each user-visible ReGa feature.
+
+**Target config surface:**
+
+1. `createMatterDevicesForVariables` (`boolean`)
+2. `createMatterDevicesForPrograms` (`boolean`)
+3. `syncChannelNames` (`boolean`)
+4. `regaVariablesPollingInterval` (`number`, with `0` meaning no polling)
+5. `virtualKeyForRegaPseudoPush` (`string` or structured key reference)
 
 **Planned approach:**
 
-1. Add a new boolean config flag such as `regaNameSync` with a default that preserves current behavior for existing users
-2. Treat `regaNameSync` as the switch for channel-name lookup and config migration, independent from `regaEnabled`
-3. Ensure name-sync still works when `regaEnabled` is `false`, as long as `regaNameSync` is `true`
-4. Keep the rest of the current ReGa-dependent behavior behind `regaEnabled` unless a given feature is explicitly split out the same way
+1. Keep compatibility for existing installs by mapping the current `regaEnabled` behavior onto sensible defaults for the new flags during migration
+2. Treat `syncChannelNames` as the switch for channel-name lookup and blacklist/whitelist migration, independent from program and variable exposure
+3. Allow `syncChannelNames` to work even when the broader historical `regaEnabled` path is disabled
+4. Gate program endpoint creation behind `createMatterDevicesForPrograms`
+5. Gate ReGa boolean-variable endpoint creation behind `createMatterDevicesForVariables`
+6. Use `regaVariablesPollingInterval` only for ReGa variable state refresh; `0` should disable polling entirely
+7. Use `virtualKeyForRegaPseudoPush` to support a pseudo-push mechanism for faster refresh without requiring aggressive polling
 
 **Design notes:**
 
-- `regaEnabled` currently covers more than one concern: channel display-name lookup, program/script usage, and any future broader ReGa integration
-- `regaNameSync` should only enable the minimal ReGa calls required to fetch channel names and migrate config entries; it should not implicitly enable program support, polling, or other ReGa-backed features
-- This likely requires splitting the current connection-layer ReGa initialization path into smaller capabilities instead of treating ReGa as all-or-nothing
-- Config migration should continue to work for both startup discovery and later delayed ReGa-name arrival events under the new flag
-- Schema and README documentation should describe the difference clearly: `regaEnabled` = general ReGa integration, `regaNameSync` = channel-name discovery/migration only
+- `syncChannelNames` should only enable the minimal ReGa calls required to fetch channel names and migrate config entries; it should not implicitly enable program support or variable polling
+- Variable and program support should be modeled as separate endpoint families so users can enable one without the other
+- `virtualKeyForRegaPseudoPush` should be documented as an optimization path for ReGa-backed state refresh, not as a mandatory dependency for variables/programs
+- The connection layer will likely need smaller ReGa capability slices instead of a single all-or-nothing initialization path
+- Schema and README documentation should describe the five options explicitly and explain how they interact with the legacy `regaEnabled` setting during the transition period
 
 ---
 
@@ -323,11 +334,11 @@ RedMatic prior art: `hmip-mod-ho.js` and `hmip-mod-tm.js` (alias for MOD-HO).
 
 ---
 
-#### HM-8 — ReGa program triggers as Matter switches
+#### HM-8 — ReGa programs and boolean variables as Matter devices
 
 **Effort: Medium**
 
-The CCU supports user-defined programs (Homematic scripts / automations). Expose selected programs as Matter `onOffSwitch` endpoints so any Matter controller or automation can fire a CCU program with a simple on/off command.
+The CCU supports both user-defined programs and ReGa system variables. Expose selected programs as Matter trigger devices and selected boolean variables as stateful Matter devices so Matter controllers can both fire CCU automations and observe/control simple ReGa state.
 
 **How CCU programs work:**
 
@@ -335,24 +346,37 @@ The CCU supports user-defined programs (Homematic scripts / automations). Expose
 - A program is executed via: `dom.GetObject(<id>).ProgramExecute()`
 - The `homematic-rega` client (already used by the connection layer for channel name lookup) supports arbitrary script execution
 
+**How boolean ReGa variables work:**
+
+- Boolean variables are listed via ReGa script by enumerating system variables and filtering for the boolean type
+- Variable state is read via ReGa object access and written via the corresponding `State()` setter
+- Unlike programs, variables have persistent state and therefore need either polling or pseudo-push-assisted refresh
+
 **Matter mapping:**
 
 - Each program → one `onOffSwitch` endpoint (or `genericSwitch` for momentary semantics)
-- `onOffSwitch`: turning ON executes the program; the attribute auto-resets to OFF after execution (stateless trigger semantic). This matches how scene/macro buttons work in other Matter plugins.
-- Alternatively `genericSwitch` with a short-press action would be more semantically correct but is less universally supported by Matter controllers
+- Program endpoint behavior: turning ON executes the program; the attribute auto-resets to OFF after execution
+- Each boolean variable → one stateful boolean Matter device, most likely `onOffSwitch` / `onOffLight`-style semantics or another simple boolean endpoint depending on controller compatibility
+- Variable endpoint behavior: Matter writes should update the ReGa variable, and ReGa state changes should sync back into Matter via polling or pseudo-push refresh
 
 **Implementation notes:**
 
-1. Add a `programs` section to `CcuConfig` / `matterbridge-homematic.schema.json` — either a list of program IDs/names to expose, or a flag to expose all active programs
-2. In `onStart`, query ReGa for the program list and create one endpoint per configured program; endpoint ID should be stable and based on the program ID (not name, since names can change)
-3. In `module.ts`, handle the `onOff` cluster `on` command by executing the ReGa `ProgramExecute()` call, then immediately resetting `onOff` to `false`
-4. No RPC event subscription needed — programs are fire-and-forget from the CCU side; there is no state to sync back
-5. Power source: always `createDefaultPowerSourceWiredClusterServer()` (virtual endpoint, not battery-powered)
+1. Add the five ReGa-related config options described in CFG-0 to `CcuConfig` / `matterbridge-homematic.schema.json`
+2. In `onStart`, if `createMatterDevicesForPrograms` is enabled, query ReGa for the program list and create one endpoint per configured program; endpoint ID should be stable and based on the program ID, not the name
+3. In `onStart`, if `createMatterDevicesForVariables` is enabled, query ReGa for boolean variables and create one endpoint per configured variable; endpoint ID should be stable and based on the variable ID, not the name
+4. In `module.ts`, handle program endpoint `on` commands by executing `ProgramExecute()` and immediately resetting the Matter state to OFF
+5. In `module.ts`, handle boolean-variable endpoint writes by setting the ReGa variable value and syncing the updated state back into Matter
+6. Use `regaVariablesPollingInterval` to periodically refresh boolean-variable state when polling is enabled
+7. Investigate `virtualKeyForRegaPseudoPush` as an alternative or supplement to polling so variable changes can be reflected with lower latency and lower ReGa load
+8. Power source for all ReGa-backed virtual endpoints: `createDefaultPowerSourceWiredClusterServer()`
 
 **Open questions:**
 
 - Should inactive/disabled programs be filtered out or exposed as disabled endpoints?
-- Should program execution errors (ReGa timeout, CCU unreachable) surface as a Matter fault state?
+- Which Matter boolean device type gives the best controller compatibility for ReGa variables while still behaving like a virtual state object rather than a lamp?
+- How should variable writes and external ReGa-side changes be arbitrated if polling lags behind a Matter write?
+- Should `virtualKeyForRegaPseudoPush` be optional acceleration on top of polling, or a fully supported alternative when polling is set to `0`?
+- Should program execution errors and variable write/read failures surface as a Matter fault state?
 
 ---
 
