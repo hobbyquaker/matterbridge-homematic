@@ -244,18 +244,29 @@ export class CcuConnectionLayer extends EventEmitter {
    * @returns {Promise<CcuChannelInfo[]>} List of all discovered channels.
    */
   async discoverChannels(): Promise<CcuChannelInfo[]> {
-    // Return cached data immediately
+    let performedInitialRefresh = false;
+
+    // Return cached data immediately when available.
     if (this.cache.channels.length > 0) {
       this.log.debug(`discoverChannels: returning cached ${this.cache.channels.length} channels`);
     } else {
       // Ensure cache is loaded on first call
       await this.loadCache();
+
+      // On first startup with an empty cache, wait for a real refresh so the platform can
+      // register devices immediately instead of exposing zero devices until the next restart.
+      if (this.cache.channels.length === 0) {
+        await this.refreshChannelsCache();
+        performedInitialRefresh = true;
+      }
     }
 
-    // Spawn background refresh without awaiting (non-blocking)
-    this.refreshChannelsCache().catch((err) => {
-      this.log.warn(`Failed to refresh channel cache: ${String(err)}`);
-    });
+    if (this.cache.channels.length > 0 && !performedInitialRefresh) {
+      // Spawn background refresh without awaiting when we already have cached data.
+      this.refreshChannelsCache().catch((err) => {
+        this.log.warn(`Failed to refresh channel cache: ${String(err)}`);
+      });
+    }
 
     const enabledInterfaces = new Set(this.getEnabledInterfaces());
     const filteredChannels = this.cache.channels.filter((channel) => enabledInterfaces.has(channel.interfaceName));

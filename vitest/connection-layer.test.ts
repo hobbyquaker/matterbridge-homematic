@@ -77,4 +77,31 @@ describe('CcuConnectionLayer.discoverChannels', () => {
     expect(channels[0]?.address).toBe('000A1B2C3D:1');
     expect(refreshChannelsCache).toHaveBeenCalledOnce();
   });
+
+  test('should await an initial refresh when the cache is empty', async () => {
+    const layer = new CcuConnectionLayer(makeConfig({ iprfEnabled: true }), makeLogger());
+
+    const refreshChannelsCache = vi.fn(async () => {
+      (layer as any).cache = {
+        channels: [makeChannel('HmIP-RF', '000A1B2C3D:1')],
+        nameMap: {},
+        timestamp: Date.now(),
+      };
+    });
+
+    (layer as any).loadCache = vi.fn().mockResolvedValue(undefined);
+    (layer as any).refreshChannelsCache = refreshChannelsCache;
+    (layer as any).cache = {
+      channels: [],
+      nameMap: {},
+      timestamp: 0,
+    };
+
+    const channels = await layer.discoverChannels();
+
+    expect(refreshChannelsCache).toHaveBeenCalledOnce();
+    expect(channels).toHaveLength(1);
+    expect(channels[0]?.interfaceName).toBe('HmIP-RF');
+    expect(channels[0]?.address).toBe('000A1B2C3D:1');
+  });
 });
