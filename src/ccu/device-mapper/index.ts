@@ -28,14 +28,12 @@ export const DEVICE_MAPPERS: Record<string, DeviceMapper> = {
   // HmIP-DRSI family — multi-channel DIN rail switch actuators (mains-powered, one endpoint per output).
   'hmip-drsi1': hmipDrsi4,
   'hmip-drsi4': hmipDrsi4,
-  // MOD-OC8 — 8-channel relay module, same multi-switch pattern.
-  'mod-oc8': hmipDrsi4,
-  // HmIP-WTH family — wall thermostats with HUMIDITY on the HEATING_CLIMATECONTROL_TRANSCEIVER channel.
+  // HmIP-WTH family — battery powered wall thermostats with HUMIDITY on the HEATING_CLIMATECONTROL_TRANSCEIVER channel.
   'hmip-wth': hmipWth,
   'hmip-wth-1': hmipWth,
   'hmip-wth-2': hmipWth,
   'hmip-wth-b': hmipWth,
-  // HmIP-BWTH family — brand-switch-form-factor wall thermostats, same channel layout as WTH.
+  // HmIP-BWTH family — brand-switch-form-factor mains or 24V powered wall thermostats, same channel layout as WTH.
   'hmip-bwth': hmipWth,
   'hmip-bwth-a': hmipWth,
   'hmip-bwth24': hmipWth,

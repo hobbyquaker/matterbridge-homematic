@@ -252,8 +252,8 @@ describe('channel mapper: KEYMATIC', () => {
 describe('device mapper: HmIP-DRSI4', () => {
   /**
    * Build raw Homematic channels for N switch outputs of one device, matching the real
-   * HmIP-DRSI4 layout: MAINTENANCE (ch0), then each output has one SWITCH_TRANSMITTER
-   * followed by three SWITCH_VIRTUAL_RECEIVER channels.
+   * HmIP-DRSI4 layout: each output has one SWITCH_TRANSMITTER followed by three
+   * SWITCH_VIRTUAL_RECEIVER channels.
    *
    * Channel index layout (0-based group index i):
    *   tx  → channelIndex: i*4 + 1
@@ -265,16 +265,7 @@ describe('device mapper: HmIP-DRSI4', () => {
    * @param count
    */
   function makeDrsiChannels(deviceType: string, count: number): CcuChannelInfo[] {
-    const maintenance = makeRawChannel({
-      type: 'MAINTENANCE',
-      deviceType,
-      address: 'DRSI4XXXXX:0',
-      deviceAddress: 'DRSI4XXXXX',
-      channelIndex: 0,
-      name: 'Maintenance',
-      batteryPowered: false,
-    });
-    const switchChannels = Array.from({ length: count }, (_, i) => {
+    return Array.from({ length: count }, (_, i) => {
       const txIndex = i * 4 + 1;
       const rx1Index = i * 4 + 2;
       const rx2Index = i * 4 + 3;
@@ -318,7 +309,6 @@ describe('device mapper: HmIP-DRSI4', () => {
         }),
       ];
     }).flat();
-    return [maintenance, ...switchChannels];
   }
 
   /**
@@ -330,7 +320,7 @@ describe('device mapper: HmIP-DRSI4', () => {
     return `DRSI4XXXXX:${i * 4 + 2}`;
   }
 
-  for (const deviceType of ['HmIP-DRSI4', 'HmIP-DRSI1', 'MOD-OC8']) {
+  for (const deviceType of ['HmIP-DRSI4', 'HmIP-DRSI1']) {
     test(`should be registered for ${deviceType}`, () => {
       expect(getDeviceMapper(deviceType)).toBeDefined();
     });
@@ -398,39 +388,6 @@ describe('device mapper: HmIP-DRSI4', () => {
     expect(results[0].channels[0].address).toBe(drsiRxAddress(0));
   });
 
-  test('should work for MOD-OC8 with eight channels', () => {
-    const mapper = getDeviceMapper('MOD-OC8')!;
-    const channels = makeDrsiChannels('MOD-OC8', 8);
-    const results = mapper(channels, VENDOR_ID, {});
-    expect(results).toHaveLength(8);
-  });
-
-  test('each endpoint should have TemperatureMeasurement cluster when MAINTENANCE channel is present', () => {
-    const mapper = getDeviceMapper('HmIP-DRSI4')!;
-    const channels = makeDrsiChannels('HmIP-DRSI4', 4); // includes MAINTENANCE ch0
-    const results = mapper(channels, VENDOR_ID, {});
-    for (const { endpoint } of results) {
-      expect(endpoint.hasClusterServer('TemperatureMeasurement')).toBe(true);
-    }
-  });
-
-  test('each returned channel should carry temperatureChannelAddress pointing to the MAINTENANCE channel', () => {
-    const mapper = getDeviceMapper('HmIP-DRSI4')!;
-    const channels = makeDrsiChannels('HmIP-DRSI4', 4);
-    const results = mapper(channels, VENDOR_ID, {});
-    for (const { channels: mappedChannels } of results) {
-      expect(mappedChannels[0].temperatureChannelAddress).toBe('DRSI4XXXXX:0');
-    }
-  });
-
-  test('should not add TemperatureMeasurement cluster when no MAINTENANCE channel is present', () => {
-    const mapper = getDeviceMapper('HmIP-DRSI4')!;
-    // Build channels without the MAINTENANCE channel.
-    const channels = makeDrsiChannels('HmIP-DRSI4', 1).filter((c) => c.type !== 'MAINTENANCE');
-    const results = mapper(channels, VENDOR_ID, {});
-    expect(results).toHaveLength(1);
-    expect(results[0].endpoint.hasClusterServer('TemperatureMeasurement')).toBe(false);
-  });
 });
 
 // ---------------------------------------------------------------------------

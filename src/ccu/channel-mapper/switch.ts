@@ -41,10 +41,5 @@ export const mapChannel: ChannelMapper = (channel, vendorId, options) => {
     ep.createDefaultElectricalPowerMeasurementClusterServer();
   }
 
-  if (channel.temperatureChannelAddress) {
-    // A MAINTENANCE channel temperature is exposed on this endpoint (e.g. HmIP-DRSI4 ch0).
-    ep.createDefaultTemperatureMeasurementClusterServer();
-  }
-
   return finalizeEndpoint(ep, { ...options, batteryPowered: channel.batteryPowered });
 };

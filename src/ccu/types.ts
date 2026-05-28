@@ -168,12 +168,6 @@ export interface CcuChannelInfo {
    * which reports CURRENT in milliamps. False (or absent) for BidCos POWERMETER (CURRENT in amps).
    */
   powerMeterIsHmIP?: boolean;
-  /**
-   * Address of the MAINTENANCE channel (channel 0) on devices that expose ACTUAL_TEMPERATURE
-   * there (e.g. HmIP-DRSI4). Set by a device mapper to add a TemperatureMeasurement cluster to
-   * the endpoint and route incoming ACTUAL_TEMPERATURE events to it.
-   */
-  temperatureChannelAddress?: string;
 }
 
 /** Per-channel user override stored in plugin config. */

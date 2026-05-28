@@ -9,7 +9,7 @@
  * ## Real HmIP-DRSI4 channel structure
  *
  * ```
- * ch0   MAINTENANCE                        — housekeeping; exposes ACTUAL_TEMPERATURE datapoint
+ * ch0   MAINTENANCE                        — housekeeping (not exposed)
  * ch1   MULTI_MODE_INPUT_TRANSMITTER       — input button 1 (SENDER)
  * ch2   MULTI_MODE_INPUT_TRANSMITTER       — input button 2 (SENDER)
  * ch3   MULTI_MODE_INPUT_TRANSMITTER       — input button 3 (SENDER)
@@ -74,10 +74,6 @@ export const mapDevice: DeviceMapper = (channels, vendorId, options) => {
 
   if (transmitters.length === 0) return [];
 
-  // The MAINTENANCE channel (ch0) carries an ACTUAL_TEMPERATURE datapoint for the device’s
-  // internal temperature. Attach its address to every switch endpoint so the switch mapper
-  // adds a TemperatureMeasurement cluster and wireChannelEndpoint routes events to all outputs.
-  const maintenanceChannel = channels.find((c) => c.type === 'MAINTENANCE');
 
   const results: MappedDeviceEndpoint[] = [];
 
@@ -87,9 +83,7 @@ export const mapDevice: DeviceMapper = (channels, vendorId, options) => {
     if (!rx) continue;
 
     // Normalize to the canonical SWITCH type expected by wireChannelEndpoint and mapSwitchChannel.
-    // Carry the MAINTENANCE channel address so switch.ts adds a TemperatureMeasurement cluster
-    // and wireChannelEndpoint registers the ch0 address → this endpoint for ACTUAL_TEMPERATURE events.
-    const switchChannel: CcuChannelInfo = { ...rx, type: 'SWITCH', temperatureChannelAddress: maintenanceChannel?.address };
+    const switchChannel: CcuChannelInfo = { ...rx, type: 'SWITCH' };
     // One MappedDeviceEndpoint per output: the endpoint is the Matter on/off device,
     // and channels contains the single switch channel that wireChannelEndpoint will wire up.
     results.push({
