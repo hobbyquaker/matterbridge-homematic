@@ -343,36 +343,52 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const mapper = getDeviceMapper(deviceType);
       if (!mapper) continue;
 
-      // Use the first resolved supported channel for select/enabled/display logic.
       const resolvedDeviceChannels = channelsByDevice.get(deviceAddress) ?? [];
+
+      // Derive device-level mapping options from the first resolved supported channel.
+      // These options (switchMatterType, batteryPowered) apply to all endpoints produced
+      // by this device mapper. Per-endpoint overrides are not yet supported.
       const primaryChannel = resolvedDeviceChannels.find((c) => isSupportedChannelType(c.type));
-      if (!primaryChannel) continue;
-
-      const displayName = this.getChannelDisplayName(primaryChannel);
-      const override = this.getChannelOverride(primaryChannel.address);
-      const selectSerial = this.getChannelSelectSerial(primaryChannel);
-      for (const oldKey of this.getLegacyChannelSelectKeys(primaryChannel)) {
-        if (this.getSelectDevice(oldKey) !== undefined) {
-          await this.clearDeviceSelect(oldKey);
-        }
-      }
-      this.setSelectDevice(selectSerial, displayName, undefined, 'switch');
-
-      if (!this.isChannelEnabled(primaryChannel, override, displayName)) {
-        this.log.debug(`Skipping disabled device-mapper device ${deviceAddress}`);
-        continue;
-      }
-
-      enabledCount++;
-      deviceMapperHandled.add(deviceAddress);
+      const deviceOverride = primaryChannel ? this.getChannelOverride(primaryChannel.address) : undefined;
       const mappingOptions = {
-        switchMatterType: override?.switchMatterType ?? inferSwitchMatterTypeFromName(primaryChannel.name),
-        batteryPowered: this.deviceBatteryHints.get(deviceAddress) ?? primaryChannel.batteryPowered,
+        switchMatterType: deviceOverride?.switchMatterType ?? (primaryChannel ? inferSwitchMatterTypeFromName(primaryChannel.name) : undefined),
+        batteryPowered: this.deviceBatteryHints.get(deviceAddress) ?? (primaryChannel?.batteryPowered ?? false),
       };
+
       // Pass raw channels — device mappers see real Homematic channel types.
       this.logDeviceMapperSelection(deviceAddress, deviceType, rawDeviceChannels);
       const results = mapper(rawDeviceChannels, this.matterbridge.aggregatorVendorId, mappingOptions);
+      if (results.length === 0) continue;
+
+      // Mark the device handled so the channel loop skips its channels entirely, regardless of
+      // which individual endpoints are enabled below.
+      deviceMapperHandled.add(deviceAddress);
+
+      // Per-endpoint select and enabled checks: each endpoint produced by the mapper maps to a
+      // single Homematic channel (channels[0]). Look up its resolved counterpart for display name
+      // and enabled state so that individual outputs can be enabled/disabled independently.
       for (const { endpoint, channels: mappedChannels } of results) {
+        const primaryMappedAddress = mappedChannels[0]?.address;
+        const resolvedChannel =
+          (primaryMappedAddress ? resolvedDeviceChannels.find((c) => c.address === primaryMappedAddress) : undefined) ?? primaryChannel;
+        if (!resolvedChannel) continue;
+
+        const displayName = this.getChannelDisplayName(resolvedChannel);
+        const override = this.getChannelOverride(resolvedChannel.address);
+        const selectSerial = this.getChannelSelectSerial(resolvedChannel);
+        for (const oldKey of this.getLegacyChannelSelectKeys(resolvedChannel)) {
+          if (this.getSelectDevice(oldKey) !== undefined) {
+            await this.clearDeviceSelect(oldKey);
+          }
+        }
+        this.setSelectDevice(selectSerial, displayName, undefined, 'switch');
+
+        if (!this.isChannelEnabled(resolvedChannel, override, displayName)) {
+          this.log.debug(`Skipping disabled device-mapper endpoint ${resolvedChannel.address}`);
+          continue;
+        }
+
+        enabledCount++;
         await this.registerDevice(endpoint);
         registeredCount++;
         this.deviceAddressToDevice.set(deviceAddress, endpoint);
