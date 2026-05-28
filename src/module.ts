@@ -91,8 +91,6 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    */
   private readonly wthHumidityChannels = new Map<string, MatterbridgeEndpoint>();
 
-
-
   /**
    * Tracks the last value written to a Matter attribute from an incoming RPC event.
    * Used to suppress the echo setValue that the subscribeAttribute callback would otherwise send back.

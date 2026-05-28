@@ -387,7 +387,6 @@ describe('device mapper: HmIP-DRSI4', () => {
     // First SWITCH_VIRTUAL_RECEIVER of the single output.
     expect(results[0].channels[0].address).toBe(drsiRxAddress(0));
   });
-
 });
 
 // ---------------------------------------------------------------------------

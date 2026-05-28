@@ -74,7 +74,6 @@ export const mapDevice: DeviceMapper = (channels, vendorId, options) => {
 
   if (transmitters.length === 0) return [];
 
-
   const results: MappedDeviceEndpoint[] = [];
 
   for (const tx of transmitters) {
