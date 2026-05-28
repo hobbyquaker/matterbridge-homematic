@@ -633,7 +633,9 @@ export class CcuConnectionLayer extends EventEmitter {
     });
 
     server.on('NotFound', (method: unknown, params: unknown) => {
-      this.log.debug(`RPC callback <- protocol=${protocol} method=NotFound originalMethod=${String(method)} params=${this.toJsonSafe(params)}`);
+      if (this.config.logging.logRpcEvents) {
+        this.log.debug(`RPC callback <- protocol=${protocol} method=NotFound originalMethod=${String(method)} params=${this.formatPayload(params)}`);
+      }
     });
 
     for (const method of this.getRpcCallbackMethodNames()) {
