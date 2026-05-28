@@ -299,12 +299,66 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
     let enabledCount = 0;
     let registeredCount = 0;
-    // Tracks device addresses for which a device mapper was already invoked, so that device mappers
-    // are called at most once per device even when a device has multiple qualifying channels.
-    const deviceMapperHandled = new Set<string>();
 
+    // Group channels by device address for the device mapper pre-pass.
+    const channelsByDevice = new Map<string, CcuChannelInfo[]>();
+    for (const ch of channels) {
+      const list = channelsByDevice.get(ch.deviceAddress);
+      if (list) {
+        list.push(ch);
+      } else {
+        channelsByDevice.set(ch.deviceAddress, [ch]);
+      }
+    }
+
+    // Device mapper pre-pass: handle devices with registered device mappers before the channel loop.
+    // Device mappers take full priority over channel mappers — all channels of a mapped device are
+    // handled exclusively by the device mapper. The channel loop below skips these devices entirely.
+    const deviceMapperHandled = new Set<string>();
+    for (const [deviceAddress, deviceChannels] of channelsByDevice) {
+      const primaryChannel = deviceChannels.find((c) => isSupportedChannelType(c.type));
+      if (!primaryChannel || !primaryChannel.deviceType) continue;
+      const mapper = getDeviceMapper(primaryChannel.deviceType);
+      if (!mapper) continue;
+
+      const displayName = this.getChannelDisplayName(primaryChannel);
+      const override = this.getChannelOverride(primaryChannel.address);
+      const selectSerial = this.getChannelSelectSerial(primaryChannel);
+      for (const oldKey of this.getLegacyChannelSelectKeys(primaryChannel)) {
+        if (this.getSelectDevice(oldKey) !== undefined) {
+          await this.clearDeviceSelect(oldKey);
+        }
+      }
+      this.setSelectDevice(selectSerial, displayName, undefined, 'switch');
+
+      if (!this.isChannelEnabled(primaryChannel, override, displayName)) {
+        this.log.debug(`Skipping disabled device-mapper device ${deviceAddress}`);
+        continue;
+      }
+
+      enabledCount++;
+      deviceMapperHandled.add(deviceAddress);
+      const mappingOptions = {
+        switchMatterType: override?.switchMatterType ?? inferSwitchMatterTypeFromName(primaryChannel.name),
+        batteryPowered: this.deviceBatteryHints.get(deviceAddress) ?? primaryChannel.batteryPowered,
+      };
+      this.logDeviceMapperSelection(deviceAddress, primaryChannel.deviceType, deviceChannels);
+      const results = mapper(deviceChannels, this.matterbridge.aggregatorVendorId, mappingOptions);
+      for (const { endpoint, channels: mappedChannels } of results) {
+        await this.registerDevice(endpoint);
+        registeredCount++;
+        this.deviceAddressToDevice.set(deviceAddress, endpoint);
+        for (const ch of mappedChannels) {
+          await this.wireChannelEndpoint(endpoint, ch);
+        }
+      }
+    }
+
+    // Channel mapper loop: handles all channels not claimed by a device mapper.
     for (const channel of channels) {
       if (!isSupportedChannelType(channel.type)) continue;
+      // Skip channels whose device was handled by the device mapper pre-pass.
+      if (deviceMapperHandled.has(channel.deviceAddress)) continue;
 
       const displayName = this.getChannelDisplayName(channel);
       const override = this.getChannelOverride(channel.address);
@@ -326,338 +380,321 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       enabledCount++;
       this.logChannelMapperSelection(channel, displayName);
 
-      // For HEATING_CLIMATECONTROL_TRANSCEIVER channels on devices with a registered device mapper
-      // (HmIP-WTH, STHD, STH family), the mapper returns a single combined endpoint with both the
-      // thermostat and humidity clusters. Use it instead of the standard channel mapper result so
-      // that both appear as one device — matching the HomeKit experience.
-      let deviceMapperEndpoint: MatterbridgeEndpoint | undefined;
-      if (channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' && channel.deviceType && !deviceMapperHandled.has(channel.deviceAddress)) {
-        const deviceMapper = getDeviceMapper(channel.deviceType);
-        if (deviceMapper) {
-          deviceMapperHandled.add(channel.deviceAddress);
-          const deviceChannels = channels.filter((c) => c.deviceAddress === channel.deviceAddress);
-          this.logDeviceMapperSelection(channel.deviceAddress, channel.deviceType, deviceChannels);
-          const mappingOptions = {
-            switchMatterType: override?.switchMatterType ?? inferSwitchMatterTypeFromName(channel.name),
-            batteryPowered: this.deviceBatteryHints.get(channel.deviceAddress) ?? channel.batteryPowered,
-          };
-          const deviceEndpoints = deviceMapper(deviceChannels, this.matterbridge.aggregatorVendorId, mappingOptions);
-          deviceMapperEndpoint = deviceEndpoints[0];
-        } else {
-          this.log.debug(`No device mapper for HEATING_CLIMATECONTROL_TRANSCEIVER channel=${channel.address} deviceType=${channel.deviceType}`);
-        }
-      } else if (channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' && !channel.deviceType) {
-        this.log.debug(`No device mapper for HEATING_CLIMATECONTROL_TRANSCEIVER channel=${channel.address}: deviceType not reported by CCU`);
-      }
-
-      const endpoint =
-        deviceMapperEndpoint ??
-        createEndpointForChannel(channel as Parameters<typeof createEndpointForChannel>[0], this.matterbridge.aggregatorVendorId, {
-          switchMatterType: override?.switchMatterType ?? inferSwitchMatterTypeFromName(channel.name),
-          batteryPowered: this.deviceBatteryHints.get(channel.deviceAddress) ?? channel.batteryPowered,
-        });
+      const endpoint = createEndpointForChannel(channel as Parameters<typeof createEndpointForChannel>[0], this.matterbridge.aggregatorVendorId, {
+        switchMatterType: override?.switchMatterType ?? inferSwitchMatterTypeFromName(channel.name),
+        batteryPowered: this.deviceBatteryHints.get(channel.deviceAddress) ?? channel.batteryPowered,
+      });
 
       await this.registerDevice(endpoint);
       registeredCount++;
-
-      // Track device for availability monitoring (keyed by root device address).
       this.deviceAddressToDevice.set(channel.deviceAddress, endpoint);
-
-      // Track combined thermostat+humidity endpoint for RPC event routing.
-      if (deviceMapperEndpoint?.hasClusterServer('RelativeHumidityMeasurement')) {
-        this.wthHumidityChannels.set(channel.address, deviceMapperEndpoint);
-        this.log.debug(`Registered combined thermostat+humidity endpoint for ${channel.address} (${channel.deviceType})`);
-      }
-
-      // Wire OnOff attribute for SWITCH channels
-      if (channel.type === 'SWITCH' && this.ccuConnection) {
-        const ccuConn = this.ccuConnection;
-        // Track channel address for precise inbound event matching.
-        this.channelAddressToDevice.set(channel.address, endpoint);
-        try {
-          await endpoint.subscribeAttribute('OnOff', 'onOff', (value: boolean) => {
-            const iface = channel.interfaceName;
-            const address = channel.address;
-            // Suppress setValue when this change was triggered by an incoming RPC event.
-            const suppress = this.rpcEchoSuppress.get(address);
-            if (suppress !== undefined && suppress === value) {
-              this.rpcEchoSuppress.delete(address);
-              return;
-            }
-            this.log.debug(`Matter OnOff -> Homematic setValue: iface=${iface} channel=${address} value=${value}`);
-            ccuConn.setChannelDatapointValue(iface, address, 'STATE', value).catch((err: unknown) => {
-              this.log.warn(`Failed to set Homematic STATE for ${address}: ${String(err)}`);
-            });
-          });
-        } catch (err) {
-          this.log.warn(`Failed to subscribe OnOff for ${channel.address}: ${String(err)}`);
-        }
-        // If a power meter channel was merged onto this SWITCH endpoint, register its address
-        // in the appropriate event map so incoming RPC events update the merged endpoint.
-        if (channel.powerMeterChannelAddress) {
-          if (channel.powerMeterIsHmIP) {
-            // ENERGIE_METER_TRANSMITTER: CURRENT reported in mA, handled by handleRpcEventEnergieMeter.
-            this.energieMeterChannels.set(channel.powerMeterChannelAddress, endpoint);
-          } else {
-            // BidCos POWERMETER: CURRENT reported in A, handled by handleRpcEventPowerMeter.
-            this.channelAddressToDevice.set(channel.powerMeterChannelAddress, endpoint);
-          }
-        }
-      }
-
-      // Wire LevelControl attribute for DIMMER channels.
-      // Matter currentLevel is 0-254; Homematic LEVEL is 0.0-1.0.
-      if (channel.type === 'DIMMER' && this.ccuConnection) {
-        const ccuConn = this.ccuConnection;
-        // Track channel address for precise inbound event matching.
-        this.channelAddressToDevice.set(channel.address, endpoint);
-        try {
-          await endpoint.subscribeAttribute('LevelControl', 'currentLevel', (value: number | null) => {
-            const iface = channel.interfaceName;
-            const address = channel.address;
-            const level = value != null ? Math.round((value / 254) * 100) / 100 : 0;
-            // Suppress setValue when this change was triggered by an incoming RPC event.
-            const suppress = this.rpcEchoSuppress.get(address);
-            if (suppress !== undefined && suppress === level) {
-              this.rpcEchoSuppress.delete(address);
-              return;
-            }
-            this.log.debug(`Matter currentLevel -> Homematic setValue: iface=${iface} channel=${address} level=${level}`);
-            ccuConn.setChannelDatapointValue(iface, address, 'LEVEL', String(level)).catch((err: unknown) => {
-              this.log.warn(`Failed to set Homematic LEVEL for ${address}: ${String(err)}`);
-            });
-          });
-        } catch (err) {
-          this.log.warn(`Failed to subscribe LevelControl for ${channel.address}: ${String(err)}`);
-        }
-        // Wire OnOff for DIMMER: on -> LEVEL 1.005 (restore last level), off -> LEVEL 0.0.
-        try {
-          await endpoint.subscribeAttribute('OnOff', 'onOff', (value: boolean) => {
-            const iface = channel.interfaceName;
-            const address = channel.address;
-            // Suppress setValue when this change was triggered by an incoming RPC event.
-            const suppress = this.rpcEchoSuppress.get(address + ':onoff');
-            if (suppress !== undefined && suppress === value) {
-              this.rpcEchoSuppress.delete(address + ':onoff');
-              return;
-            }
-            // 1.005 is the Homematic special LEVEL value that restores the last active level.
-            const level = value ? 1.005 : 0;
-            this.log.debug(`Matter OnOff -> Homematic LEVEL: iface=${iface} channel=${address} onOff=${value} level=${level}`);
-            ccuConn.setChannelDatapointValue(iface, address, 'LEVEL', String(level)).catch((err: unknown) => {
-              this.log.warn(`Failed to set Homematic LEVEL for ${address}: ${String(err)}`);
-            });
-          });
-        } catch (err) {
-          this.log.warn(`Failed to subscribe OnOff (dimmer) for ${channel.address}: ${String(err)}`);
-        }
-      }
-
-      // Track SHUTTER_CONTACT channel address for inbound STATE events.
-      if (channel.type === 'SHUTTER_CONTACT') {
-        this.channelAddressToDevice.set(channel.address, endpoint);
-      }
-
-      // Track MOTION_DETECTOR channel address for inbound MOTION events.
-      if (channel.type === 'MOTION_DETECTOR') {
-        this.channelAddressToDevice.set(channel.address, endpoint);
-      }
-
-      // Track TEMPERATURE_HUMIDITY_TRANSMITTER channel address for inbound sensor events.
-      if (channel.type === 'TEMPERATURE_HUMIDITY_TRANSMITTER') {
-        this.channelAddressToDevice.set(channel.address, endpoint);
-      }
-
-      // Track WEATHER channel address for inbound sensor events.
-      if (channel.type === 'WEATHER') {
-        this.channelAddressToDevice.set(channel.address, endpoint);
-      }
-
-      // Track SMOKE_DETECTOR channel address for inbound alarm events.
-      if (channel.type === 'SMOKE_DETECTOR') {
-        this.channelAddressToDevice.set(channel.address, endpoint);
-      }
-
-      // Track ALARMSTATE channel address for inbound water-leak alarm events.
-      if (channel.type === 'ALARMSTATE') {
-        this.channelAddressToDevice.set(channel.address, endpoint);
-      }
-
-      // Track ROTARY_HANDLE_SENSOR channel address in its own map to avoid STATE conflicts with SHUTTER_CONTACT.
-      if (channel.type === 'ROTARY_HANDLE_SENSOR') {
-        this.rotaryHandleChannels.set(channel.address, endpoint);
-      }
-
-      // Wire Thermostat setpoint and mode for HEATING_CLIMATECONTROL_TRANSCEIVER/THERMALCONTROL_TRANSMIT channels.
-      if ((channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' || channel.type === 'THERMALCONTROL_TRANSMIT') && this.ccuConnection) {
-        const ccuConn = this.ccuConnection;
-        this.channelAddressToDevice.set(channel.address, endpoint);
-        // Subscribe to setpoint — write Homematic SET_POINT_TEMPERATURE on change.
-        try {
-          await endpoint.subscribeAttribute('Thermostat', 'occupiedHeatingSetpoint', (value: number) => {
-            const address = channel.address;
-            // Matter sends 0.01°C (hundredths); Homematic wants plain °C.
-            const setpointDegC = value / 100;
-            const suppress = this.rpcEchoSuppress.get(address + ':heatingSetpoint');
-            if (suppress !== undefined && suppress === value) {
-              this.rpcEchoSuppress.delete(address + ':heatingSetpoint');
-              return;
-            }
-            // Remember last non-frost setpoint so mode switches can restore it.
-            if (setpointDegC > 4.5) {
-              this.thermostatLastSetpoint.set(address, setpointDegC);
-            }
-            this.log.debug(`Matter Thermostat setpoint -> Homematic: channel=${address} setpoint=${setpointDegC}`);
-            ccuConn.setChannelDatapointValue(channel.interfaceName, address, 'SET_POINT_TEMPERATURE', setpointDegC).catch((err: unknown) => {
-              this.log.warn(`Failed to set Homematic SET_POINT_TEMPERATURE for ${address}: ${String(err)}`);
-            });
-          });
-        } catch (err) {
-          this.log.warn(`Failed to subscribe Thermostat setpoint for ${channel.address}: ${String(err)}`);
-        }
-        // Subscribe to systemMode — Matter 0=Off maps to frost-protection setpoint (4.5°C) on the device;
-        // Matter 4=Heat syncs the current occupiedHeatingSetpoint back to Homematic.
-        // Both use putParamset with CONTROL_MODE=1 (manual) + SET_POINT_TEMPERATURE, which is the
-        // only reliable way to change the setpoint on HmIP-eTRV-style devices.
-        try {
-          await endpoint.subscribeAttribute('Thermostat', 'systemMode', (value: number) => {
-            const address = channel.address;
-            const suppress = this.rpcEchoSuppress.get(address + ':thermMode');
-            if (suppress !== undefined && suppress === value) {
-              this.rpcEchoSuppress.delete(address + ':thermMode');
-              return;
-            }
-            if (value === 0) {
-              // systemMode=Off: switch to manual mode with frost-protection temperature.
-              this.log.debug(`Matter Thermostat systemMode=Off -> Homematic: channel=${address} CONTROL_MODE=1 SET_POINT_TEMPERATURE=4.5`);
-              ccuConn.putChannelParamsetValues(channel.interfaceName, address, { CONTROL_MODE: 1, SET_POINT_TEMPERATURE: 4.5 }).catch((err: unknown) => {
-                this.log.warn(`Failed to set frost protection for ${address}: ${String(err)}`);
-              });
-            } else if (value === 4) {
-              // systemMode=Heat: switch to manual mode and restore the last non-frost setpoint.
-              const setpointDegC = this.thermostatLastSetpoint.get(address) ?? 21;
-              this.log.debug(`Matter Thermostat systemMode=Heat -> Homematic: channel=${address} CONTROL_MODE=1 SET_POINT_TEMPERATURE=${setpointDegC}`);
-              ccuConn.putChannelParamsetValues(channel.interfaceName, address, { CONTROL_MODE: 1, SET_POINT_TEMPERATURE: setpointDegC }).catch((err: unknown) => {
-                this.log.warn(`Failed to set Homematic SET_POINT_TEMPERATURE on heat mode for ${address}: ${String(err)}`);
-              });
-            }
-          });
-        } catch (err) {
-          this.log.warn(`Failed to subscribe Thermostat mode for ${channel.address}: ${String(err)}`);
-        }
-      }
-
-      // Wire DoorLock commands for KEYMATIC channels.
-      // Matter lockDoor → Homematic STATE=false (locked); unlockDoor → STATE=true (unlocked).
-      if (channel.type === 'KEYMATIC' && this.ccuConnection) {
-        const ccuConn = this.ccuConnection;
-        this.channelAddressToDevice.set(channel.address, endpoint);
-        this.keymaticState.set(channel.address, { state: false, uncertain: false, error: false, direction: 0 });
-        endpoint.addCommandHandler('lockDoor', () => {
-          this.log.debug(`Matter lockDoor -> Homematic STATE=false: channel=${channel.address}`);
-          // Optimistically set direction=2 (closing) so that incoming STATE events (which still carry
-          // the old value) cannot set lockState back to Unlocked before the real DIRECTION RPC event arrives.
-          const flags = this.keymaticState.get(channel.address);
-          if (flags) flags.direction = 2;
-          // Signal NotFullyLocked immediately after the command transaction closes so the Home app
-          // shows the "closing" animation without waiting for the first CCU RPC event (~800ms delay).
-          setImmediate(() => {
-            endpoint.updateAttribute('DoorLock', 'lockState', 0).catch((err: unknown) => {
-              this.log.warn(`Failed to set NotFullyLocked on lockDoor for ${channel.address}: ${String(err)}`);
-            });
-          });
-          ccuConn.setChannelDatapointValue(channel.interfaceName, channel.address, 'STATE', false).catch((err: unknown) => {
-            this.log.warn(`Failed to set Homematic STATE for ${channel.address}: ${String(err)}`);
-          });
-        });
-        endpoint.addCommandHandler('unlockDoor', () => {
-          this.log.debug(`Matter unlockDoor -> Homematic STATE=true: channel=${channel.address}`);
-          // Optimistically set direction=1 (opening) so that incoming STATE events (which still carry
-          // the old value) cannot set lockState back to Locked before the real DIRECTION RPC event arrives.
-          const flags = this.keymaticState.get(channel.address);
-          if (flags) flags.direction = 1;
-          // Signal NotFullyLocked immediately after the command transaction closes so the Home app
-          // shows the "opening" animation without waiting for the first CCU RPC event (~800ms delay).
-          setImmediate(() => {
-            endpoint.updateAttribute('DoorLock', 'lockState', 0).catch((err: unknown) => {
-              this.log.warn(`Failed to set NotFullyLocked on unlockDoor for ${channel.address}: ${String(err)}`);
-            });
-          });
-          ccuConn.setChannelDatapointValue(channel.interfaceName, channel.address, 'STATE', true).catch((err: unknown) => {
-            this.log.warn(`Failed to set Homematic STATE for ${channel.address}: ${String(err)}`);
-          });
-        });
-      }
-
-      // Track KEY / KEY_TRANSCEIVER channel address for inbound PRESS_SHORT / PRESS_LONG events.
-      // These channels are receive-only: HM fires events, we forward them to Matter as switch events.
-      if ((channel.type === 'KEY' || channel.type === 'KEY_TRANSCEIVER') && this.ccuConnection) {
-        this.channelAddressToDevice.set(channel.address, endpoint);
-      }
-
-      // Wire WindowCovering position for BLIND channels.
-      // Matter Percent100ths: 0 = fully open, 10000 = fully closed.
-      // Homematic LEVEL: 0.0 = fully closed, 1.0 = fully open.
-      if (channel.type === 'BLIND' && this.ccuConnection) {
-        const ccuConn = this.ccuConnection;
-        const isTiltSupported = channel.tiltSupported === true;
-        this.channelAddressToDevice.set(channel.address, endpoint);
-        try {
-          await endpoint.subscribeAttribute('WindowCovering', 'targetPositionLiftPercent100ths', (value: number | null) => {
-            const iface = channel.interfaceName;
-            const address = channel.address;
-            const hmLevel = value != null ? Math.round((1 - value / 10000) * 100) / 100 : 0;
-            const suppress = this.rpcEchoSuppress.get(address + ':blindTarget');
-            if (suppress !== undefined && suppress === value) {
-              this.rpcEchoSuppress.delete(address + ':blindTarget');
-              return;
-            }
-            // Record the commanded target so that early LEVEL echos from the CCU (before DIRECTION/WORKING
-            // arrives) only update currentPositionLiftPercent100ths and don't overwrite this target.
-            this.blindCommandedTarget.set(address, value ?? 0);
-            this.log.debug(`Matter WindowCovering target -> Homematic LEVEL: iface=${iface} channel=${address} target=${value?.toString() ?? 'null'} hmLevel=${hmLevel}`);
-            if (isTiltSupported) {
-              const tilt = this.blindLastTilt.get(address) ?? 0.5;
-              ccuConn.putChannelParamsetValues(iface, address, { LEVEL: hmLevel, LEVEL_2: tilt }).catch((err: unknown) => {
-                this.log.warn(`Failed to putParamset LEVEL for ${address}: ${String(err)}`);
-              });
-            } else {
-              ccuConn.setChannelDatapointValue(iface, address, 'LEVEL', String(hmLevel)).catch((err: unknown) => {
-                this.log.warn(`Failed to set Homematic LEVEL for ${address}: ${String(err)}`);
-              });
-            }
-          });
-        } catch (err) {
-          this.log.warn(`Failed to subscribe WindowCovering lift for ${channel.address}: ${String(err)}`);
-        }
-        if (isTiltSupported) {
-          try {
-            await endpoint.subscribeAttribute('WindowCovering', 'targetPositionTiltPercent100ths', (value: number | null) => {
-              const iface = channel.interfaceName;
-              const address = channel.address;
-              // Matter 0 = open tilt, 10000 = closed tilt → Homematic LEVEL_2: 0=closed, 1=open.
-              const hmTilt = value != null ? Math.round((1 - value / 10000) * 100) / 100 : 0.5;
-              const suppress = this.rpcEchoSuppress.get(address + ':blindTilt');
-              if (suppress !== undefined && suppress === value) {
-                this.rpcEchoSuppress.delete(address + ':blindTilt');
-                return;
-              }
-              this.log.debug(`Matter WindowCovering tilt -> Homematic LEVEL_2: iface=${iface} channel=${address} tilt=${value?.toString() ?? 'null'} hmTilt=${hmTilt}`);
-              const lastLevel = this.dimmerLastLevel.get(address)?.level ?? 0;
-              ccuConn.putChannelParamsetValues(iface, address, { LEVEL: lastLevel, LEVEL_2: hmTilt }).catch((err: unknown) => {
-                this.log.warn(`Failed to putParamset LEVEL_2 for ${address}: ${String(err)}`);
-              });
-            });
-          } catch (err) {
-            this.log.warn(`Failed to subscribe WindowCovering tilt for ${channel.address}: ${String(err)}`);
-          }
-        }
-      }
+      await this.wireChannelEndpoint(endpoint, channel);
     }
 
     this.log.info(
       `Channel registration summary: enabled=${enabledCount} registered=${registeredCount} totalSupported=${channels.filter((c) => isSupportedChannelType(c.type)).length}`,
     );
+  }
+
+  /**
+   * Wire Matter attribute subscriptions and RPC event routing for a single channel endpoint.
+   *
+   * Called once per channel in both the device mapper pre-pass and the channel mapper loop so that
+   * all endpoints (regardless of how they were created) receive consistent wiring.
+   *
+   * @param {MatterbridgeEndpoint} endpoint The registered endpoint to wire.
+   * @param {CcuChannelInfo} channel The Homematic channel this endpoint handles.
+   */
+  private async wireChannelEndpoint(endpoint: MatterbridgeEndpoint, channel: CcuChannelInfo): Promise<void> {
+    // Wire OnOff attribute for SWITCH channels
+    if (channel.type === 'SWITCH' && this.ccuConnection) {
+      const ccuConn = this.ccuConnection;
+      // Track channel address for precise inbound event matching.
+      this.channelAddressToDevice.set(channel.address, endpoint);
+      try {
+        await endpoint.subscribeAttribute('OnOff', 'onOff', (value: boolean) => {
+          const iface = channel.interfaceName;
+          const address = channel.address;
+          // Suppress setValue when this change was triggered by an incoming RPC event.
+          const suppress = this.rpcEchoSuppress.get(address);
+          if (suppress !== undefined && suppress === value) {
+            this.rpcEchoSuppress.delete(address);
+            return;
+          }
+          this.log.debug(`Matter OnOff -> Homematic setValue: iface=${iface} channel=${address} value=${value}`);
+          ccuConn.setChannelDatapointValue(iface, address, 'STATE', value).catch((err: unknown) => {
+            this.log.warn(`Failed to set Homematic STATE for ${address}: ${String(err)}`);
+          });
+        });
+      } catch (err) {
+        this.log.warn(`Failed to subscribe OnOff for ${channel.address}: ${String(err)}`);
+      }
+      // If a power meter channel was merged onto this SWITCH endpoint, register its address
+      // in the appropriate event map so incoming RPC events update the merged endpoint.
+      if (channel.powerMeterChannelAddress) {
+        if (channel.powerMeterIsHmIP) {
+          // ENERGIE_METER_TRANSMITTER: CURRENT reported in mA, handled by handleRpcEventEnergieMeter.
+          this.energieMeterChannels.set(channel.powerMeterChannelAddress, endpoint);
+        } else {
+          // BidCos POWERMETER: CURRENT reported in A, handled by handleRpcEventPowerMeter.
+          this.channelAddressToDevice.set(channel.powerMeterChannelAddress, endpoint);
+        }
+      }
+    }
+
+    // Wire LevelControl attribute for DIMMER channels.
+    // Matter currentLevel is 0-254; Homematic LEVEL is 0.0-1.0.
+    if (channel.type === 'DIMMER' && this.ccuConnection) {
+      const ccuConn = this.ccuConnection;
+      // Track channel address for precise inbound event matching.
+      this.channelAddressToDevice.set(channel.address, endpoint);
+      try {
+        await endpoint.subscribeAttribute('LevelControl', 'currentLevel', (value: number | null) => {
+          const iface = channel.interfaceName;
+          const address = channel.address;
+          const level = value != null ? Math.round((value / 254) * 100) / 100 : 0;
+          // Suppress setValue when this change was triggered by an incoming RPC event.
+          const suppress = this.rpcEchoSuppress.get(address);
+          if (suppress !== undefined && suppress === level) {
+            this.rpcEchoSuppress.delete(address);
+            return;
+          }
+          this.log.debug(`Matter currentLevel -> Homematic setValue: iface=${iface} channel=${address} level=${level}`);
+          ccuConn.setChannelDatapointValue(iface, address, 'LEVEL', String(level)).catch((err: unknown) => {
+            this.log.warn(`Failed to set Homematic LEVEL for ${address}: ${String(err)}`);
+          });
+        });
+      } catch (err) {
+        this.log.warn(`Failed to subscribe LevelControl for ${channel.address}: ${String(err)}`);
+      }
+      // Wire OnOff for DIMMER: on -> LEVEL 1.005 (restore last level), off -> LEVEL 0.0.
+      try {
+        await endpoint.subscribeAttribute('OnOff', 'onOff', (value: boolean) => {
+          const iface = channel.interfaceName;
+          const address = channel.address;
+          // Suppress setValue when this change was triggered by an incoming RPC event.
+          const suppress = this.rpcEchoSuppress.get(address + ':onoff');
+          if (suppress !== undefined && suppress === value) {
+            this.rpcEchoSuppress.delete(address + ':onoff');
+            return;
+          }
+          // 1.005 is the Homematic special LEVEL value that restores the last active level.
+          const level = value ? 1.005 : 0;
+          this.log.debug(`Matter OnOff -> Homematic LEVEL: iface=${iface} channel=${address} onOff=${value} level=${level}`);
+          ccuConn.setChannelDatapointValue(iface, address, 'LEVEL', String(level)).catch((err: unknown) => {
+            this.log.warn(`Failed to set Homematic LEVEL for ${address}: ${String(err)}`);
+          });
+        });
+      } catch (err) {
+        this.log.warn(`Failed to subscribe OnOff (dimmer) for ${channel.address}: ${String(err)}`);
+      }
+    }
+
+    // Track SHUTTER_CONTACT channel address for inbound STATE events.
+    if (channel.type === 'SHUTTER_CONTACT') {
+      this.channelAddressToDevice.set(channel.address, endpoint);
+    }
+
+    // Track MOTION_DETECTOR channel address for inbound MOTION events.
+    if (channel.type === 'MOTION_DETECTOR') {
+      this.channelAddressToDevice.set(channel.address, endpoint);
+    }
+
+    // Track TEMPERATURE_HUMIDITY_TRANSMITTER channel address for inbound sensor events.
+    if (channel.type === 'TEMPERATURE_HUMIDITY_TRANSMITTER') {
+      this.channelAddressToDevice.set(channel.address, endpoint);
+    }
+
+    // Track WEATHER channel address for inbound sensor events.
+    if (channel.type === 'WEATHER') {
+      this.channelAddressToDevice.set(channel.address, endpoint);
+    }
+
+    // Track SMOKE_DETECTOR channel address for inbound alarm events.
+    if (channel.type === 'SMOKE_DETECTOR') {
+      this.channelAddressToDevice.set(channel.address, endpoint);
+    }
+
+    // Track ALARMSTATE channel address for inbound water-leak alarm events.
+    if (channel.type === 'ALARMSTATE') {
+      this.channelAddressToDevice.set(channel.address, endpoint);
+    }
+
+    // Track ROTARY_HANDLE_SENSOR channel address in its own map to avoid STATE conflicts with SHUTTER_CONTACT.
+    if (channel.type === 'ROTARY_HANDLE_SENSOR') {
+      this.rotaryHandleChannels.set(channel.address, endpoint);
+    }
+
+    // Wire Thermostat setpoint and mode for HEATING_CLIMATECONTROL_TRANSCEIVER/THERMALCONTROL_TRANSMIT channels.
+    if ((channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' || channel.type === 'THERMALCONTROL_TRANSMIT') && this.ccuConnection) {
+      const ccuConn = this.ccuConnection;
+      this.channelAddressToDevice.set(channel.address, endpoint);
+      // Track combined thermostat+humidity endpoint for humidity RPC event routing.
+      if (channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' && endpoint.hasClusterServer('RelativeHumidityMeasurement')) {
+        this.wthHumidityChannels.set(channel.address, endpoint);
+        this.log.debug(`Registered combined thermostat+humidity endpoint for ${channel.address} (${channel.deviceType ?? 'unknown'})`);
+      }
+      // Subscribe to setpoint — write Homematic SET_POINT_TEMPERATURE on change.
+      try {
+        await endpoint.subscribeAttribute('Thermostat', 'occupiedHeatingSetpoint', (value: number) => {
+          const address = channel.address;
+          // Matter sends 0.01°C (hundredths); Homematic wants plain °C.
+          const setpointDegC = value / 100;
+          const suppress = this.rpcEchoSuppress.get(address + ':heatingSetpoint');
+          if (suppress !== undefined && suppress === value) {
+            this.rpcEchoSuppress.delete(address + ':heatingSetpoint');
+            return;
+          }
+          // Remember last non-frost setpoint so mode switches can restore it.
+          if (setpointDegC > 4.5) {
+            this.thermostatLastSetpoint.set(address, setpointDegC);
+          }
+          this.log.debug(`Matter Thermostat setpoint -> Homematic: channel=${address} setpoint=${setpointDegC}`);
+          ccuConn.setChannelDatapointValue(channel.interfaceName, address, 'SET_POINT_TEMPERATURE', setpointDegC).catch((err: unknown) => {
+            this.log.warn(`Failed to set Homematic SET_POINT_TEMPERATURE for ${address}: ${String(err)}`);
+          });
+        });
+      } catch (err) {
+        this.log.warn(`Failed to subscribe Thermostat setpoint for ${channel.address}: ${String(err)}`);
+      }
+      // Subscribe to systemMode — Matter 0=Off maps to frost-protection setpoint (4.5°C) on the device;
+      // Matter 4=Heat syncs the current occupiedHeatingSetpoint back to Homematic.
+      // Both use putParamset with CONTROL_MODE=1 (manual) + SET_POINT_TEMPERATURE, which is the
+      // only reliable way to change the setpoint on HmIP-eTRV-style devices.
+      try {
+        await endpoint.subscribeAttribute('Thermostat', 'systemMode', (value: number) => {
+          const address = channel.address;
+          const suppress = this.rpcEchoSuppress.get(address + ':thermMode');
+          if (suppress !== undefined && suppress === value) {
+            this.rpcEchoSuppress.delete(address + ':thermMode');
+            return;
+          }
+          if (value === 0) {
+            // systemMode=Off: switch to manual mode with frost-protection temperature.
+            this.log.debug(`Matter Thermostat systemMode=Off -> Homematic: channel=${address} CONTROL_MODE=1 SET_POINT_TEMPERATURE=4.5`);
+            ccuConn.putChannelParamsetValues(channel.interfaceName, address, { CONTROL_MODE: 1, SET_POINT_TEMPERATURE: 4.5 }).catch((err: unknown) => {
+              this.log.warn(`Failed to set frost protection for ${address}: ${String(err)}`);
+            });
+          } else if (value === 4) {
+            // systemMode=Heat: switch to manual mode and restore the last non-frost setpoint.
+            const setpointDegC = this.thermostatLastSetpoint.get(address) ?? 21;
+            this.log.debug(`Matter Thermostat systemMode=Heat -> Homematic: channel=${address} CONTROL_MODE=1 SET_POINT_TEMPERATURE=${setpointDegC}`);
+            ccuConn.putChannelParamsetValues(channel.interfaceName, address, { CONTROL_MODE: 1, SET_POINT_TEMPERATURE: setpointDegC }).catch((err: unknown) => {
+              this.log.warn(`Failed to set Homematic SET_POINT_TEMPERATURE on heat mode for ${address}: ${String(err)}`);
+            });
+          }
+        });
+      } catch (err) {
+        this.log.warn(`Failed to subscribe Thermostat mode for ${channel.address}: ${String(err)}`);
+      }
+    }
+
+    // Wire DoorLock commands for KEYMATIC channels.
+    // Matter lockDoor → Homematic STATE=false (locked); unlockDoor → STATE=true (unlocked).
+    if (channel.type === 'KEYMATIC' && this.ccuConnection) {
+      const ccuConn = this.ccuConnection;
+      this.channelAddressToDevice.set(channel.address, endpoint);
+      this.keymaticState.set(channel.address, { state: false, uncertain: false, error: false, direction: 0 });
+      endpoint.addCommandHandler('lockDoor', () => {
+        this.log.debug(`Matter lockDoor -> Homematic STATE=false: channel=${channel.address}`);
+        // Optimistically set direction=2 (closing) so that incoming STATE events (which still carry
+        // the old value) cannot set lockState back to Unlocked before the real DIRECTION RPC event arrives.
+        const flags = this.keymaticState.get(channel.address);
+        if (flags) flags.direction = 2;
+        // Signal NotFullyLocked immediately after the command transaction closes so the Home app
+        // shows the "closing" animation without waiting for the first CCU RPC event (~800ms delay).
+        setImmediate(() => {
+          endpoint.updateAttribute('DoorLock', 'lockState', 0).catch((err: unknown) => {
+            this.log.warn(`Failed to set NotFullyLocked on lockDoor for ${channel.address}: ${String(err)}`);
+          });
+        });
+        ccuConn.setChannelDatapointValue(channel.interfaceName, channel.address, 'STATE', false).catch((err: unknown) => {
+          this.log.warn(`Failed to set Homematic STATE for ${channel.address}: ${String(err)}`);
+        });
+      });
+      endpoint.addCommandHandler('unlockDoor', () => {
+        this.log.debug(`Matter unlockDoor -> Homematic STATE=true: channel=${channel.address}`);
+        // Optimistically set direction=1 (opening) so that incoming STATE events (which still carry
+        // the old value) cannot set lockState back to Locked before the real DIRECTION RPC event arrives.
+        const flags = this.keymaticState.get(channel.address);
+        if (flags) flags.direction = 1;
+        // Signal NotFullyLocked immediately after the command transaction closes so the Home app
+        // shows the "opening" animation without waiting for the first CCU RPC event (~800ms delay).
+        setImmediate(() => {
+          endpoint.updateAttribute('DoorLock', 'lockState', 0).catch((err: unknown) => {
+            this.log.warn(`Failed to set NotFullyLocked on unlockDoor for ${channel.address}: ${String(err)}`);
+          });
+        });
+        ccuConn.setChannelDatapointValue(channel.interfaceName, channel.address, 'STATE', true).catch((err: unknown) => {
+          this.log.warn(`Failed to set Homematic STATE for ${channel.address}: ${String(err)}`);
+        });
+      });
+    }
+
+    // Track KEY / KEY_TRANSCEIVER channel address for inbound PRESS_SHORT / PRESS_LONG events.
+    // These channels are receive-only: HM fires events, we forward them to Matter as switch events.
+    if ((channel.type === 'KEY' || channel.type === 'KEY_TRANSCEIVER') && this.ccuConnection) {
+      this.channelAddressToDevice.set(channel.address, endpoint);
+    }
+
+    // Wire WindowCovering position for BLIND channels.
+    // Matter Percent100ths: 0 = fully open, 10000 = fully closed.
+    // Homematic LEVEL: 0.0 = fully closed, 1.0 = fully open.
+    if (channel.type === 'BLIND' && this.ccuConnection) {
+      const ccuConn = this.ccuConnection;
+      const isTiltSupported = channel.tiltSupported === true;
+      this.channelAddressToDevice.set(channel.address, endpoint);
+      try {
+        await endpoint.subscribeAttribute('WindowCovering', 'targetPositionLiftPercent100ths', (value: number | null) => {
+          const iface = channel.interfaceName;
+          const address = channel.address;
+          const hmLevel = value != null ? Math.round((1 - value / 10000) * 100) / 100 : 0;
+          const suppress = this.rpcEchoSuppress.get(address + ':blindTarget');
+          if (suppress !== undefined && suppress === value) {
+            this.rpcEchoSuppress.delete(address + ':blindTarget');
+            return;
+          }
+          // Record the commanded target so that early LEVEL echos from the CCU (before DIRECTION/WORKING
+          // arrives) only update currentPositionLiftPercent100ths and don't overwrite this target.
+          this.blindCommandedTarget.set(address, value ?? 0);
+          this.log.debug(`Matter WindowCovering target -> Homematic LEVEL: iface=${iface} channel=${address} target=${value?.toString() ?? 'null'} hmLevel=${hmLevel}`);
+          if (isTiltSupported) {
+            const tilt = this.blindLastTilt.get(address) ?? 0.5;
+            ccuConn.putChannelParamsetValues(iface, address, { LEVEL: hmLevel, LEVEL_2: tilt }).catch((err: unknown) => {
+              this.log.warn(`Failed to putParamset LEVEL for ${address}: ${String(err)}`);
+            });
+          } else {
+            ccuConn.setChannelDatapointValue(iface, address, 'LEVEL', String(hmLevel)).catch((err: unknown) => {
+              this.log.warn(`Failed to set Homematic LEVEL for ${address}: ${String(err)}`);
+            });
+          }
+        });
+      } catch (err) {
+        this.log.warn(`Failed to subscribe WindowCovering lift for ${channel.address}: ${String(err)}`);
+      }
+      if (isTiltSupported) {
+        try {
+          await endpoint.subscribeAttribute('WindowCovering', 'targetPositionTiltPercent100ths', (value: number | null) => {
+            const iface = channel.interfaceName;
+            const address = channel.address;
+            // Matter 0 = open tilt, 10000 = closed tilt → Homematic LEVEL_2: 0=closed, 1=open.
+            const hmTilt = value != null ? Math.round((1 - value / 10000) * 100) / 100 : 0.5;
+            const suppress = this.rpcEchoSuppress.get(address + ':blindTilt');
+            if (suppress !== undefined && suppress === value) {
+              this.rpcEchoSuppress.delete(address + ':blindTilt');
+              return;
+            }
+            this.log.debug(`Matter WindowCovering tilt -> Homematic LEVEL_2: iface=${iface} channel=${address} tilt=${value?.toString() ?? 'null'} hmTilt=${hmTilt}`);
+            const lastLevel = this.dimmerLastLevel.get(address)?.level ?? 0;
+            ccuConn.putChannelParamsetValues(iface, address, { LEVEL: lastLevel, LEVEL_2: hmTilt }).catch((err: unknown) => {
+              this.log.warn(`Failed to putParamset LEVEL_2 for ${address}: ${String(err)}`);
+            });
+          });
+        } catch (err) {
+          this.log.warn(`Failed to subscribe WindowCovering tilt for ${channel.address}: ${String(err)}`);
+        }
+      }
+    }
   }
 
   private async primeBatteryHintsFromRpc(channels: CcuChannelInfo[]): Promise<void> {

@@ -30,5 +30,5 @@ export const mapDevice: DeviceMapper = (channels, vendorId, options) => {
 
   // HmIP-BSM is always mains-powered — override any battery hint from the discovery layer.
   const endpoint = mapSwitchChannel(switchChannel, vendorId, { ...options, batteryPowered: false });
-  return [endpoint];
+  return [{ endpoint, channels: [switchChannel] }];
 };

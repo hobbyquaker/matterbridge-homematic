@@ -69,7 +69,7 @@ function makePlatform(config: PlatformConfig = makeConfig()): TemplatePlatform {
 describe('TemplatePlatform config selection migration', () => {
   test('should remove disabled-interface channels from select devices and blacklist', async () => {
     const config = makeConfig();
-    config.blackList = ['BidCos-RF:SWITCH:LEQ1234567:1', 'LEQ1234567:1', 'Legacy Switch'];
+    config.blackList = ['BidCos-RF:SWITCH:LEQ1234567:1', 'BidCos-RF:SHUTTER_CONTACT:OLD9999999:1', 'LEQ1234567:1', 'Legacy Switch'];
 
     const instance = makePlatform(config);
     const saveConfigSpy = vi.spyOn(instance, 'saveConfig').mockImplementation(() => {});
@@ -77,6 +77,7 @@ describe('TemplatePlatform config selection migration', () => {
 
     instance.setSelectDevice('BidCos-RF:SWITCH:LEQ1234567:1', 'Legacy Switch', undefined, 'switch');
     instance.setSelectDevice('SWITCH:LEQ1234567:1', 'Legacy Switch', undefined, 'switch');
+    instance.setSelectDevice('BidCos-RF:SHUTTER_CONTACT:OLD9999999:1', 'Stale Legacy Contact', undefined, 'switch');
 
     const channels: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'name' | 'type'>[] = [
       { address: 'LEQ1234567:1', interfaceName: 'BidCos-RF', name: 'Legacy Switch', type: 'SWITCH' },
@@ -88,7 +89,7 @@ describe('TemplatePlatform config selection migration', () => {
     expect(config.blackList).toEqual([]);
     expect(instance.getSelectDevices()).toEqual([]);
     expect(saveConfigSpy).toHaveBeenCalledExactlyOnceWith(config);
-    expect(logInfoSpy).toHaveBeenCalledWith('Disabled interface cleanup summary: removedSelectDevices=2 removedBlacklistEntries=3');
+    expect(logInfoSpy).toHaveBeenCalledWith('Disabled interface cleanup summary: removedSelectDevices=3 removedBlacklistEntries=4');
   });
 
   test('should migrate address-based whitelist and blacklist entries to ReGa names when discovered', () => {

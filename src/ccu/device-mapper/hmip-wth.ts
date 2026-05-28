@@ -3,8 +3,7 @@
  *
  * The HEATING_CLIMATECONTROL_TRANSCEIVER channel on these devices carries both temperature /
  * setpoint data and a HUMIDITY datapoint. This device mapper combines both into a single Matter
- * endpoint with the thermostatDevice + humiditySensor device types, so that Home.app shows them
- * as one device — matching the HomeKit experience.
+ * endpoint with the thermostatDevice + humiditySensor device types.
  *
  * @file device-mapper/hmip-wth.ts
  */
@@ -31,13 +30,16 @@ export const mapDevice: DeviceMapper = (channels, vendorId, options) => {
   const model = buildModel(heatingChannel);
 
   return [
-    finalizeEndpoint(
-      new MatterbridgeEndpoint([thermostatDevice, humiditySensor], { id })
-        .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
-        // localTemperature=23°C, occupiedHeatingSetpoint=21°C as defaults; updated from RPC on startup.
-        .createDefaultHeatingThermostatClusterServer(23, 21)
-        .createDefaultRelativeHumidityMeasurementClusterServer(),
-      { ...options, batteryPowered: heatingChannel.batteryPowered },
-    ),
+    {
+      endpoint: finalizeEndpoint(
+        new MatterbridgeEndpoint([thermostatDevice, humiditySensor], { id })
+          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
+          // localTemperature=23°C, occupiedHeatingSetpoint=21°C as defaults; updated from RPC on startup.
+          .createDefaultHeatingThermostatClusterServer(23, 21)
+          .createDefaultRelativeHumidityMeasurementClusterServer(),
+        { ...options, batteryPowered: heatingChannel.batteryPowered },
+      ),
+      channels: [heatingChannel],
+    },
   ];
 };

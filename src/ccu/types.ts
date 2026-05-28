@@ -199,8 +199,42 @@ export interface ChannelMappingOptions {
 export type ChannelMapper = (channel: CcuChannelInfo, vendorId: number, options: ChannelMappingOptions) => MatterbridgeEndpoint;
 
 /**
- * Function signature for a device-level mapper.
- * Receives all resolved channels for one Homematic device and returns zero or more endpoints.
- * Use this when a specific device type requires a mapping that differs from the generic channel-type fallback.
+ * A single Matter endpoint produced by a device mapper, paired with the Homematic channels it handles.
+ *
+ * The `channels` array drives the wiring step: `module.ts` calls `wireChannelEndpoint` once for each
+ * entry so that the correct Matter→Homematic attribute subscriptions and RPC event routing are
+ * established for every channel the endpoint is responsible for.
+ *
+ * - Single-function devices (e.g. wall thermostat with combined humidity): one entry with one channel.
+ * - Multi-endpoint devices (e.g. multi-zone floor heating): one entry per zone, each with its own channel.
+ * - Devices where one endpoint aggregates several channels: one entry with multiple channels.
  */
-export type DeviceMapper = (channels: CcuChannelInfo[], vendorId: number, options: ChannelMappingOptions) => MatterbridgeEndpoint[];
+export interface MappedDeviceEndpoint {
+  /** The Matter endpoint to register with Matterbridge. */
+  endpoint: MatterbridgeEndpoint;
+  /**
+   * The Homematic channels this endpoint handles.
+   * Determines which Matter attribute subscriptions and RPC event routing wires are established.
+   */
+  channels: CcuChannelInfo[];
+}
+
+/**
+ * Function signature for a device-level mapper.
+ *
+ * Receives all resolved channels for one Homematic device and returns zero or more
+ * `MappedDeviceEndpoint` instances. Each entry pairs a Matter endpoint with the Homematic channels
+ * it handles for wiring (attribute subscriptions, RPC event routing).
+ *
+ * **Priority**: Device mappers always run before the channel mapper loop. When a device mapper is
+ * registered for a device type, ALL channels of that device are handled exclusively by the device
+ * mapper — the channel mapper is never invoked for any of those channels.
+ *
+ * **Channel mapper reuse**: A device mapper may call channel mapper functions internally
+ * (e.g. `mapChannel as mapSwitchChannel`) to delegate endpoint creation for individual channels
+ * while still controlling the overall device presentation.
+ *
+ * @returns {MappedDeviceEndpoint[]} Zero or more endpoint-channel associations.
+ *   Return an empty array to suppress the device entirely (e.g. when a required channel is absent).
+ */
+export type DeviceMapper = (channels: CcuChannelInfo[], vendorId: number, options: ChannelMappingOptions) => MappedDeviceEndpoint[];
