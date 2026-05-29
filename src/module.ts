@@ -37,7 +37,7 @@ import {
   resolveChannelsForMatter,
 } from './ccu/device-mapper.js';
 import { getBatteryVoltageRange, getMatchingMainsPoweredPrefix, isAlwaysMainsPoweredDeviceType, MAINS_POWERED_DEVICE_TYPE_PREFIXES } from './ccu/device-power.js';
-import { ParamsetCache, buildParamsetKey } from './ccu/paramset-cache.js';
+import { buildParamsetKey, ParamsetCache } from './ccu/paramset-cache.js';
 import { CcuChannelInfo, CcuChannelOverride, CcuInterfaceName } from './ccu/types.js';
 
 /**

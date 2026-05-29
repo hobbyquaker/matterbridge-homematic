@@ -86,6 +86,9 @@ export class CcuConnectionLayer extends EventEmitter {
    */
   private readonly deviceVersionFromNewDevices = new Map<string, number>();
 
+  /** Raw `newDevices` payload stored per interface for use by {@link refreshChannelsCache}. */
+  private readonly newDevicesPayloadByIface = new Map<RpcInterfaceName, RpcDeviceDescription[]>();
+
   /** Interfaces that have already delivered their `newDevices` callback payload. */
   private readonly newDevicesReceivedByIface = new Set<string>();
 
@@ -310,61 +313,48 @@ export class CcuConnectionLayer extends EventEmitter {
    */
   private async refreshChannelsCache(): Promise<void> {
     this.log.debug('refreshChannelsCache: started');
-    const nameMap = await this.getRegaChannelNameMap();
-    const channelLists = await Promise.all(
-      [...this.clients.keys()].map(async (iface): Promise<CcuChannelInfo[]> => {
-        try {
-          const devices = (await this.callRpc(iface, 'listDevices', [])) as RpcDeviceDescription[];
-          const deviceTypeByAddress = new Map<string, string>();
-          const deviceFirmwareByAddress = new Map<string, string>();
-          const deviceVersionByAddress = new Map<string, number>();
+    // Run ReGa name resolution and wait for newDevices payloads in parallel.
+    const [nameMap] = await Promise.all([this.getRegaChannelNameMap(), this.waitForNewDevices(this.getRequestTimeoutMs())]);
 
-          for (const dev of devices) {
-            if (typeof dev.ADDRESS !== 'string' || dev.ADDRESS.includes(':')) continue;
-            if (typeof dev.TYPE !== 'string') continue;
-            deviceTypeByAddress.set(dev.ADDRESS, dev.TYPE);
-            if (typeof dev.FIRMWARE === 'string' && dev.FIRMWARE.length > 0) {
-              deviceFirmwareByAddress.set(dev.ADDRESS, dev.FIRMWARE);
-            }
-            const rawVersion = dev.VERSION;
-            if (typeof rawVersion === 'number') {
-              deviceVersionByAddress.set(dev.ADDRESS, rawVersion);
-            }
-          }
+    const channelLists = [...this.clients.keys()].map((iface): CcuChannelInfo[] => {
+      const devices = (this.newDevicesPayloadByIface.get(iface) ?? []) as RpcDeviceDescription[];
+      const deviceTypeByAddress = new Map<string, string>();
+      const deviceFirmwareByAddress = new Map<string, string>();
 
-          const channels: CcuChannelInfo[] = [];
-
-          for (const dev of devices) {
-            if (!dev.ADDRESS.includes(':')) continue;
-
-            const colonIndex = dev.ADDRESS.indexOf(':');
-            const deviceAddress = dev.ADDRESS.slice(0, colonIndex);
-            const channelIndex = parseInt(dev.ADDRESS.slice(colonIndex + 1), 10);
-
-            channels.push({
-              address: dev.ADDRESS,
-              deviceAddress,
-              channelIndex,
-              type: dev.TYPE,
-              deviceType: deviceTypeByAddress.get(deviceAddress),
-              deviceFirmware: deviceFirmwareByAddress.get(deviceAddress),
-              // Prefer VERSION from the newDevices callback (always the authoritative source);
-              // fall back to the listDevices value for the first-start empty-cache path where
-              // newDevices may not have arrived yet.
-              deviceVersion: this.deviceVersionFromNewDevices.get(`${iface}:${deviceAddress}`) ?? deviceVersionByAddress.get(deviceAddress),
-              interfaceName: iface,
-              name: nameMap.get(dev.ADDRESS),
-              batteryPowered: this.deviceBatteryHints.get(deviceAddress),
-            });
-          }
-
-          return channels;
-        } catch (err) {
-          this.log.warn(`RPC listDevices failed on ${iface}: ${String(err)}`);
-          return [];
+      for (const dev of devices) {
+        if (typeof dev.ADDRESS !== 'string' || dev.ADDRESS.includes(':')) continue;
+        if (typeof dev.TYPE !== 'string') continue;
+        deviceTypeByAddress.set(dev.ADDRESS, dev.TYPE);
+        if (typeof dev.FIRMWARE === 'string' && dev.FIRMWARE.length > 0) {
+          deviceFirmwareByAddress.set(dev.ADDRESS, dev.FIRMWARE);
         }
-      }),
-    );
+      }
+
+      const channels: CcuChannelInfo[] = [];
+
+      for (const dev of devices) {
+        if (!dev.ADDRESS.includes(':')) continue;
+
+        const colonIndex = dev.ADDRESS.indexOf(':');
+        const deviceAddress = dev.ADDRESS.slice(0, colonIndex);
+        const channelIndex = parseInt(dev.ADDRESS.slice(colonIndex + 1), 10);
+
+        channels.push({
+          address: dev.ADDRESS,
+          deviceAddress,
+          channelIndex,
+          type: dev.TYPE,
+          deviceType: deviceTypeByAddress.get(deviceAddress),
+          deviceFirmware: deviceFirmwareByAddress.get(deviceAddress),
+          deviceVersion: this.deviceVersionFromNewDevices.get(`${iface}:${deviceAddress}`),
+          interfaceName: iface,
+          name: nameMap.get(dev.ADDRESS),
+          batteryPowered: this.deviceBatteryHints.get(deviceAddress),
+        });
+      }
+
+      return channels;
+    });
 
     const channels = channelLists.flat();
 
@@ -639,6 +629,7 @@ export class CcuConnectionLayer extends EventEmitter {
 
     // Signal waiters that are blocking on this interface's newDevices payload.
     if (iface !== undefined) {
+      this.newDevicesPayloadByIface.set(iface, payload as RpcDeviceDescription[]);
       this.newDevicesReceivedByIface.add(iface);
     }
     if (this.allIfacesHaveReceivedNewDevices()) {
@@ -838,7 +829,7 @@ export class CcuConnectionLayer extends EventEmitter {
     const pingTimeout = this.getPingTimeoutMs();
     const last = this.lastRpcEventTime.get(iface) ?? Date.now();
     const elapsed = Date.now() - last;
-    this.log.debug(`Ping watchdog check -> iface=${iface} elapsedMs=${elapsed} pingTimeoutMs=${pingTimeout}`);
+    this.log.debug(`Ping watchdog -> iface=${iface} elapsedMs=${elapsed} timeoutMs=${pingTimeout}`);
 
     if (elapsed >= pingTimeout) {
       // Full timeout exceeded — re-subscribe.
