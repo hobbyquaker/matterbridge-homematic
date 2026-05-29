@@ -91,6 +91,7 @@
     "lint:inspect": "eslint --cache --cache-location .cache/.eslintcache --max-warnings=0 --inspect-config",
     "format": "prettier --cache --cache-location .cache/.prettiercache --write .",
     "format:check": "prettier --cache --cache-location .cache/.prettiercache --check .",
+    "prepare": "git config core.hooksPath .githooks || true",
     "preversion": "npm run runMeBeforePublish",
     "postversion": "npm run build",
     "version:patch": "npm version patch --no-git-tag-version",
