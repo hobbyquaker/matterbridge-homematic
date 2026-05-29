@@ -87,7 +87,7 @@ describe('channelTypeToKey', () => {
 
 describe('deviceTypeToKey', () => {
   test('should lowercase and convert hyphens', () => {
-    expect(deviceTypeToKey('HmIP-BSM')).toBe('hmip-bsm');
+    expect(deviceTypeToKey('HmIP-WTH')).toBe('hmip-wth');
   });
 
   test('should strip leading and trailing hyphens', () => {
@@ -131,11 +131,6 @@ describe('CHANNEL_MAPPERS', () => {
 // ---------------------------------------------------------------------------
 
 describe('DEVICE_MAPPERS', () => {
-  test('should contain the HmIP-BSM device mapper', () => {
-    expect(DEVICE_MAPPERS).toHaveProperty('hmip-bsm');
-    expect(typeof DEVICE_MAPPERS['hmip-bsm']).toBe('function');
-  });
-
   test('should contain device mappers for HmIP-WTH family', () => {
     expect(DEVICE_MAPPERS).toHaveProperty('hmip-wth');
     expect(DEVICE_MAPPERS).toHaveProperty('hmip-wth-2');
@@ -155,14 +150,14 @@ describe('DEVICE_MAPPERS', () => {
 // ---------------------------------------------------------------------------
 
 describe('getDeviceMapper', () => {
-  test('should return the HmIP-BSM mapper for "HmIP-BSM"', () => {
-    const mapper = getDeviceMapper('HmIP-BSM');
+  test('should return the HmIP-WTH mapper for "HmIP-WTH"', () => {
+    const mapper = getDeviceMapper('HmIP-WTH');
     expect(mapper).toBeDefined();
     expect(typeof mapper).toBe('function');
   });
 
   test('should be case-insensitive (returns same mapper for lowercase)', () => {
-    expect(getDeviceMapper('hmip-bsm')).toBeDefined();
+    expect(getDeviceMapper('hmip-wth')).toBeDefined();
   });
 
   test('should return undefined for an unknown device type', () => {

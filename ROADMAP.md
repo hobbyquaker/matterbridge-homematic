@@ -823,7 +823,7 @@ The current `regaEnabled` shape is too coarse. It mixes at least three separate 
 - Channel mapper registry: `src/ccu/channel-mapper/index.ts`
 - Device mapper registry: `src/ccu/device-mapper/index.ts`
 - Shared helpers: `src/ccu/mapper-utils.ts`
-- Existing device mapper example: `src/ccu/device-mapper/hmip-bsm.ts`
+- Existing device mapper example: `src/ccu/device-mapper/hmip-wth.ts`
 - All types: `src/ccu/types.ts`
 - Conventions (key sanitization, endpoint ID format, serial number format): see `homematic.instructions.md`
 - Tests go in `vitest/` as `.test.ts` files; follow patterns in `vitest/mapper.test.ts`

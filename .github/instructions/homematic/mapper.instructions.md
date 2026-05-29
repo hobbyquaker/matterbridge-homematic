@@ -146,7 +146,7 @@ export interface MappedDeviceEndpoint {
 ### File layout
 
 ```text
-src/ccu/device-mapper/<device-key>.ts   e.g. hmip-wth.ts, hmip-bsm.ts
+src/ccu/device-mapper/<device-key>.ts   e.g. hmip-wth.ts, hmip-drsi4.ts
 ```
 
 The file exports `mapDevice: DeviceMapper`.
@@ -218,27 +218,6 @@ export const mapDevice: DeviceMapper = (channels, vendorId, options) => {
 ```
 
 Each zone endpoint gets its own `wireChannelEndpoint` call from `module.ts`, establishing independent Thermostat attribute subscriptions and RPC event routing per zone.
-
----
-
-## Example: device mapper delegating to channel mapper
-
-```ts
-// src/ccu/device-mapper/hmip-bsm.ts
-import { mapChannel as mapSwitchChannel } from '../channel-mapper/switch.js';
-import { DeviceMapper } from '../types.js';
-
-export const mapDevice: DeviceMapper = (channels, vendorId, options) => {
-  const switchChannel = channels.find((c) => c.type === 'SWITCH');
-  if (!switchChannel) return [];
-
-  // Force mains-powered classification regardless of battery hints.
-  const endpoint = mapSwitchChannel(switchChannel, vendorId, { ...options, batteryPowered: false });
-  return [{ endpoint, channels: [switchChannel] }];
-};
-```
-
-This pattern is the recommended way to reuse standard channel mapper logic while overriding device-level concerns.
 
 ---
 

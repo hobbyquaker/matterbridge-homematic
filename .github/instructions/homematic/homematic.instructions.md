@@ -151,13 +151,13 @@ The mapping layer is split across several directories:
 | `src/ccu/types.ts`                 | All shared CCU types including `CcuChannelInfo`, `ChannelMappingOptions`, `ChannelMapper`, `DeviceMapper`, `SUPPORTED_CHANNEL_TYPES`.                                                                               |
 | `src/ccu/channel-mapper/<type>.ts` | One file per channel type (e.g. `shutter-contact.ts`). Each exports a `mapChannel: ChannelMapper` function.                                                                                                         |
 | `src/ccu/channel-mapper/index.ts`  | Registry `CHANNEL_MAPPERS` keyed by sanitized channel type + `channelTypeToKey` helper.                                                                                                                             |
-| `src/ccu/device-mapper/<model>.ts` | One file per device model (e.g. `hmip-bsm.ts`). Each exports a `mapDevice: DeviceMapper` function.                                                                                                                  |
+| `src/ccu/device-mapper/<model>.ts` | One file per device model (e.g. `hmip-wth.ts`). Each exports a `mapDevice: DeviceMapper` function.                                                                                                                  |
 | `src/ccu/device-mapper/index.ts`   | Registry `DEVICE_MAPPERS` keyed by sanitized device type + `deviceTypeToKey` helper.                                                                                                                                |
 
 ### Key naming rules
 
 - **Channel type key**: `channelType.toLowerCase().replace(/_/g, '-')` — e.g. `SHUTTER_CONTACT` → `shutter-contact`
-- **Device type key**: `deviceType.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')` — e.g. `HmIP-BSM` → `hmip-bsm`, `HmIP-STE2+` → `hmip-ste2`
+- **Device type key**: `deviceType.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')` — e.g. `HmIP-WTH` → `hmip-wth`, `HmIP-STE2+` → `hmip-ste2`
 
 ## Adding support for a new channel type
 
