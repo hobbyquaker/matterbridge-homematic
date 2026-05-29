@@ -92,63 +92,93 @@ describe('TemplatePlatform config selection migration', () => {
     expect(logInfoSpy).toHaveBeenCalledWith('Disabled interface cleanup summary: removedSelectDevices=3 removedBlacklistEntries=4');
   });
 
-  test('should migrate address-based whitelist and blacklist entries to ReGa names when discovered', () => {
+  test('should migrate address-based entries to selectSerial in both white and blacklist', () => {
     const config = makeConfig();
     config.whiteList = ['001558A99EFDBA:1'];
     config.blackList = ['00391F29B5C076:1'];
 
     const instance = makePlatform(config);
     const saveConfigSpy = vi.spyOn(instance, 'saveConfig').mockImplementation(() => {});
-    const logInfoSpy = vi.spyOn(instance.log, 'info');
 
-    const channels: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'name'>[] = [
-      { address: '001558A99EFDBA:1', interfaceName: 'HmIP-RF', name: 'TFK Bad:1' },
-      { address: '00391F29B5C076:1', interfaceName: 'HmIP-RF', name: 'Thermostat Wohnzimmer:1' },
+    const channels: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'type' | 'name'>[] = [
+      { address: '001558A99EFDBA:1', interfaceName: 'HmIP-RF', type: 'SHUTTER_CONTACT', name: 'TFK Bad' },
+      { address: '00391F29B5C076:1', interfaceName: 'HmIP-RF', type: 'SWITCH', name: 'Thermostat Wohnzimmer' },
     ];
 
     // @ts-expect-error Accessing private method for testing purposes
-    instance.syncChannelListEntriesWithRegaNames(channels, ['HmIP-RF']);
+    instance.migrateSelectListEntriesToSerial(channels);
 
-    expect(config.whiteList).toEqual(['TFK Bad:1']);
-    expect(config.blackList).toEqual(['Thermostat Wohnzimmer:1']);
+    expect(config.whiteList).toEqual(['HmIP-RF:CONTACT:001558A99EFDBA:1']);
+    expect(config.blackList).toEqual(['HmIP-RF:SWITCH:00391F29B5C076:1']);
     expect(saveConfigSpy).toHaveBeenCalledExactlyOnceWith(config);
-    expect(logInfoSpy).toHaveBeenCalledWith('ReGa list sync summary: migrated=2 skippedNoName=0 skippedDisabledInterface=0');
   });
 
-  test('should avoid duplicate ReGa names when migrating address-based entries', () => {
+  test('should migrate name-based entries to selectSerial', () => {
     const config = makeConfig();
-    config.blackList = ['00391F29B5C076:1', 'Thermostat Wohnzimmer:1'];
+    config.blackList = ['Küchenlicht'];
 
     const instance = makePlatform(config);
     const saveConfigSpy = vi.spyOn(instance, 'saveConfig').mockImplementation(() => {});
 
-    const channels: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'name'>[] = [{ address: '00391F29B5C076:1', interfaceName: 'HmIP-RF', name: 'Thermostat Wohnzimmer:1' }];
-
-    // @ts-expect-error Accessing private method for testing purposes
-    instance.syncChannelListEntriesWithRegaNames(channels, ['HmIP-RF']);
-
-    expect(config.blackList).toEqual(['Thermostat Wohnzimmer:1']);
-    expect(saveConfigSpy).toHaveBeenCalledOnce();
-  });
-
-  test('should report skipped entries for missing ReGa names and disabled interfaces', () => {
-    const config = makeConfig();
-    config.blackList = ['001558A99EFDBA:1', '00391F29B5C076:1'];
-
-    const instance = makePlatform(config);
-    const saveConfigSpy = vi.spyOn(instance, 'saveConfig').mockImplementation(() => {});
-    const logInfoSpy = vi.spyOn(instance.log, 'info');
-
-    const channels: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'name'>[] = [
-      { address: '001558A99EFDBA:1', interfaceName: 'HmIP-RF', name: '' },
-      { address: '00391F29B5C076:1', interfaceName: 'BidCos-RF', name: 'Thermostat Wohnzimmer:1' },
+    const channels: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'type' | 'name'>[] = [
+      { address: 'OEQ0854602:1', interfaceName: 'BidCos-RF', type: 'SWITCH', name: 'Küchenlicht' },
     ];
 
     // @ts-expect-error Accessing private method for testing purposes
-    instance.syncChannelListEntriesWithRegaNames(channels, ['HmIP-RF']);
+    instance.migrateSelectListEntriesToSerial(channels);
 
-    expect(config.blackList).toEqual(['001558A99EFDBA:1', '00391F29B5C076:1']);
+    expect(config.blackList).toEqual(['BidCos-RF:SWITCH:OEQ0854602:1']);
+    expect(saveConfigSpy).toHaveBeenCalledExactlyOnceWith(config);
+  });
+
+  test('should not migrate a name shared by multiple channels (ambiguous)', () => {
+    const config = makeConfig();
+    config.blackList = ['Licht'];
+
+    const instance = makePlatform(config);
+    const saveConfigSpy = vi.spyOn(instance, 'saveConfig').mockImplementation(() => {});
+
+    const channels: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'type' | 'name'>[] = [
+      { address: 'OEQ0854602:1', interfaceName: 'HmIP-RF', type: 'SWITCH', name: 'Licht' },
+      { address: 'OEQ9999999:1', interfaceName: 'HmIP-RF', type: 'SWITCH', name: 'Licht' },
+    ];
+
+    // @ts-expect-error Accessing private method for testing purposes
+    instance.migrateSelectListEntriesToSerial(channels);
+
+    expect(config.blackList).toEqual(['Licht']);
     expect(saveConfigSpy).not.toHaveBeenCalled();
-    expect(logInfoSpy).toHaveBeenCalledWith('ReGa list sync summary: migrated=0 skippedNoName=1 skippedDisabledInterface=1');
+  });
+
+  test('should pass through already-selectSerial entries unchanged', () => {
+    const config = makeConfig();
+    config.blackList = ['HmIP-RF:SWITCH:OEQ0854602:1'];
+
+    const instance = makePlatform(config);
+    const saveConfigSpy = vi.spyOn(instance, 'saveConfig').mockImplementation(() => {});
+
+    const channels: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'type' | 'name'>[] = [
+      { address: 'OEQ0854602:1', interfaceName: 'HmIP-RF', type: 'SWITCH', name: 'Kitchen Light' },
+    ];
+
+    // @ts-expect-error Accessing private method for testing purposes
+    instance.migrateSelectListEntriesToSerial(channels);
+
+    expect(config.blackList).toEqual(['HmIP-RF:SWITCH:OEQ0854602:1']);
+    expect(saveConfigSpy).not.toHaveBeenCalled();
+  });
+
+  test('should pass through entries with no matching channel unchanged', () => {
+    const config = makeConfig();
+    config.blackList = ['some-unknown-entry'];
+
+    const instance = makePlatform(config);
+    const saveConfigSpy = vi.spyOn(instance, 'saveConfig').mockImplementation(() => {});
+
+    // @ts-expect-error Accessing private method for testing purposes
+    instance.migrateSelectListEntriesToSerial([]);
+
+    expect(config.blackList).toEqual(['some-unknown-entry']);
+    expect(saveConfigSpy).not.toHaveBeenCalled();
   });
 });

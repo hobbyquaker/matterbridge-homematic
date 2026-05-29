@@ -185,7 +185,7 @@ describe('discoverDevices auto-disable', () => {
     // @ts-expect-error Accessing private method for testing purposes
     inst.cleanupDisabledInterfaceChannels = vi.fn(async () => {});
     // @ts-expect-error Accessing private method for testing purposes
-    inst.syncChannelListEntriesWithRegaNames = vi.fn();
+    inst.migrateSelectListEntriesToSerial = vi.fn();
     inst.setSelectDevice = vi.fn();
     inst.clearDeviceSelect = vi.fn();
     inst.saveConfig = vi.fn();
@@ -204,7 +204,7 @@ describe('discoverDevices auto-disable', () => {
     vi.clearAllMocks();
   });
 
-  it('should not auto-blacklist on the first install even when newDevicesDefaultEnabled is false', async () => {
+  it('should auto-blacklist on the first install when newDevicesDefaultEnabled is false', async () => {
     instance = createInstance({ newDevicesDefaultEnabled: false } as Partial<PlatformConfig>);
     injectFakeCcuConnection(instance);
     // First install: no select devices registered yet.
@@ -213,8 +213,8 @@ describe('discoverDevices auto-disable', () => {
     // @ts-expect-error Accessing private method for testing purposes
     await instance.discoverDevices();
 
-    expect((instance.config.blackList as string[]).length).toBe(0);
-    expect(instance.saveConfig).not.toHaveBeenCalled();
+    expect(instance.config.blackList as string[]).toContain(NEW_SERIAL);
+    expect(instance.saveConfig).toHaveBeenCalled();
   });
 
   it('should auto-blacklist a new channel and call saveConfig when newDevicesDefaultEnabled is false', async () => {

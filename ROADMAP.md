@@ -74,6 +74,8 @@ Because the restart is Matterbridge-managed, the UX improvement here comes from 
 **Effort: Low**  
 **Status: Not started**
 
+**Done:** [`f429ea7`](https://github.com/hobbyquaker/matterbridge-homematic/commit/f429ea7)
+
 When a user renames a device or channel in the Homematic CCU ReGa interface and then restarts the plugin, several things currently go wrong. The root cause differs by bug: some are display-only (Matter controller sees a stale name), others are functional (a previously-disabled channel silently re-enables itself after a rename).
 
 **The key insight — `selectFrom: 'serial'` eliminates the functional bugs for UI-driven users**

@@ -186,8 +186,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     // Listen for channel updates and refresh device names when ReGa names arrive
     this.ccuConnection.on('channelsUpdated', (updatedChannels: CcuChannelInfo[]) => {
       this.log.debug(`Channels updated event received with ${updatedChannels.length} channels`);
-      this.syncChannelListEntriesWithRegaNames(updatedChannels);
-      this.refreshDeviceNames(updatedChannels);
+      void this.refreshDeviceNames(updatedChannels);
     });
 
     // Listen for RPC events to track device availability via UNREACH datapoint
@@ -296,7 +295,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     this.updateMainsPoweredDeviceSet(rawChannels);
     await this.primeBatteryHintsFromRpc(rawChannels);
     await this.cleanupDisabledInterfaceChannels(cachedChannels, enabledInterfaces);
-    this.syncChannelListEntriesWithRegaNames(cachedChannels, enabledInterfaces);
+    this.migrateSelectListEntriesToSerial(rawChannels);
     const channels = resolveChannelsForMatter(rawChannels);
     this.discoveredChannels = channels;
     const channelsWithNames = channels.filter((c) => c.name).length;
@@ -320,8 +319,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
     // Snapshot before any setSelectDevice calls: treat zero registered channels as first install
     // so we never auto-blacklist on a brand-new deployment or after a full reset.
-    const isFirstInstall = this.getSelectDevices().length === 0;
-    const shouldAutoDisable = !isFirstInstall && this.getPlatformConfig().newDevicesDefaultEnabled === false;
+    const shouldAutoDisable = this.getPlatformConfig().newDevicesDefaultEnabled === false;
     let autoDisabledCount = 0;
 
     // Group resolved channels by device address (used by the channel loop and select/enabled logic).
@@ -2164,15 +2162,11 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     }, 1000);
   }
 
-  private refreshDeviceNames(updatedChannels: CcuChannelInfo[]): void {
+  private async refreshDeviceNames(updatedChannels: CcuChannelInfo[]): Promise<void> {
     const channelMap = new Map<string, CcuChannelInfo>(updatedChannels.map((c) => [c.address, c]));
 
-    for (const device of this.getDevices()) {
-      const channelAddress = device.originalId;
-      if (typeof channelAddress !== 'string') continue;
-
+    for (const [channelAddress, device] of this.channelAddressToDevice) {
       const updatedChannel = channelMap.get(channelAddress);
-
       if (!updatedChannel) continue;
 
       const newName = this.getChannelDisplayName(updatedChannel);
@@ -2181,12 +2175,12 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       if (newName && newName !== oldName && newName !== channelAddress) {
         this.log.info(`Updating device name for ${channelAddress}: "${oldName}" -> "${newName}"`);
         device.deviceName = newName;
-        this.setSelectDevice(
-          `${updatedChannel.interfaceName}:${isSupportedChannelType(updatedChannel.type) ? channelTypeLabel(updatedChannel.type) : updatedChannel.type}:${channelAddress}`,
-          newName,
-          undefined,
-          'switch',
-        );
+        this.setSelectDevice(this.getChannelSelectSerial(updatedChannel), newName, undefined, 'switch');
+        try {
+          await device.updateAttribute('BridgedDeviceBasicInformation', 'nodeLabel', newName);
+        } catch (error) {
+          this.log.debug(`Failed to update nodeLabel for ${channelAddress}: ${String(error)}`);
+        }
       }
     }
   }
@@ -2249,71 +2243,70 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     }
   }
 
-  private syncChannelListEntriesWithRegaNames(channels: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'name'>[], enabledInterfaces?: readonly CcuInterfaceName[]): void {
-    const enabledInterfaceSet = enabledInterfaces ? new Set(enabledInterfaces) : undefined;
-    const channelMap = new Map<string, Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'name'>>();
+  /**
+   * One-time migration: replace legacy address- or name-based whitelist/blacklist entries with
+   * stable selectSerial keys. Runs on every startup so that installations upgraded from older
+   * versions automatically convert stored entries without manual intervention.
+   *
+   * @param {Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'type' | 'name'>[]} channels All discovered channels used as the reference for address and name lookups.
+   */
+  private migrateSelectListEntriesToSerial(channels: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'type' | 'name'>[]): void {
+    const addressToSerial = new Map<string, string>();
+    const nameToSerials = new Map<string, string[]>();
+
     for (const channel of channels) {
-      channelMap.set(channel.address, channel);
+      const serial = this.getChannelSelectSerial(channel);
+      addressToSerial.set(channel.address, serial);
+      const name = channel.name?.trim();
+      if (name && name !== channel.address) {
+        const list = nameToSerials.get(name) ?? [];
+        list.push(serial);
+        nameToSerials.set(name, list);
+      }
     }
 
-    let changed = false;
-    let migrated = 0;
-    let skippedNoName = 0;
-    let skippedDisabledInterface = 0;
+    let totalMigrated = 0;
 
     for (const listKey of ['whiteList', 'blackList'] as const) {
       const entries = this.getPlatformConfig()[listKey];
       if (!Array.isArray(entries)) continue;
 
+      let listChanged = false;
+      const newEntries: string[] = [];
+
       for (const entry of entries) {
-        if (typeof entry !== 'string' || !entry.includes(':')) continue;
+        if (typeof entry !== 'string') continue;
 
-        const channel = channelMap.get(entry);
-        if (!channel) continue;
-
-        if (enabledInterfaceSet && !enabledInterfaceSet.has(channel.interfaceName)) {
-          skippedDisabledInterface++;
+        const byAddress = addressToSerial.get(entry);
+        if (byAddress && byAddress !== entry) {
+          if (!newEntries.includes(byAddress)) newEntries.push(byAddress);
+          this.log.info(`Migrated ${listKey} entry "${entry}" to "${byAddress}"`);
+          totalMigrated++;
+          listChanged = true;
           continue;
         }
 
-        const regaName = channel.name?.trim();
-        if (!regaName || regaName === channel.address) {
-          skippedNoName++;
+        const byName = nameToSerials.get(entry);
+        if (byName?.length === 1 && byName[0] !== entry) {
+          if (!newEntries.includes(byName[0])) newEntries.push(byName[0]);
+          this.log.info(`Migrated ${listKey} entry "${entry}" to "${byName[0]}"`);
+          totalMigrated++;
+          listChanged = true;
           continue;
         }
 
-        if (this.migrateChannelListEntry(listKey, channel.address, regaName)) {
-          changed = true;
-          migrated++;
-        }
+        newEntries.push(entry);
+      }
+
+      if (listChanged) {
+        this.getPlatformConfig()[listKey] = newEntries;
       }
     }
 
-    if (migrated > 0 || skippedNoName > 0 || skippedDisabledInterface > 0) {
-      this.log.info(`ReGa list sync summary: migrated=${migrated} skippedNoName=${skippedNoName} skippedDisabledInterface=${skippedDisabledInterface}`);
-    }
-
-    if (changed) {
+    if (totalMigrated > 0) {
+      this.log.info(`Legacy select list migration: migrated ${totalMigrated} entries to selectSerial format`);
       this.saveConfig(this.getPlatformConfig());
     }
-  }
-
-  private migrateChannelListEntry(listKey: 'whiteList' | 'blackList', channelAddress: string, regaName: string): boolean {
-    const config = this.getPlatformConfig();
-    const currentEntries = config[listKey];
-
-    if (!Array.isArray(currentEntries) || !currentEntries.includes(channelAddress)) {
-      return false;
-    }
-
-    const nextEntries = currentEntries.filter((entry): entry is string => typeof entry === 'string' && entry !== channelAddress);
-    if (!nextEntries.includes(regaName)) {
-      nextEntries.push(regaName);
-    }
-
-    config[listKey] = nextEntries;
-    this.log.info(`Migrated ${listKey} entry from ${channelAddress} to ${regaName}`);
-    return true;
   }
 
   private getChannelSelectSerial(channel: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'type'>): string {
