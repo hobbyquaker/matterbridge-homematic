@@ -316,6 +316,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
     let enabledCount = 0;
     let registeredCount = 0;
+    const enabledDeviceTypesByInterface = new Map<string, Set<string>>();
 
     // Snapshot before any setSelectDevice calls: treat zero registered channels as first install
     // so we never auto-blacklist on a brand-new deployment or after a full reset.
@@ -425,6 +426,11 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         }
 
         enabledCount++;
+        if (resolvedChannel.deviceType) {
+          const s = enabledDeviceTypesByInterface.get(resolvedChannel.interfaceName) ?? new Set<string>();
+          s.add(resolvedChannel.deviceType);
+          enabledDeviceTypesByInterface.set(resolvedChannel.interfaceName, s);
+        }
         await this.registerDevice(endpoint);
         registeredCount++;
         this.log.info(`Device mapper: channel=${resolvedChannel.address} name="${displayName}" deviceType=${deviceType} mapper=${this.getDeviceMapperKey(deviceType)}`);
@@ -459,6 +465,11 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       }
 
       enabledCount++;
+      if (channel.deviceType) {
+        const s = enabledDeviceTypesByInterface.get(channel.interfaceName) ?? new Set<string>();
+        s.add(channel.deviceType);
+        enabledDeviceTypesByInterface.set(channel.interfaceName, s);
+      }
       this.logChannelMapperSelection(channel, displayName);
 
       const endpoint = createEndpointForChannel(channel as Parameters<typeof createEndpointForChannel>[0], this.matterbridge.aggregatorVendorId, {
@@ -475,6 +486,10 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     if (autoDisabledCount > 0) {
       this.saveConfig(this.getPlatformConfig());
       this.log.info(`Auto-disabled ${autoDisabledCount} newly discovered channel(s) (newDevicesDefaultEnabled=false). Enable them individually in the Matterbridge device list.`);
+    }
+
+    for (const [iface, deviceTypes] of [...enabledDeviceTypesByInterface.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+      this.log.info(`Enabled device types on ${iface}: ${[...deviceTypes].sort().join(', ')}`);
     }
 
     this.log.info(
