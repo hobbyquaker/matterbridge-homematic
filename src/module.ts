@@ -598,7 +598,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       // Track combined thermostat+humidity endpoint for humidity RPC event routing.
       if (channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' && endpoint.hasClusterServer('RelativeHumidityMeasurement')) {
         this.wthHumidityChannels.set(channel.address, endpoint);
-        this.log.debug(`Registered combined thermostat+humidity endpoint for ${channel.address} (${channel.deviceType ?? 'unknown'})`);
+        this.log.info(`Registered combined thermostat+humidity endpoint for ${channel.address} (${channel.deviceType ?? 'unknown'})`);
       }
       // Subscribe to setpoint — write Homematic SET_POINT_TEMPERATURE on change.
       try {
@@ -920,7 +920,6 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     if (deviceAddress) {
       const device = this.deviceAddressToDevice.get(deviceAddress);
       if (!device) return;
-      this.log.debug(`UNREACH event: iface=${String(event.iface ?? 'unknown')} device=${deviceAddress} reachable=${reachable}`);
       await this.updateDeviceReachable(deviceAddress, device, reachable);
       return;
     }
@@ -981,8 +980,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const current = await endpoint.getAttribute('PowerSource', 'batPercentRemaining');
       if (current !== batPercentRemaining) {
         await endpoint.updateAttribute('PowerSource', 'batPercentRemaining', batPercentRemaining);
-        this.log.info(`Battery voltage updated: ${deviceAddress} voltage=${voltage}V pct=${pct}% batPercentRemaining=${batPercentRemaining}`);
-      }
+        this.log.info(`${endpoint.deviceName} OPERATING_VOLTAGE event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} batPercentRemaining to ${batPercentRemaining} (${voltage}V ${pct}%)`);      }
     } catch (err) {
       this.log.debug(`Failed to update batPercentRemaining for ${deviceAddress}: ${String(err)}`);
     }
@@ -1019,7 +1017,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         // Suppress the echo setValue that subscribeAttribute would send back.
         this.rpcEchoSuppress.set(channelAddress, newValue);
         await endpoint.updateAttribute('OnOff', 'onOff', newValue);
-        this.log.info(`SWITCH STATE event: updated Matter OnOff for ${channelAddress} to ${newValue}`);
+        this.log.info(`${endpoint.deviceName} SWITCH STATE event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} OnOff to ${newValue}`);
       }
     } catch (err) {
       this.rpcEchoSuppress.delete(channelAddress);
@@ -1058,7 +1056,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const current = await endpoint.getAttribute('BooleanState', 'stateValue');
       if (current !== closed) {
         await endpoint.updateAttribute('BooleanState', 'stateValue', closed);
-        this.log.info(`SHUTTER_CONTACT STATE event: updated Matter stateValue for ${channelAddress} to ${closed}`);
+        this.log.info(`${endpoint.deviceName} SHUTTER_CONTACT STATE event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} stateValue to ${closed}`);
       }
     } catch (err) {
       this.log.warn(`Failed to update Matter BooleanState for ${channelAddress}: ${String(err)}`);
@@ -1189,7 +1187,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
           await endpoint.updateAttribute('OnOff', 'onOff', onOff);
         }
       }
-      this.log.info(`DIMMER LEVEL event: updated Matter level for ${channelAddress} to ${matterLevel} (onOff=${onOff})`);
+      this.log.info(`${endpoint.deviceName} DIMMER LEVEL event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} level to ${matterLevel} (onOff=${onOff})`);
     } catch (err) {
       this.rpcEchoSuppress.delete(channelAddress);
       this.rpcEchoSuppress.delete(channelAddress + ':onoff');
@@ -1226,7 +1224,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const currentOccupied = typeof current === 'object' && current !== null && 'occupied' in current ? (current as { occupied: boolean }).occupied : false;
       if (currentOccupied !== occupied) {
         await endpoint.updateAttribute('OccupancySensing', 'occupancy', { occupied });
-        this.log.info(`MOTION_DETECTOR MOTION event: updated occupancy for ${channelAddress} to ${occupied}`);
+        this.log.info(`${endpoint.deviceName} MOTION_DETECTOR MOTION event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} occupancy to ${occupied}`);
       }
     } catch (err) {
       this.log.warn(`Failed to update Matter OccupancySensing for ${channelAddress}: ${String(err)}`);
@@ -1263,7 +1261,9 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const current = await endpoint.getAttribute('IlluminanceMeasurement', 'measuredValue');
       if (current !== measuredValue) {
         await endpoint.updateAttribute('IlluminanceMeasurement', 'measuredValue', measuredValue);
-        this.log.info(`MOTION_DETECTOR ILLUMINATION event: updated illuminance for ${channelAddress} to ${measuredValue} (${lux} lux)`);
+        this.log.info(
+          `${endpoint.deviceName} MOTION_DETECTOR ILLUMINATION event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} illuminance to ${measuredValue} (${lux} lux)`,
+        );
       }
     } catch (err) {
       this.log.warn(`Failed to update IlluminanceMeasurement for ${channelAddress}: ${String(err)}`);
@@ -1300,7 +1300,9 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         const current = await endpoint.getAttribute('TemperatureMeasurement', 'measuredValue');
         if (current !== measuredValue) {
           await endpoint.updateAttribute('TemperatureMeasurement', 'measuredValue', measuredValue);
-          this.log.info(`TEMPERATURE event: updated TemperatureMeasurement for ${channelAddress} to ${measuredValue} (${measuredValue / 100}°C)`);
+          this.log.info(
+            `${endpoint.deviceName} TEMPERATURE event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} TemperatureMeasurement to ${measuredValue} (${measuredValue / 100}°C)`,
+          );
         }
       } catch (err) {
         this.log.warn(`Failed to update TemperatureMeasurement for ${channelAddress}: ${String(err)}`);
@@ -1317,7 +1319,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         const current = await endpoint.getAttribute('IlluminanceMeasurement', 'measuredValue');
         if (current !== measuredValue) {
           await endpoint.updateAttribute('IlluminanceMeasurement', 'measuredValue', measuredValue);
-          this.log.info(`BRIGHTNESS event: updated illuminance for ${channelAddress} to ${measuredValue} (${lux} lux)`);
+          this.log.info(`${endpoint.deviceName} BRIGHTNESS event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} illuminance to ${measuredValue} (${lux} lux)`);
         }
       } catch (err) {
         this.log.warn(`Failed to update IlluminanceMeasurement for ${channelAddress}: ${String(err)}`);
@@ -1336,7 +1338,9 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const current = await humidityEndpoint.getAttribute('RelativeHumidityMeasurement', 'measuredValue');
       if (current !== measuredValue) {
         await humidityEndpoint.updateAttribute('RelativeHumidityMeasurement', 'measuredValue', measuredValue);
-        this.log.info(`HUMIDITY event: updated RelativeHumidityMeasurement for ${channelAddress} to ${measuredValue} (${measuredValue / 100}%)`);
+        this.log.info(
+          `${humidityEndpoint.deviceName} HUMIDITY event: updated ${humidityEndpoint.id}.${String(humidityEndpoint.number ?? '?')} RelativeHumidityMeasurement to ${measuredValue} (${measuredValue / 100}%)`,
+        );
       }
     } catch (err) {
       this.log.warn(`Failed to update RelativeHumidityMeasurement for ${channelAddress}: ${String(err)}`);
@@ -1375,7 +1379,9 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const current = await endpoint.getAttribute('SmokeCoAlarm', 'smokeState');
       if (current !== smokeState) {
         await endpoint.updateAttribute('SmokeCoAlarm', 'smokeState', smokeState);
-        this.log.info(`SMOKE_DETECTOR alarm event: updated smokeState for ${channelAddress} to ${smokeState} (alarm=${alarmActive})`);
+        this.log.info(
+          `${endpoint.deviceName} SMOKE_DETECTOR alarm event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} smokeState to ${smokeState} (alarm=${alarmActive})`,
+        );
       }
     } catch (err) {
       this.log.warn(`Failed to update SmokeCoAlarm for ${channelAddress}: ${String(err)}`);
@@ -1412,7 +1418,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const current = await endpoint.getAttribute('BooleanState', 'stateValue');
       if (current !== leakDetected) {
         await endpoint.updateAttribute('BooleanState', 'stateValue', leakDetected);
-        this.log.info(`ALARMSTATE event: updated water-leak stateValue for ${channelAddress} to ${leakDetected}`);
+        this.log.info(`${endpoint.deviceName} ALARMSTATE event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} water-leak stateValue to ${leakDetected}`);
       }
     } catch (err) {
       this.log.warn(`Failed to update BooleanState for ${channelAddress}: ${String(err)}`);
@@ -1451,7 +1457,9 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const current = await endpoint.getAttribute('BooleanState', 'stateValue');
       if (current !== closed) {
         await endpoint.updateAttribute('BooleanState', 'stateValue', closed);
-        this.log.info(`ROTARY_HANDLE_SENSOR STATE event: updated stateValue for ${channelAddress} to ${closed} (raw=${String(event.value)})`);
+        this.log.info(
+          `${endpoint.deviceName} ROTARY_HANDLE_SENSOR STATE event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} stateValue to ${closed} (raw=${String(event.value)})`,
+        );
       }
     } catch (err) {
       this.log.warn(`Failed to update BooleanState for rotary handle ${channelAddress}: ${String(err)}`);
@@ -1494,7 +1502,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const current = await endpoint.getAttribute('ElectricalPowerMeasurement', attr);
       if (current !== milliValue) {
         await endpoint.updateAttribute('ElectricalPowerMeasurement', attr, milliValue);
-        this.log.info(`POWERMETER ${datapoint} event: updated ${attr} for ${channelAddress} to ${milliValue} (${raw} raw)`);
+        this.log.info(`${endpoint.deviceName} POWERMETER ${datapoint} event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} ${attr} to ${milliValue} (${raw} raw)`);
       }
     } catch (err) {
       this.log.warn(`Failed to update ElectricalPowerMeasurement.${attr} for ${channelAddress}: ${String(err)}`);
@@ -1540,7 +1548,9 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const current = await endpoint.getAttribute('ElectricalPowerMeasurement', attr);
       if (current !== milliValue) {
         await endpoint.updateAttribute('ElectricalPowerMeasurement', attr, milliValue);
-        this.log.info(`ENERGIE_METER_TRANSMITTER ${datapoint} event: updated ${attr} for ${channelAddress} to ${milliValue} (${raw} raw)`);
+        this.log.info(
+          `${endpoint.deviceName} ENERGIE_METER_TRANSMITTER ${datapoint} event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} ${attr} to ${milliValue} (${raw} raw)`,
+        );
       }
     } catch (err) {
       this.log.warn(`Failed to update ElectricalPowerMeasurement.${attr} for ${channelAddress}: ${String(err)}`);
@@ -1578,7 +1588,9 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         const current = await endpoint.getAttribute('Thermostat', 'localTemperature');
         if (current !== measuredValue) {
           await endpoint.updateAttribute('Thermostat', 'localTemperature', measuredValue);
-          this.log.info(`THERMOSTAT ACTUAL_TEMPERATURE event: updated localTemperature for ${channelAddress} to ${measuredValue} (${measuredValue / 100}°C)`);
+          this.log.info(
+            `${endpoint.deviceName} THERMOSTAT ACTUAL_TEMPERATURE event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} localTemperature to ${measuredValue} (${measuredValue / 100}°C)`,
+          );
         }
       } catch (err) {
         this.log.warn(`Failed to update Thermostat localTemperature for ${channelAddress}: ${String(err)}`);
@@ -1599,7 +1611,9 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         await endpoint.updateAttribute('Thermostat', 'occupiedHeatingSetpoint', setpointValue);
         this.rpcEchoSuppress.set(channelAddress + ':thermMode', matterMode);
         await endpoint.updateAttribute('Thermostat', 'systemMode', matterMode);
-        this.log.info(`THERMOSTAT SET_POINT_TEMPERATURE event: updated setpoint for ${channelAddress} to ${setpointValue} (${setpointDegC}°C) mode=${matterMode}`);
+        this.log.info(
+          `${endpoint.deviceName} THERMOSTAT SET_POINT_TEMPERATURE event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} setpoint to ${setpointValue} (${setpointDegC}°C) mode=${matterMode}`,
+        );
       }
     } catch (err) {
       this.rpcEchoSuppress.delete(channelAddress + ':heatingSetpoint');
@@ -1650,7 +1664,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       if (current !== lockState) {
         await endpoint.updateAttribute('DoorLock', 'lockState', lockState);
         this.log.info(
-          `KEYMATIC ${datapoint} event: updated lockState for ${channelAddress} to ${lockState} (state=${flags.state} uncertain=${flags.uncertain} error=${flags.error} direction=${flags.direction})`,
+          `${endpoint.deviceName} KEYMATIC ${datapoint} event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} lockState to ${lockState} (state=${flags.state} uncertain=${flags.uncertain} error=${flags.error} direction=${flags.direction})`,
         );
       }
     } catch (err) {
@@ -1733,7 +1747,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       this.rpcEchoSuppress.set(channelAddress + ':blindTilt', matterTilt);
       await endpoint.updateAttribute('WindowCovering', 'currentPositionTiltPercent100ths', matterTilt);
       await endpoint.updateAttribute('WindowCovering', 'targetPositionTiltPercent100ths', matterTilt);
-      this.log.info(`BLIND LEVEL_2 event: updated tilt for ${channelAddress} to ${matterTilt}/10000 (hmTilt=${hmTilt})`);
+      this.log.info(`${endpoint.deviceName} BLIND LEVEL_2 event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} tilt to ${matterTilt}/10000 (hmTilt=${hmTilt})`);
     } catch (err) {
       this.rpcEchoSuppress.delete(channelAddress + ':blindTilt');
       this.log.warn(`Failed to update Matter WindowCovering tilt for ${channelAddress}: ${String(err)}`);
@@ -1871,13 +1885,17 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         // A Matter command is in flight (DIRECTION/WORKING not yet received). Only update the current
         // position so the Home app sees the blind starting to move; preserve the commanded target.
         await endpoint.updateAttribute('WindowCovering', 'currentPositionLiftPercent100ths', position);
-        this.log.info(`BLIND LEVEL event: updated currentPosition for ${channelAddress} to ${position}/10000 (hmLevel=${hmLevel}, target preserved)`);
+        this.log.info(
+          `${endpoint.deviceName} BLIND LEVEL event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} currentPosition to ${position}/10000 (hmLevel=${hmLevel}, target preserved)`,
+        );
       } else {
         // No command in flight: update both current and target (normal status update or final position).
         // Suppress the echo that subscribeAttribute on targetPositionLiftPercent100ths would send back.
         this.rpcEchoSuppress.set(channelAddress + ':blindTarget', position);
         await endpoint.setWindowCoveringTargetAndCurrentPosition(position);
-        this.log.info(`BLIND LEVEL event: updated WindowCovering for ${channelAddress} to ${position}/10000 (hmLevel=${hmLevel})`);
+        this.log.info(
+          `${endpoint.deviceName} BLIND LEVEL event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} WindowCovering to ${position}/10000 (hmLevel=${hmLevel})`,
+        );
       }
     } catch (err) {
       this.rpcEchoSuppress.delete(channelAddress + ':blindTarget');
@@ -2070,7 +2088,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const currentChargeLevel = await endpoint.getAttribute('PowerSource', 'batChargeLevel');
       if (currentChargeLevel !== chargeLevel) {
         await endpoint.updateAttribute('PowerSource', 'batChargeLevel', chargeLevel);
-        this.log.info(`Battery state changed from ${source}: ${deviceAddress} low=${batteryLow} batChargeLevel=${chargeLevel}`);
+        this.log.info(`${endpoint.deviceName} LOWBAT event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} batChargeLevel to ${chargeLevel} (low=${batteryLow})`);
       }
     } catch (err) {
       this.log.debug(`Failed to update battery charge level for ${deviceAddress}: ${String(err)}`);
@@ -2081,7 +2099,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     try {
       const currentReachable = await device.getAttribute('BridgedDeviceBasicInformation', 'reachable');
       if (currentReachable !== reachable) {
-        this.log.info(`Device reachability changed: ${deviceAddress} reachable=${reachable}`);
+        this.log.info(`${device.deviceName} UNREACH event: updated ${device.id}.${String(device.number ?? '?')} reachable to ${reachable}`);
         await device.updateAttribute('BridgedDeviceBasicInformation', 'reachable', reachable);
       }
     } catch (err) {

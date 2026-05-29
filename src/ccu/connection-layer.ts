@@ -230,7 +230,7 @@ export class CcuConnectionLayer extends EventEmitter {
     }
 
     const started = Date.now();
-    this.log.debug(`RPC call -> iface=${iface} method=${method} timeoutMs=${timeoutMs} params=${this.formatPayload(parameters)}`);
+    this.log.info(`RPC -> iface=${iface} method=${method} params=${this.formatPayload(parameters)}`);
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -488,8 +488,9 @@ export class CcuConnectionLayer extends EventEmitter {
     return compact.length > 200 ? `${compact.slice(0, 200)}\u2026` : compact;
   }
 
-  private handleRpcCallback(method: string, parameters: unknown[]): unknown {
-    if (this.config.logging.logRpcEvents) {
+  private handleRpcCallback(method: string, parameters: unknown[], fromMulticall = false): unknown {
+    // Log all top-level callbacks except 'event' — events get their own RPC event <- line below.
+    if (!fromMulticall && method !== 'event' && this.config.logging.logRpcEvents) {
       this.log.debug(`RPC callback <- method=${method} params=${this.formatPayload(parameters)}`);
     }
     this.emit('rpcCallback', method, parameters);
@@ -508,7 +509,6 @@ export class CcuConnectionLayer extends EventEmitter {
       }
       // PONG events only serve the watchdog — do not forward to subscribers.
       if (typeof channel === 'string' && channel.includes('CENTRAL') && datapoint === 'PONG') {
-        if (this.config.logging.logRpcEvents) this.log.debug(`RPC PONG <- iface=${iface ?? 'unknown'}`);
         return '';
       }
       if (this.config.logging.logRpcEvents) {
@@ -541,7 +541,7 @@ export class CcuConnectionLayer extends EventEmitter {
             return '';
           }
         }
-        this.handleRpcCallback(callMethod, callParams);
+        this.handleRpcCallback(callMethod, callParams, true);
         return '';
       });
     }
@@ -766,7 +766,6 @@ export class CcuConnectionLayer extends EventEmitter {
         const callbackUrl = this.getCallbackUrl(definition.protocol);
         const initId = this.getInterfaceInitId(iface);
         this.initIdToInterface.set(initId, iface);
-        this.log.info(`RPC init -> iface=${iface} callbackUrl=${callbackUrl} initId=${initId}`);
         try {
           await this.callRpc(iface, 'init', [callbackUrl, initId]);
           this.log.info(`RPC init done <- iface=${iface}`);
@@ -829,7 +828,6 @@ export class CcuConnectionLayer extends EventEmitter {
     const pingTimeout = this.getPingTimeoutMs();
     const last = this.lastRpcEventTime.get(iface) ?? Date.now();
     const elapsed = Date.now() - last;
-    this.log.debug(`Ping watchdog -> iface=${iface} elapsedMs=${elapsed} timeoutMs=${pingTimeout}`);
 
     if (elapsed >= pingTimeout) {
       // Full timeout exceeded — re-subscribe.
@@ -851,7 +849,6 @@ export class CcuConnectionLayer extends EventEmitter {
 
     if (elapsed >= pingTimeout / 2) {
       // Half the timeout elapsed — send a ping to keep the subscription alive.
-      this.log.debug(`Ping send -> iface=${iface}`);
       this.callRpc(iface, 'ping', ['mb']).catch((err: unknown) => {
         this.log.warn(`Ping failed <- iface=${iface} error=${String(err)}`);
       });
@@ -955,7 +952,7 @@ export class CcuConnectionLayer extends EventEmitter {
     }
 
     const started = Date.now();
-    this.log.debug('ReGa call -> method=getValues');
+    this.log.info('ReGa call -> method=getValues');
 
     try {
       const raw = await new Promise<Array<{ name: string; value: unknown; ts: string }>>((resolve, reject) => {
@@ -997,7 +994,8 @@ export class CcuConnectionLayer extends EventEmitter {
         datapoints.push({ iface, channel, datapoint, value: dp.value, uncertain });
       }
 
-      this.log.debug(`ReGa result <- method=getValues durationMs=${Date.now() - started} total=${raw.length} parsed=${datapoints.length}`);
+      this.log.info(`ReGa result <- method=getValues durationMs=${Date.now() - started} total=${raw.length} parsed=${datapoints.length}`);
+
       return datapoints;
     } catch (err) {
       this.log.warn(`fetchInitialValues failed: ${String(err)}`);
