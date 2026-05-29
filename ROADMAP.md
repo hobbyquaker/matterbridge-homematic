@@ -74,11 +74,17 @@ Because the restart is Matterbridge-managed, the UX improvement here comes from 
 **Effort: Low**  
 **Status: Not started**
 
-When a user renames a device or channel in the Homematic CCU ReGa interface and then restarts the plugin, several things currently go wrong:
+When a user renames a device or channel in the Homematic CCU ReGa interface and then restarts the plugin, several things currently go wrong. The root cause differs by bug: some are display-only (Matter controller sees a stale name), others are functional (a previously-disabled channel silently re-enables itself after a rename).
+
+**The key insight — `selectFrom: 'serial'` eliminates the functional bugs for UI-driven users**
+
+Users interact with the blacklist/whitelist exclusively through the Matterbridge device-list checkboxes, not by editing the config JSON by hand. When the plugin calls `setSelectDevice(selectSerial, displayName, ...)` and the schema declares the lists with `selectFrom: 'serial'`, the Matterbridge UI writes the stable `selectSerial` key (e.g. `HmIP-RF:CONTACT:OEQ0854602:1`) into the blacklist on every checkbox toggle — regardless of what the channel is currently named in ReGa. Because `selectSerial` is derived from the interface name, channel type label, and Homematic address, it is unaffected by ReGa renames and unaffected by toggling the ReGa name-sync option on or off.
+
+This means that for any installation where device toggling is done through the UI, Bugs 3 and 4 below are prevented at the source. The `selectFrom: 'serial'` schema change is the **primary fix** and can be delivered as a one-liner alongside or as part of the UX-1 schema work.
 
 **Bug 1 — `refreshDeviceNames` never finds any device (wrong map key)**
 
-`refreshDeviceNames` builds a lookup map keyed by `channel.address` (e.g. `OEQ0854602:1`) but iterates `this.getDevices()` and looks up `device.originalId`, which is the endpoint id string `hm-OEQ0854602-1`. These never match, so the method is a permanent no-op.
+`refreshDeviceNames` builds a lookup map keyed by `channel.address` (e.g. `OEQ0854602:1`) but iterates `this.getDevices()` and looks up `device.originalId`, which is the endpoint id string `hm-OEQ0854602-1`. These never match, so the method is a permanent no-op: ReGa name changes are never propagated back to Matter or to the Matterbridge UI after the first startup.
 
 Fix: iterate `this.channelAddressToDevice` entries instead; both the address key and the device are then directly available.
 
@@ -88,48 +94,49 @@ Even if Bug 1 were fixed, `refreshDeviceNames` only assigns `device.deviceName` 
 
 Fix: add the `updateAttribute` call (wrapped in try/catch since the cluster may be absent for certain endpoint types) and make the method `async`.
 
-**Bug 3 — Stale blacklist/whitelist entries after rename**
+**Bug 3 — Stale blacklist entries after rename (legacy concern only)**
 
-`isChannelEnabled` resolves a device against four candidates: `selectSerial`, `channel.address`, `channel.name` (current), and `displayName`. If a user disabled a channel when its name was `"Kitchen Light"` and that name was stored in the blacklist, renaming the channel to `"Küchenlicht"` on ReGa causes the old `"Kitchen Light"` entry to become an orphan. It no longer matches any candidate, so the device silently reappears as enabled.
+`isChannelEnabled` resolves a device against four candidates: `selectSerial`, `channel.address`, `channel.name` (current), and `displayName`. If a user disabled a channel when its name was `"Kitchen Light"` and a name-based entry was stored in the blacklist, renaming the channel to `"Küchenlicht"` on ReGa causes the old entry to become an orphan. It no longer matches any candidate, so the device silently reappears as enabled.
 
-Fix: in `refreshDeviceNames`, when a name change is detected, scan `whiteList` and `blackList` for entries equal to `oldName` and replace them with the stable `selectSerial` key. Persist the config if any migrations occurred.
+With `selectFrom: 'serial'` in place, the UI never writes name-based entries, so this scenario only arises for users who have existing name entries from a previous install (before the schema fix) or who edit the config JSON by hand. A one-time migration on startup — scan `whiteList` / `blackList` for any entry that matches a known channel's `name` or `address` and replace it with the corresponding `selectSerial` — cleans up legacy installations.
 
-**Bug 4 — `syncChannelListEntriesWithRegaNames` migrates in the wrong direction**
+**Bug 4 — `syncChannelListEntriesWithRegaNames` migrates in the wrong direction (should be removed)**
 
-This method finds address-format entries in the blacklist (e.g. `OEQ0854602:1`) and migrates them to the current ReGa name (e.g. `"Kitchen Light"`). Migrating to names creates new unstable entries that will become orphans after the next rename.
+This method finds address-format entries in the blacklist (e.g. `OEQ0854602:1`) and migrates them to the current ReGa name (e.g. `"Kitchen Light"`). Migrating to names creates new unstable entries that become orphans after the next rename — the opposite of what we want.
 
-Fix: migrate to `selectSerial` (e.g. `HmIP-RF:CONTACT:OEQ0854602:1`) instead of to the name. This requires adding `type` to the channel Pick type accepted by the method.
+Fix: remove this migration entirely. With `selectFrom: 'serial'`, no new address-format or name-format entries are ever created by UI actions. For the legacy migration in Bug 3, convert directly to `selectSerial` rather than going through names.
 
----
+**Implementation order:**
 
-**Alternative approaches (changes on the Matterbridge side)**
+1. **`selectFrom: 'serial'` in `matterbridge-homematic.schema.json`** (part of UX-1 schema work) — prevents name-based entries from being created by the UI going forward.
+2. **Bug 4 fix: remove `syncChannelListEntriesWithRegaNames`** — stop creating new name entries from address entries.
+3. **Bug 3 fix: one-time legacy migration** — on startup, replace any blacklist/whitelist entries that match a known channel name or address with the corresponding `selectSerial`. Persist if any entries were migrated.
+4. **Bug 1 fix: correct `refreshDeviceNames` key lookup** — iterate `channelAddressToDevice` instead of `getDevices()`.
+5. **Bug 2 fix: propagate name to Matter via `nodeLabel`** — add `updateAttribute('BridgedDeviceBasicInformation', 'nodeLabel', newName)` in `refreshDeviceNames`.
 
-| Approach                                                       | Description                                                                                                                                                                                                                                                                                                   | Feasibility                                                                                                          |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `selectFrom: 'serial'` in schema                               | If `blackList`/`whiteList` are declared with `selectFrom: 'serial'`, the Matterbridge UI device-toggle action writes the stable `selectSerial` key instead of a name. This eliminates name-based entries at the source and makes Bug 3 a rare edge case. Requires schema change only (no plugin code change). | High — low effort, see UX-1 for full schema work                                                                     |
-| Matterbridge: rename callback                                  | Matterbridge could emit `onDeviceRenamed(serial, oldName, newName)` so plugins can react to Matter-side renames and sync them back to the CCU via ReGa. Currently not part of the platform API.                                                                                                               | Low — would require upstream Matterbridge PR                                                                         |
-| Matterbridge: `updateDeviceName(serial, name)` platform method | A dedicated method that handles `nodeLabel` update, UI label update, and storage key migration atomically. Would remove the need for plugins to orchestrate these three steps separately.                                                                                                                     | Low — would require upstream Matterbridge PR                                                                         |
-| Store per-channel previous name in plugin config               | Write the last-known ReGa name into plugin storage (alongside or instead of the blacklist). On each startup, compare against the current ReGa name to detect renames before device registration, enabling blacklist key migration before `validateDevice` is first called.                                    | Medium — avoids the race condition between background `channelsUpdated` and `discoverDevices`; adds persistent state |
+Steps 1–3 fix the functional (enable/disable) side. Steps 4–5 are display-only improvements for users who rename channels in ReGa and want Matter controllers to reflect the new names.
 
 **Implementation notes:**
 
 - `refreshDeviceNames` is only meaningful on subsequent startups (when the cache is populated and `channelsUpdated` fires in the background after device registration). On first startup the devices are not yet registered when the event fires, so it is correctly a no-op.
 - The `channelsUpdated` event handler must use `void this.refreshDeviceNames(updatedChannels)` once the method is made async.
-- The `skippedNoName` counter in `syncChannelListEntriesWithRegaNames` becomes irrelevant once migration targets `selectSerial` (which does not depend on the ReGa name), but can be retained or removed.
+- The `skippedNoName` counter in `syncChannelListEntriesWithRegaNames` is removed along with the method itself.
 
 ---
 
 #### UX-2 — Auto-disable newly introduced channels
 
+**Done:** [`2e0d12d`](https://github.com/hobbyquaker/matterbridge-homematic/commit/2e0d12d)
+
 **Effort: Low**  
-**Status: Not started**
+**Status: Done**
 
 When a user activates a new CCU interface in the plugin config (e.g. enables `HmIP-RF` where only `BidCos-RF` was active before) and restarts Matterbridge, the plugin discovers all channels on that interface and registers them as enabled by default. On an installation with 60+ HmIP devices this floods the Matter controller with new endpoints the user never chose to expose. The user wants new channels to start disabled and be explicitly opted-in, without affecting the enable/disable status of channels that were already known.
 
 **The core invariant:**
 
-- A channel that has ever been registered (i.e. `setSelectDevice` was called for its `selectSerial` in a previous run) is *known* → its enabled/disabled status must not be changed.
-- A channel that has no existing `selectDevice` record anywhere (neither canonical `selectSerial` nor any legacy key) is *new* → it should be added to the blacklist before registration so it starts disabled.
+- A channel that has ever been registered (i.e. `setSelectDevice` was called for its `selectSerial` in a previous run) is _known_ → its enabled/disabled status must not be changed.
+- A channel that has no existing `selectDevice` record anywhere (neither canonical `selectSerial` nor any legacy key) is _new_ → it should be added to the blacklist before registration so it starts disabled.
 
 **Detection algorithm**
 
@@ -187,8 +194,154 @@ An alternative is to make `false` the default (always auto-disable new channels 
 - The `isFirstInstall` snapshot must be taken once before the outer loop in `discoverDevices()`, not per channel.
 - `cleanupDisabledInterfaceChannels` is called before `discoverDevices()` re-registers channels. The blacklist entries written by auto-disable should not be swept by that cleanup (they are keyed by `selectSerial`, which includes the interface prefix, so the cleanup's interface-prefix filter correctly leaves them alone).
 - `channelOverrides` with `enabled: true` on a specific address takes precedence over the blacklist via `isChannelEnabled()`. Users can whitelist individual channels this way even when the interface-level default is disabled — no extra code needed.
-- Do not auto-blacklist channels in the *device mapper pre-pass* independently for each `mappedChannel`; use the primary channel's `selectSerial` as the single gating key for the whole composed device (same as the existing `setSelectDevice` call in that loop).
+- Do not auto-blacklist channels in the _device mapper pre-pass_ independently for each `mappedChannel`; use the primary channel's `selectSerial` as the single gating key for the whole composed device (same as the existing `setSelectDevice` call in that loop).
 - Log a single summary line: `Auto-disabled N new channel(s) from interface HmIP-RF (newDevicesDefaultEnabled=false)`.
+
+---
+
+#### TEST-0 — System tests with Homematic simulator
+
+**Effort: Medium**  
+**Status: Not started**  
+**Prior art:** https://github.com/hobbyquaker/hm-simulator  
+**Reusable prompt:** `hm-simulator-modernize-and-integrate.prompt.md` (VS Code user prompts folder)
+
+The existing Vitest suite tests channel mappers, device mappers, config helpers, and individual units in isolation but cannot exercise the full plugin lifecycle against a real CCU protocol. System tests would run the entire plugin stack — `CcuConnectionLayer`, RPC handshake, channel discovery, endpoint registration, and bidirectional value routing — against a lightweight in-process simulator instead of a real CCU. This catches integration bugs that unit tests miss: wrong datapoint names, mismatched RPC types, broken wiring between Matter attribute changes and CCU `setValue` calls, and stale Matter state after incoming RPC events.
+
+**hm-simulator capabilities (as of last commit 38bc644):**
+
+`hm-simulator` can be used as a Node.js module (`HmSim` class from `sim.js`). It spins up:
+
+- A **binrpc** server (default port 2001) simulating the BidCos-RF / `rfd` interface
+- An **xmlrpc** server (default port 2010) simulating the HmIP-RF / `hmipserver` interface
+- An optional **ReGa HTTP** server for script-based channel name and variable queries
+
+Implemented RPC methods (incoming from client): `init`, `ping`, `listDevices`, `getParamsetDescription`, `setValue`, `system.listMethods`.
+
+Outgoing calls to registered clients: `newDevices`, `deleteDevices`, `event`, `system.multicall`.
+
+The `api` field is a Node.js `EventEmitter`. External test code can listen on `api.on('setValue', (iface, address, datapoint, value) => ...)` to observe when the plugin sends a value to the CCU, and can trigger inbound state changes by calling the internal `setValue` function (exposed via `api.emit('setValue', ...)`).
+
+All servers are shut down cleanly by calling `hmSim.close()`.
+
+**Known limitations / gaps that tests must work around:**
+
+- No incoming `getParamset` — our plugin calls `getParamsetDescription` during startup (`primeBatteryHintsFromRpc`); tests must either inject a pre-populated `paramsets.json`-format fixture or disable battery-hint priming for the test run.
+- The `hmip` interface ping handler is a deliberate no-op in the simulator (upstream CCU bug workaround); this is harmless.
+- A minor bug in `setValue` value-range validation (`ps[datapoint].MAx` instead of `.MAX`) causes range checks to silently pass; this does not affect test correctness since we are not testing the simulator's validation, only the plugin's behavior.
+- The ReGa sim supports only a fixed set of script identifiers (`!# devices.rega`, `!# variables.rega`, etc.); channel name resolution will return whatever static fixture data is supplied.
+- `hm-simulator` is a CommonJS module (no ESM exports). Import via `createRequire` in the Vitest test setup or wrap in a thin ESM adapter.
+
+**Device fixtures for tests:**
+
+Each system test instantiates `HmSim` with a minimal device list covering only the channel types under test. Example fixture for a SWITCH channel (HmIP-BSM):
+
+```ts
+const devices = {
+  rfd: { devices: [] },
+  hmip: {
+    devices: [
+      { ADDRESS: 'TEST000001',   TYPE: 'HmIP-BSM', PARENT: '',             PARENT_TYPE: '',        PARAMSETS: ['MASTER', 'VALUES'], VERSION: 1, FIRMWARE: '2.4.0', FLAGS: 1, CHILDREN: ['TEST000001:1', 'TEST000001:2'], ... },
+      { ADDRESS: 'TEST000001:1', TYPE: 'SWITCH',    PARENT: 'TEST000001',   PARENT_TYPE: 'HmIP-BSM', PARAMSETS: ['VALUES'],          VERSION: 1, DIRECTION: 1, ... },
+    ],
+  },
+};
+```
+
+**Four test scenarios:**
+
+**1 — Init process**
+
+Verify that `CcuConnectionLayer.connect()` completes the full RPC handshake:
+
+- Plugin calls `init` on the simulator → simulator calls back `listDevices` on the plugin → plugin responds with its current device list → simulator calls `newDevices` with the configured device set.
+- Assert that `CcuConnectionLayer.discoverChannels()` returns the expected channel addresses and types.
+- Assert that the `waitForNewDevices` promise resolves within a reasonable timeout once the `newDevices` callback fires.
+
+**2 — Endpoint creation on newDevices**
+
+Run `TemplatePlatform.onStart()` with the plugin configured to point at the simulator's ports. After discovery completes:
+
+- Assert that `registerDevice` was called for each expected channel.
+- Assert that the created `MatterbridgeEndpoint` instances have the correct device type, cluster servers, and serial numbers.
+- Assert that `setSelectDevice` was called with the correct `selectSerial` for each channel.
+
+**3 — setValue calls from the Matter side**
+
+After startup, simulate a Matter controller writing an attribute (e.g., `onOff = true` on a SWITCH endpoint):
+
+- Use `endpoint.executeCommandHandler('on', ...)` or `updateAttribute('OnOff', 'onOff', true)` to trigger the Matter → CCU write path.
+- Listen on `hmSim.api.on('setValue', ...)` and assert that the simulator received `setValue('hmip', 'TEST000001:1', 'STATE', true)`.
+- Cover at least: OnOff SWITCH, level/brightness DIMMER, and position BLIND.
+
+**4 — Matter attribute updates on incoming RPC events**
+
+Trigger an inbound state change from the simulator:
+
+- Call `hmSim.api.emit('setValue', 'hmip', 'TEST000001:1', 'STATE', false)` (or use a behavior script) to fire an `event` multicall from the simulator to all registered clients.
+- Assert that the corresponding `MatterbridgeEndpoint` attribute is updated: `getAttribute('OnOff', 'onOff') === false`.
+- Cover at least: boolean state change (SWITCH), numeric value change (DIMMER level, temperature), and contact open/close (SHUTTER_CONTACT).
+
+**Test infrastructure design:**
+
+```ts
+// vitest/system/helpers.ts
+
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const HmSim = require('hm-simulator/sim.js');
+
+export function startSim(devices, regaOptions?) {
+  const sim = new HmSim({
+    devices,
+    config: {
+      listenAddress: '127.0.0.1',
+      binrpcListenPort: 0,   // ephemeral — read back from sim.rfdServer after bind
+      xmlrpcListenPort: 0,   // ephemeral
+    },
+    rega: regaOptions,
+  });
+  return sim;
+}
+```
+
+> Note: `hm-simulator` does not yet support port `0` (ephemeral) out of the box. Tests must either use a fixed, well-known test port range (e.g. 52001 / 52010) or patch the simulator to report the bound port. A thin wrapper that picks a random available port before constructing the sim instance is the pragmatic short-term solution.
+
+**Placement:** system tests live in `vitest/system/` and are tagged so they can be excluded from the fast unit-test run (`vitest run --project unit`). They require no real network access — the simulator binds only to `127.0.0.1`.
+
+**Dependencies to add (devDependencies):**
+
+- `hm-simulator` — the simulator package
+- Possibly a forked/patched version if the upstream `MAx` typo or the missing ephemeral-port support blocks test reliability
+
+**Open questions before starting:**
+
+- Can the existing `CcuConnectionLayer` constructor accept a config with custom host/port, or does it always read from `PlatformConfig.host` / `PlatformConfig.rpcPort`? Confirm that it is straightforward to point the plugin at the simulator without production-code changes.
+- Does `primeBatteryHintsFromRpc` need `getParamset` to be implemented in the simulator, or is it safe to stub it (return an empty paramset description) without breaking discovery?
+- Confirm whether hm-simulator's `newDevices` callback fires synchronously within the `init` → `listDevices` → `newDevices` round-trip, or whether additional scheduling is needed in the test to await it.
+
+**Implementation backlog (ordered):**
+
+Prerequisites:
+- [ ] **P-1** — Modernise `hm-simulator`: TypeScript, dual CJS+ESM output, Vitest, ESLint flat config, Prettier, ephemeral port 0 support, typed public API. Keep full backward compat (`require('hm-simulator/sim.js')`, constructor shape, `api` EventEmitter, `close()`). Follow the reusable prompt above.
+- [ ] **P-2** — Add `hm-simulator` as a `devDependency` in `matterbridge-homematic/package.json`.
+- [ ] **P-3** — Split `vite.config.ts` into `unit` and `system` Vitest projects so `vitest run --project unit` stays fast.
+
+Test infrastructure:
+- [ ] **I-1** — Create `vitest/system/helpers.ts`: `startSim()`, `makePluginConfig()`, `startPlatform()`, `stopPlatform()`, `stopSim()`, `waitForEvent()`.
+- [ ] **I-2** — Create device fixtures in `vitest/system/fixtures/`: `switch-hmip-bsm.ts`, `dimmer-hmip-pdm.ts`, `contact-hmip-swdo.ts`.
+- [ ] **I-3** — Confirm or add `CcuConnectionLayer` config keys for custom host/port so the plugin can point at the simulator without production-code changes.
+
+System test files:
+- [ ] **T-1** — `vitest/system/init.test.ts`: RPC handshake and channel discovery.
+- [ ] **T-2** — `vitest/system/registration.test.ts`: endpoint + `setSelectDevice` assertions after full `onStart()`.
+- [ ] **T-3** — `vitest/system/matter-to-ccu.test.ts`: Matter attribute write → simulator `setValue` event.
+- [ ] **T-4** — `vitest/system/ccu-to-matter.test.ts`: simulator inbound event → Matter attribute update.
+
+Documentation + CI:
+- [ ] **D-1** — `vitest/system/README.md` explaining local execution.
+- [ ] **D-2** — Update this roadmap entry to in-progress once T-1 is merged.
+- [ ] **D-3** — Separate GitHub Actions CI job for system tests.
 
 ---
 
