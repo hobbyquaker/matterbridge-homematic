@@ -9,7 +9,7 @@ import { promises as fs } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
-import { getMatchingMainsPoweredPrefix, isAlwaysMainsPoweredDeviceType } from './device-power.js';
+import { isAlwaysMainsPoweredDeviceType } from './device-power.js';
 import {
   CcuChannelInfo,
   CcuConnectionConfig,
@@ -605,7 +605,6 @@ export class CcuConnectionLayer extends EventEmitter {
       const typeValue = (entry as Record<string, unknown>).TYPE;
       const channelType = typeof typeValue === 'string' ? typeValue : undefined;
       const deviceType = deviceTypeByAddress.get(deviceAddress) ?? channelType;
-      const mainsMatchPrefix = getMatchingMainsPoweredPrefix(deviceType);
       const hasLowBatMarker = this.containsLowBatMarker(entry);
       const batteryHint = isAlwaysMainsPoweredDeviceType(deviceType) ? false : hasLowBatMarker ? true : undefined;
       const previous = this.deviceBatteryHints.get(deviceAddress);
