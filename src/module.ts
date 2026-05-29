@@ -980,7 +980,10 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const current = await endpoint.getAttribute('PowerSource', 'batPercentRemaining');
       if (current !== batPercentRemaining) {
         await endpoint.updateAttribute('PowerSource', 'batPercentRemaining', batPercentRemaining);
-        this.log.info(`${endpoint.deviceName} OPERATING_VOLTAGE event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} batPercentRemaining to ${batPercentRemaining} (${voltage}V ${pct}%)`);      }
+        this.log.info(
+          `${endpoint.deviceName} OPERATING_VOLTAGE event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} batPercentRemaining to ${batPercentRemaining} (${voltage}V ${pct}%)`,
+        );
+      }
     } catch (err) {
       this.log.debug(`Failed to update batPercentRemaining for ${deviceAddress}: ${String(err)}`);
     }

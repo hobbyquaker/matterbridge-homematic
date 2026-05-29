@@ -7,6 +7,68 @@
 
 ### Todo
 
+#### UX-1 — Dynamic config reload and device-selection integration
+
+**Effort: Medium**  
+**Status: FURTHER INVESTIGATION NEEDED** — The device-selection flow was traced through Matterbridge source (`saveConfigFromPlugin` does not call `onConfigChanged`), but the schema-level `whiteList`/`blackList` + `selectFrom` convention and the exact `validateDevice` contract were not verified on a running instance. Confirm these details before starting implementation.
+
+Currently any config change or device enable/disable in the Matterbridge UI requires a full Matterbridge restart before taking effect. Matterbridge already provides the API hooks to improve this significantly.
+
+**What Matterbridge provides:**
+
+| Hook / API                                       | What it does                                                                    |
+| ------------------------------------------------ | ------------------------------------------------------------------------------- |
+| `onConfigChanged(config)`                        | Called by Matterbridge when the plugin's schema-form config is saved in the UI  |
+| `wssSendRestartRequired(snackbar, fixed)`        | Push a "restart required" banner to the UI when a change cannot be applied live |
+| `wssSendSnackbarMessage(msg, timeout, severity)` | Confirm to the user that a live change was applied                              |
+| `setSelectDevice(serial, name, ...)`             | Register a device in the Matterbridge per-device toggle UI                      |
+| `validateDevice(serial)`                         | Returns `true` when a device is enabled by the user                             |
+| `unregisterDevice(ep)` / `registerDevice(ep)`    | Add / remove endpoints at runtime without restarting                            |
+
+**Situation for device enable/disable:**
+
+When a user toggles a device in the Matterbridge UI, the actual flow is:
+
+1. Matterbridge modifies the plugin's in-memory `config.whiteList` / `config.blackList` arrays.
+2. Calls `saveConfigFromPlugin(plugin, restartRequired=true)` — writes config to disk, sets `plugin.restartRequired = true`.
+3. Shows the "restart required" snackbar in the lower right.
+4. **`onConfigChanged` is NOT called** — there is no plugin callback for device selection changes.
+
+This means restart cannot be avoided from the plugin side using the current Matterbridge API. The UX improvement is to integrate correctly so the system works and the restart is at least deterministic and fast:
+
+1. The plugin's schema.json must declare `whiteList` and `blackList` arrays with the `selectFrom` field set to `'serial'` or `'name'` so Matterbridge knows which key to use when toggling a device.
+2. Call `setSelectDevice(channel.address, channel.name, ...)` for every discovered channel during `discoverDevices()`. This makes device toggles appear in the Matterbridge UI (currently no channel is registered there at all).
+3. Call `validateDevice(channel.address)` (or `validateDevice(channel.name)`) before calling `registerDevice(endpoint)`. Disabled devices are then skipped on every startup/restart without code changes.
+
+Because the restart is Matterbridge-managed, the UX improvement here comes from (a) making device toggles visible at all, and (b) keeping restarts fast (see PERF-0 for paramset caching which reduces startup RPC load).
+
+**Situation for config form changes:**
+
+`onConfigChanged` is never overridden today — config saves silently do nothing until the user manually restarts. The following split makes sense:
+
+| Config change                                | Live action                                                                    | Restart needed? |
+| -------------------------------------------- | ------------------------------------------------------------------------------ | --------------- |
+| `switchMatterType` override for a channel    | `unregisterDevice` old endpoint, re-map channel, `registerDevice` new endpoint | No              |
+| Adding / removing a `channelOverrides` entry | Same as above for the affected channel                                         | No              |
+| `initialValuesFromRega` toggle               | Start or stop the initial-value fetch sequence                                 | No              |
+| `regaEnabled` toggle                         | Reconnect or disable ReGa client                                               | No              |
+| CCU host / interface list / port changes     | Call `wssSendRestartRequired(true, true)` and return                           | Yes             |
+| Any other connection-layer parameter         | `wssSendRestartRequired(true, true)`                                           | Yes             |
+
+**Implementation plan:**
+
+1. **`setSelectDevice` + `validateDevice`** — call in `discoverDevices()`: register each channel with `setSelectDevice` before (re-)registering the endpoint; guard `registerDevice` with `validateDevice`.
+2. **`onConfigChanged` handler** — compare old `this.config` against the new `config` argument. If any connection-level key changed, call `wssSendRestartRequired(true, true)` and return. Otherwise diff the `channelOverrides` array and call `unregisterDevice` / re-map / `registerDevice` for each affected channel; update `this.config` and call `wssSendSnackbarMessage('Config applied', 3000, 'success')`.
+3. **Re-map helper** — extract the per-channel re-registration logic from `discoverDevices()` into a private method so it can be called from both `discoverDevices()` and `onConfigChanged`.
+
+**Design constraints:**
+
+- The `channelAddressToDevice`, `deviceAddressToDevice`, `mainsPoweredDevices`, and `discoveredChannels` maps must be kept consistent during live re-registration. Update them atomically as part of the `unregister → re-map → register` cycle.
+- RPC event subscriptions wired via `subscribeAttribute` in `discoverDevices()` are scoped to the endpoint object. They are garbage-collected when `unregisterDevice` removes the endpoint, so re-wiring is automatic on re-`registerDevice`.
+- Do not attempt live CCU connection restart from `onConfigChanged`. If the host changes, `wssSendRestartRequired` is the correct response.
+
+---
+
 #### UI-0 — Per-device / per-channel configuration web UI
 
 **Effort: Medium** (frontend + backend, depends on upstream API)  
