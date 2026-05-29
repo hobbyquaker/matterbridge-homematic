@@ -1,6 +1,6 @@
 /**
  * Device mapper for HmIP-DRSI4 (DIN Rail Switch Interface, 4 channels) and related
- * multi-channel switch actuators (HmIP-DRSI1, MOD-OC8).
+ * multi-channel switch actuators (HmIP-DRSI1).
  *
  * **Multi-endpoint pattern** — this mapper is the canonical example for producing more than
  * one `MappedDeviceEndpoint` from a single physical device. The HmIP-DRSI4 exposes four
@@ -47,6 +47,14 @@
  *
  * The per-channel `switchMatterType` option (from user overrides) is respected so that
  * individual outputs can still be exposed as `'light'`, `'outlet'`, or `'switch'`.
+ *
+ * > **Note — also works without this mapper:** `resolveChannelsForMatter` already pairs each
+ * > `SWITCH_TRANSMITTER` with the first `SWITCH_VIRTUAL_RECEIVER` that follows it and
+ * > re-types it to `'SWITCH'`, so the generic channel-mapper loop would produce one
+ * > independent switch endpoint per output on its own. This device mapper therefore serves
+ * > primarily as the **canonical example of the multi-endpoint pattern** (returning more than
+ * > one `MappedDeviceEndpoint` per device) and to make the transmitter→receiver pairing logic
+ * > explicit and testable in isolation.
  *
  * @file device-mapper/hmip-drsi4.ts
  */

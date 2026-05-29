@@ -72,7 +72,7 @@ Because the restart is Matterbridge-managed, the UX improvement here comes from 
 #### RN-0 — ReGa rename handling
 
 **Effort: Low**  
-**Status: Not started**
+**Status: Done**
 
 **Done:** [`f429ea7`](https://github.com/hobbyquaker/matterbridge-homematic/commit/f429ea7)
 
