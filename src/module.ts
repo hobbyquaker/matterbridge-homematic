@@ -358,6 +358,28 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         batteryPowered: this.deviceBatteryHints.get(deviceAddress) ?? primaryChannel?.batteryPowered ?? false,
       };
 
+      // Pre-check: if every resolved supported channel for this device is disabled, skip the mapper
+      // call entirely so MatterbridgeEndpoints are not created and immediately discarded.
+      // Still register selectDevice entries so the channels appear in the Matterbridge UI.
+      const resolvedSupportedChannels = resolvedDeviceChannels.filter((ch) => isSupportedChannelType(ch.type));
+      if (
+        resolvedSupportedChannels.length > 0 &&
+        resolvedSupportedChannels.every((ch) => !this.isChannelEnabled(ch, this.getChannelOverride(ch.address), this.getChannelDisplayName(ch)))
+      ) {
+        deviceMapperHandled.add(deviceAddress);
+        for (const ch of resolvedSupportedChannels) {
+          const displayName = this.getChannelDisplayName(ch);
+          const selectSerial = this.getChannelSelectSerial(ch);
+          for (const oldKey of this.getLegacyChannelSelectKeys(ch)) {
+            if (this.getSelectDevice(oldKey) !== undefined) {
+              await this.clearDeviceSelect(oldKey);
+            }
+          }
+          this.setSelectDevice(selectSerial, displayName, undefined, 'switch');
+        }
+        continue;
+      }
+
       // Pass raw channels — device mappers see real Homematic channel types.
       this.logDeviceMapperSelection(deviceAddress, deviceType, rawDeviceChannels);
       const results = mapper(rawDeviceChannels, this.matterbridge.aggregatorVendorId, mappingOptions);
@@ -820,14 +842,13 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       if (this.paramsetCache && channelInfo?.deviceType) {
         const cached = this.paramsetCache.lookup(iface, channelInfo.deviceType, channelInfo.deviceFirmware, channelInfo.deviceVersion, channelInfo.type, paramsetKey);
         if (cached) {
-          this.log.debug(`getParamsetDescription <- address=${address} key=${cacheKey ?? 'n/a'} HIT`);
           onCacheResult?.(true);
           return cached;
         }
       }
 
       // 2. Live RPC.
-      this.log.debug(`getParamsetDescription <- address=${address} key=${cacheKey ?? 'n/a'} MISS (live RPC)`);
+      this.log.info(`getParamsetDescription <- address=${address} key=${cacheKey ?? 'n/a'} MISS (live RPC)`);
       const result = await this.getParamsetDescriptionSafe(iface, address, paramsetKey);
       onCacheResult?.(false);
 
