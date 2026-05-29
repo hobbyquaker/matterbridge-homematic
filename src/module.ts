@@ -381,7 +381,6 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       }
 
       // Pass raw channels — device mappers see real Homematic channel types.
-      this.logDeviceMapperSelection(deviceAddress, deviceType, rawDeviceChannels);
       const results = mapper(rawDeviceChannels, this.matterbridge.aggregatorVendorId, mappingOptions);
       if (results.length === 0) continue;
 
@@ -408,13 +407,13 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         this.setSelectDevice(selectSerial, displayName, undefined, 'switch');
 
         if (!this.isChannelEnabled(resolvedChannel, override, displayName)) {
-          this.log.debug(`Skipping disabled device-mapper endpoint ${resolvedChannel.address}`);
           continue;
         }
 
         enabledCount++;
         await this.registerDevice(endpoint);
         registeredCount++;
+        this.log.info(`Device mapper: channel=${resolvedChannel.address} name="${displayName}" deviceType=${deviceType} mapper=${this.getDeviceMapperKey(deviceType)}`);
         this.deviceAddressToDevice.set(deviceAddress, endpoint);
         for (const ch of mappedChannels) {
           await this.wireChannelEndpoint(endpoint, ch);
@@ -441,7 +440,6 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       this.setSelectDevice(selectSerial, displayName, undefined, 'switch');
 
       if (!this.isChannelEnabled(channel, override, displayName)) {
-        this.log.debug(`Skipping disabled channel ${channel.address}`);
         continue;
       }
 
@@ -2288,12 +2286,6 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     this.log.info(`Channel mapper: channel=${channel.address} name="${displayName}" type=${channel.type} mapper=${this.getChannelMapperKey(channel.type)}`);
   }
 
-  private logDeviceMapperSelection(deviceAddress: string, deviceType: string, deviceChannels: Pick<CcuChannelInfo, 'name'>[]): void {
-    this.log.info(
-      `Device mapper: device=${deviceAddress} names="${this.getDeviceMapperNames(deviceChannels)}" deviceType=${deviceType} mapper=${this.getDeviceMapperKey(deviceType)}`,
-    );
-  }
-
   private getChannelMapperKey(channelType: string): string {
     return channelType.toLowerCase().replace(/_/g, '-');
   }
@@ -2303,11 +2295,6 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '');
-  }
-
-  private getDeviceMapperNames(deviceChannels: Pick<CcuChannelInfo, 'name'>[]): string {
-    const names = [...new Set(deviceChannels.map((channel) => channel.name?.trim()).filter((name): name is string => typeof name === 'string' && name.length > 0))];
-    return names.join(' | ');
   }
 
   private getPlatformConfig(): HomematicPlatformConfig {
