@@ -142,7 +142,7 @@ When a user activates a new CCU interface in the plugin config (e.g. enables `Hm
 
 Both the device-mapper pre-pass and the channel-mapper loop in `discoverDevices()` follow the pattern:
 
-```
+```text
 clearLegacySelectKeys(channel)       // ← clears old-format entries
 setSelectDevice(selectSerial, ...)   // ← creates canonical entry
 isChannelEnabled(...)                // ← gate before registerDevice
@@ -323,25 +323,29 @@ export function startSim(devices, regaOptions?) {
 **Implementation backlog (ordered):**
 
 Prerequisites:
-- [ ] **P-1** — Modernise `hm-simulator`: TypeScript, dual CJS+ESM output, Vitest, ESLint flat config, Prettier, ephemeral port 0 support, typed public API. Keep full backward compat (`require('hm-simulator/sim.js')`, constructor shape, `api` EventEmitter, `close()`). Follow the reusable prompt above.
-- [ ] **P-2** — Add `hm-simulator` as a `devDependency` in `matterbridge-homematic/package.json`.
-- [ ] **P-3** — Split `vite.config.ts` into `unit` and `system` Vitest projects so `vitest run --project unit` stays fast.
+
+- **P-1** — Modernise `hm-simulator`: TypeScript, dual CJS+ESM output, Vitest, ESLint flat config, Prettier, ephemeral port 0 support, typed public API. Keep full backward compat (`require('hm-simulator/sim.js')`, constructor shape, `api` EventEmitter, `close()`). Follow the reusable prompt above.
+- **P-2** — Add `hm-simulator` as a `devDependency` in `matterbridge-homematic/package.json`.
+- **P-3** — Split `vite.config.ts` into `unit` and `system` Vitest projects so `vitest run --project unit` stays fast.
 
 Test infrastructure:
-- [ ] **I-1** — Create `vitest/system/helpers.ts`: `startSim()`, `makePluginConfig()`, `startPlatform()`, `stopPlatform()`, `stopSim()`, `waitForEvent()`.
-- [ ] **I-2** — Create device fixtures in `vitest/system/fixtures/`: `switch-hmip-bsm.ts`, `dimmer-hmip-pdm.ts`, `contact-hmip-swdo.ts`.
-- [ ] **I-3** — Confirm or add `CcuConnectionLayer` config keys for custom host/port so the plugin can point at the simulator without production-code changes.
+
+- **I-1** — Create `vitest/system/helpers.ts`: `startSim()`, `makePluginConfig()`, `startPlatform()`, `stopPlatform()`, `stopSim()`, `waitForEvent()`.
+- **I-2** — Create device fixtures in `vitest/system/fixtures/`: `switch-hmip-bsm.ts`, `dimmer-hmip-pdm.ts`, `contact-hmip-swdo.ts`.
+- **I-3** — Confirm or add `CcuConnectionLayer` config keys for custom host/port so the plugin can point at the simulator without production-code changes.
 
 System test files:
-- [ ] **T-1** — `vitest/system/init.test.ts`: RPC handshake and channel discovery.
-- [ ] **T-2** — `vitest/system/registration.test.ts`: endpoint + `setSelectDevice` assertions after full `onStart()`.
-- [ ] **T-3** — `vitest/system/matter-to-ccu.test.ts`: Matter attribute write → simulator `setValue` event.
-- [ ] **T-4** — `vitest/system/ccu-to-matter.test.ts`: simulator inbound event → Matter attribute update.
+
+- **T-1** — `vitest/system/init.test.ts`: RPC handshake and channel discovery.
+- **T-2** — `vitest/system/registration.test.ts`: endpoint + `setSelectDevice` assertions after full `onStart()`.
+- **T-3** — `vitest/system/matter-to-ccu.test.ts`: Matter attribute write → simulator `setValue` event.
+- **T-4** — `vitest/system/ccu-to-matter.test.ts`: simulator inbound event → Matter attribute update.
 
 Documentation + CI:
-- [ ] **D-1** — `vitest/system/README.md` explaining local execution.
-- [ ] **D-2** — Update this roadmap entry to in-progress once T-1 is merged.
-- [ ] **D-3** — Separate GitHub Actions CI job for system tests.
+
+- **D-1** — `vitest/system/README.md` explaining local execution.
+- **D-2** — Update this roadmap entry to in-progress once T-1 is merged.
+- **D-3** — Separate GitHub Actions CI job for system tests.
 
 ---
 

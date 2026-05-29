@@ -2311,9 +2311,9 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    * Updates the config object in place; callers must call `this.saveConfig()` after all
    * auto-blacklisting for the current discovery pass is complete.
    *
-   * @param selectSerial The canonical select serial for the channel.
-   * @param channel Channel info used to check legacy select keys.
-   * @returns true if selectSerial was newly added to the blackList, false if already known or listed.
+   * @param {string} selectSerial The canonical select serial for the channel.
+   * @param {Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'type'>} channel Channel info used to check legacy select keys.
+   * @returns {boolean} true if selectSerial was newly added to the blackList, false if already known or listed.
    */
   private autoBlacklistIfNew(selectSerial: string, channel: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'type'>): boolean {
     const isKnown = this.getSelectDevice(selectSerial) !== undefined || this.getLegacyChannelSelectKeys(channel).some((k) => this.getSelectDevice(k) !== undefined);

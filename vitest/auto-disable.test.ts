@@ -15,7 +15,7 @@ import { PlatformConfig, PlatformMatterbridge } from 'matterbridge';
 import { AnsiLogger } from 'matterbridge/logger';
 import { VendorId } from 'matterbridge/matter';
 
-import type { CcuChannelInfo } from '../src/ccu/types.js';
+import type { CcuChannelInfo, CcuStatusSnapshot } from '../src/ccu/types.js';
 import { TemplatePlatform } from '../src/module.js';
 
 const mockLog = {
@@ -57,7 +57,11 @@ const mockMatterbridge: PlatformMatterbridge = {
 
 vi.spyOn(AnsiLogger.prototype, 'log').mockImplementation(() => {});
 
-/** Build a fresh platform instance for each test. */
+/**
+ * Build a fresh platform instance for each test.
+ *
+ * @param extraConfig
+ */
 function createInstance(extraConfig: Partial<PlatformConfig> = {}): TemplatePlatform {
   const config: PlatformConfig = {
     name: 'matterbridge-homematic',
@@ -94,7 +98,6 @@ describe('autoBlacklistIfNew', () => {
   });
 
   it('should add an unknown channel to the blacklist and return true', () => {
-    // @ts-expect-error Accessing private method for testing purposes
     instance.getSelectDevice = vi.fn(() => undefined);
 
     // @ts-expect-error Accessing private method for testing purposes
@@ -129,7 +132,6 @@ describe('autoBlacklistIfNew', () => {
 
   it('should return false without duplicating when selectSerial is already in the blacklist', () => {
     instance.config.blackList = [SWITCH_SELECT_SERIAL];
-    // @ts-expect-error Accessing private method for testing purposes
     instance.getSelectDevice = vi.fn(() => undefined);
 
     // @ts-expect-error Accessing private method for testing purposes
@@ -165,7 +167,15 @@ describe('discoverDevices auto-disable', () => {
       discoverChannels: vi.fn(async () => [fakeRawChannel]),
       waitForNewDevices: vi.fn(async () => {}),
       getCachedChannels: vi.fn(() => [fakeRawChannel]),
-      getStatusSnapshot: vi.fn(() => ({ enabledInterfaces: new Set<string>(['HmIP-RF']) })),
+      getStatusSnapshot: vi.fn(
+        (): CcuStatusSnapshot => ({
+          host: '127.0.0.1',
+          connected: true,
+          enabledInterfaces: ['HmIP-RF'],
+          connectedInterfaces: ['HmIP-RF'],
+          discoveredHosts: ['127.0.0.1'],
+        }),
+      ),
     };
     // Stub heavy private helpers that depend on real CCU/RPC state.
     // @ts-expect-error Accessing private method for testing purposes
@@ -176,21 +186,16 @@ describe('discoverDevices auto-disable', () => {
     inst.cleanupDisabledInterfaceChannels = vi.fn(async () => {});
     // @ts-expect-error Accessing private method for testing purposes
     inst.syncChannelListEntriesWithRegaNames = vi.fn();
-    // @ts-expect-error Accessing private method for testing purposes
     inst.setSelectDevice = vi.fn();
-    // @ts-expect-error Accessing private method for testing purposes
     inst.clearDeviceSelect = vi.fn();
-    // @ts-expect-error Accessing private method for testing purposes
     inst.saveConfig = vi.fn();
     // Channel is not yet known (no prior select entry).
-    // @ts-expect-error Accessing private method for testing purposes
     inst.getSelectDevice = vi.fn(() => undefined);
     // Always report channels as disabled to prevent registerDevice/wireChannelEndpoint
     // from being invoked — those paths require a real Matterbridge Matter node.
-    // @ts-expect-error Accessing private method for testing purposes
     inst.validateDevice = vi.fn(() => false);
     // Prevent any Matter node interaction in case a channel is somehow passed isChannelEnabled.
-    vi.spyOn(inst, 'registerDevice').mockResolvedValue(undefined as unknown as void);
+    vi.spyOn(inst, 'registerDevice').mockImplementation(() => Promise.resolve());
     // @ts-expect-error Accessing private method for testing purposes
     inst.wireChannelEndpoint = vi.fn(async () => {});
   }
@@ -203,14 +208,12 @@ describe('discoverDevices auto-disable', () => {
     instance = createInstance({ newDevicesDefaultEnabled: false } as Partial<PlatformConfig>);
     injectFakeCcuConnection(instance);
     // First install: no select devices registered yet.
-    // @ts-expect-error Accessing private method for testing purposes
     instance.getSelectDevices = vi.fn(() => []);
 
     // @ts-expect-error Accessing private method for testing purposes
     await instance.discoverDevices();
 
     expect((instance.config.blackList as string[]).length).toBe(0);
-    // @ts-expect-error Accessing private method for testing purposes
     expect(instance.saveConfig).not.toHaveBeenCalled();
   });
 
@@ -225,7 +228,6 @@ describe('discoverDevices auto-disable', () => {
     await instance.discoverDevices();
 
     expect(instance.config.blackList as string[]).toContain(NEW_SERIAL);
-    // @ts-expect-error Accessing private method for testing purposes
     expect(instance.saveConfig).toHaveBeenCalled();
   });
 
@@ -239,7 +241,6 @@ describe('discoverDevices auto-disable', () => {
     await instance.discoverDevices();
 
     expect((instance.config.blackList as string[]).length).toBe(0);
-    // @ts-expect-error Accessing private method for testing purposes
     expect(instance.saveConfig).not.toHaveBeenCalled();
   });
 
@@ -256,7 +257,6 @@ describe('discoverDevices auto-disable', () => {
     await instance.discoverDevices();
 
     expect((instance.config.blackList as string[]).length).toBe(0);
-    // @ts-expect-error Accessing private method for testing purposes
     expect(instance.saveConfig).not.toHaveBeenCalled();
   });
 });
