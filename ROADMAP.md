@@ -69,6 +69,129 @@ Because the restart is Matterbridge-managed, the UX improvement here comes from 
 
 ---
 
+#### RN-0 — ReGa rename handling
+
+**Effort: Low**  
+**Status: Not started**
+
+When a user renames a device or channel in the Homematic CCU ReGa interface and then restarts the plugin, several things currently go wrong:
+
+**Bug 1 — `refreshDeviceNames` never finds any device (wrong map key)**
+
+`refreshDeviceNames` builds a lookup map keyed by `channel.address` (e.g. `OEQ0854602:1`) but iterates `this.getDevices()` and looks up `device.originalId`, which is the endpoint id string `hm-OEQ0854602-1`. These never match, so the method is a permanent no-op.
+
+Fix: iterate `this.channelAddressToDevice` entries instead; both the address key and the device are then directly available.
+
+**Bug 2 — `nodeLabel` on the Matter endpoint is never updated**
+
+Even if Bug 1 were fixed, `refreshDeviceNames` only assigns `device.deviceName` (a JS property visible in plugin logs) and calls `setSelectDevice` (updates the Matterbridge UI label). It never calls `await device.updateAttribute('BridgedDeviceBasicInformation', 'nodeLabel', newName)`, so Matter controllers do not receive the updated name.
+
+Fix: add the `updateAttribute` call (wrapped in try/catch since the cluster may be absent for certain endpoint types) and make the method `async`.
+
+**Bug 3 — Stale blacklist/whitelist entries after rename**
+
+`isChannelEnabled` resolves a device against four candidates: `selectSerial`, `channel.address`, `channel.name` (current), and `displayName`. If a user disabled a channel when its name was `"Kitchen Light"` and that name was stored in the blacklist, renaming the channel to `"Küchenlicht"` on ReGa causes the old `"Kitchen Light"` entry to become an orphan. It no longer matches any candidate, so the device silently reappears as enabled.
+
+Fix: in `refreshDeviceNames`, when a name change is detected, scan `whiteList` and `blackList` for entries equal to `oldName` and replace them with the stable `selectSerial` key. Persist the config if any migrations occurred.
+
+**Bug 4 — `syncChannelListEntriesWithRegaNames` migrates in the wrong direction**
+
+This method finds address-format entries in the blacklist (e.g. `OEQ0854602:1`) and migrates them to the current ReGa name (e.g. `"Kitchen Light"`). Migrating to names creates new unstable entries that will become orphans after the next rename.
+
+Fix: migrate to `selectSerial` (e.g. `HmIP-RF:CONTACT:OEQ0854602:1`) instead of to the name. This requires adding `type` to the channel Pick type accepted by the method.
+
+---
+
+**Alternative approaches (changes on the Matterbridge side)**
+
+| Approach                                                       | Description                                                                                                                                                                                                                                                                                                   | Feasibility                                                                                                          |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `selectFrom: 'serial'` in schema                               | If `blackList`/`whiteList` are declared with `selectFrom: 'serial'`, the Matterbridge UI device-toggle action writes the stable `selectSerial` key instead of a name. This eliminates name-based entries at the source and makes Bug 3 a rare edge case. Requires schema change only (no plugin code change). | High — low effort, see UX-1 for full schema work                                                                     |
+| Matterbridge: rename callback                                  | Matterbridge could emit `onDeviceRenamed(serial, oldName, newName)` so plugins can react to Matter-side renames and sync them back to the CCU via ReGa. Currently not part of the platform API.                                                                                                               | Low — would require upstream Matterbridge PR                                                                         |
+| Matterbridge: `updateDeviceName(serial, name)` platform method | A dedicated method that handles `nodeLabel` update, UI label update, and storage key migration atomically. Would remove the need for plugins to orchestrate these three steps separately.                                                                                                                     | Low — would require upstream Matterbridge PR                                                                         |
+| Store per-channel previous name in plugin config               | Write the last-known ReGa name into plugin storage (alongside or instead of the blacklist). On each startup, compare against the current ReGa name to detect renames before device registration, enabling blacklist key migration before `validateDevice` is first called.                                    | Medium — avoids the race condition between background `channelsUpdated` and `discoverDevices`; adds persistent state |
+
+**Implementation notes:**
+
+- `refreshDeviceNames` is only meaningful on subsequent startups (when the cache is populated and `channelsUpdated` fires in the background after device registration). On first startup the devices are not yet registered when the event fires, so it is correctly a no-op.
+- The `channelsUpdated` event handler must use `void this.refreshDeviceNames(updatedChannels)` once the method is made async.
+- The `skippedNoName` counter in `syncChannelListEntriesWithRegaNames` becomes irrelevant once migration targets `selectSerial` (which does not depend on the ReGa name), but can be retained or removed.
+
+---
+
+#### UX-2 — Auto-disable newly introduced channels
+
+**Effort: Low**  
+**Status: Not started**
+
+When a user activates a new CCU interface in the plugin config (e.g. enables `HmIP-RF` where only `BidCos-RF` was active before) and restarts Matterbridge, the plugin discovers all channels on that interface and registers them as enabled by default. On an installation with 60+ HmIP devices this floods the Matter controller with new endpoints the user never chose to expose. The user wants new channels to start disabled and be explicitly opted-in, without affecting the enable/disable status of channels that were already known.
+
+**The core invariant:**
+
+- A channel that has ever been registered (i.e. `setSelectDevice` was called for its `selectSerial` in a previous run) is *known* → its enabled/disabled status must not be changed.
+- A channel that has no existing `selectDevice` record anywhere (neither canonical `selectSerial` nor any legacy key) is *new* → it should be added to the blacklist before registration so it starts disabled.
+
+**Detection algorithm**
+
+Both the device-mapper pre-pass and the channel-mapper loop in `discoverDevices()` follow the pattern:
+
+```
+clearLegacySelectKeys(channel)       // ← clears old-format entries
+setSelectDevice(selectSerial, ...)   // ← creates canonical entry
+isChannelEnabled(...)                // ← gate before registerDevice
+```
+
+The "is this channel new?" check must happen **before** the legacy-key clear, because a channel known only under a legacy key would otherwise appear as new after the clear. The check reads:
+
+```ts
+// Once, before the first setSelectDevice call in discoverDevices():
+const isFirstInstall = this.getSelectDevices().length === 0;
+
+// Per channel, before clearing legacy keys:
+const isKnown =
+  this.getSelectDevice(selectSerial) !== undefined ||
+  this.getLegacyChannelSelectKeys(channel).some((k) => this.getSelectDevice(k) !== undefined);
+
+if (!isFirstInstall && !isKnown) {
+  // Add selectSerial to blacklist — channel starts disabled
+}
+```
+
+**First-install edge case**
+
+On a brand-new installation `getSelectDevices()` is empty before the first `discoverDevices()` run. Treating every channel as "new" would blacklist everything and register nothing. The `isFirstInstall` guard (snapshot the count before any `setSelectDevice` calls) bypasses auto-blacklisting entirely, preserving the current "everything enabled on first run" behavior.
+
+The same guard covers the first run after upgrading from a version of the plugin that did not call `setSelectDevice` at all, since that too produces an empty select-devices list.
+
+**Interface-level variant**
+
+As a coarser alternative: check whether the channel's `interfaceName` has ever appeared in any existing `selectDevice.serial` (serials are prefixed with the interface name). If the interface prefix is absent → all channels from that interface are new. This directly targets the user's stated use case (activating a whole new interface) and is simpler to implement, but it cannot auto-disable individual new devices paired to an already-known interface.
+
+```ts
+const knownInterfaces = new Set(
+  this.getSelectDevices().map((sd) => sd.serial.split(':')[0])
+);
+const isNewInterface = !knownInterfaces.has(channel.interfaceName);
+```
+
+The per-channel check is more precise and handles both new interfaces and newly paired individual devices uniformly. Prefer it.
+
+**Config option**
+
+Introduce a boolean config field `newDevicesDefaultEnabled` (default `true`) to preserve backward compatibility. When set to `false`, the auto-blacklist logic activates. Document it prominently in README and schema so users can opt in during a new-interface activation.
+
+An alternative is to make `false` the default (always auto-disable new channels after first install), but this is a breaking behavior change for users who habitually pair new devices and expect them to appear automatically.
+
+**Design constraints and edge cases**
+
+- The `isFirstInstall` snapshot must be taken once before the outer loop in `discoverDevices()`, not per channel.
+- `cleanupDisabledInterfaceChannels` is called before `discoverDevices()` re-registers channels. The blacklist entries written by auto-disable should not be swept by that cleanup (they are keyed by `selectSerial`, which includes the interface prefix, so the cleanup's interface-prefix filter correctly leaves them alone).
+- `channelOverrides` with `enabled: true` on a specific address takes precedence over the blacklist via `isChannelEnabled()`. Users can whitelist individual channels this way even when the interface-level default is disabled — no extra code needed.
+- Do not auto-blacklist channels in the *device mapper pre-pass* independently for each `mappedChannel`; use the primary channel's `selectSerial` as the single gating key for the whole composed device (same as the existing `setSelectDevice` call in that loop).
+- Log a single summary line: `Auto-disabled N new channel(s) from interface HmIP-RF (newDevicesDefaultEnabled=false)`.
+
+---
+
 #### UI-0 — Per-device / per-channel configuration web UI
 
 **Effort: Medium** (frontend + backend, depends on upstream API)  
