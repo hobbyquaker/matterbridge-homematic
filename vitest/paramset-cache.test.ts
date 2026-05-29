@@ -22,23 +22,28 @@ function makeLogger(): CcuLogger {
 
 describe('buildParamsetKey', () => {
   test('should return a slash-separated key string when all components are known', () => {
-    const key = buildParamsetKey('HmIP-RF', 'HmIP-WRC2', '1.4.2', 0, 'MAINTENANCE', 'VALUES');
-    expect(key).toBe('HmIP-RF/HmIP-WRC2/1.4.2/0/MAINTENANCE/VALUES');
+    const key = buildParamsetKey('HmIP-RF', 'HmIP-WRC2', '1.4.2', 2, 'MAINTENANCE', 'VALUES');
+    expect(key).toBe('HmIP-RF/HmIP-WRC2/1.4.2/2/MAINTENANCE/VALUES');
   });
 
   test('should use empty string for firmware when firmware is undefined', () => {
-    const key = buildParamsetKey('HmIP-RF', 'HmIP-WRC2', undefined, 0, 'MAINTENANCE', 'VALUES');
-    expect(key).toBe('HmIP-RF/HmIP-WRC2//0/MAINTENANCE/VALUES');
+    const key = buildParamsetKey('HmIP-RF', 'HmIP-WRC2', undefined, 2, 'MAINTENANCE', 'VALUES');
+    expect(key).toBe('HmIP-RF/HmIP-WRC2//2/MAINTENANCE/VALUES');
   });
 
   test('should return undefined when deviceType is undefined', () => {
-    const key = buildParamsetKey('HmIP-RF', undefined, '1.4.2', 0, 'MAINTENANCE', 'VALUES');
+    const key = buildParamsetKey('HmIP-RF', undefined, '1.4.2', 2, 'MAINTENANCE', 'VALUES');
     expect(key).toBeUndefined();
   });
 
+  test('should use empty string for deviceVersion when deviceVersion is undefined', () => {
+    const key = buildParamsetKey('HmIP-RF', 'HmIP-WRC2', '1.4.2', undefined, 'MAINTENANCE', 'VALUES');
+    expect(key).toBe('HmIP-RF/HmIP-WRC2/1.4.2//MAINTENANCE/VALUES');
+  });
+
   test('should include the paramset key suffix correctly', () => {
-    const master = buildParamsetKey('BidCos-RF', 'HM-LC-Sw1-FM', '2.5', 0, 'MAINTENANCE', 'MASTER');
-    expect(master).toBe('BidCos-RF/HM-LC-Sw1-FM/2.5/0/MAINTENANCE/MASTER');
+    const master = buildParamsetKey('BidCos-RF', 'HM-LC-Sw1-FM', '2.5', 3, 'MAINTENANCE', 'MASTER');
+    expect(master).toBe('BidCos-RF/HM-LC-Sw1-FM/2.5/3/MAINTENANCE/MASTER');
   });
 });
 
@@ -60,7 +65,7 @@ describe('ParamsetCache', () => {
     const cache = new ParamsetCache(makeLogger(), cacheDir);
     await cache.load('/nonexistent/paramsets.json');
 
-    const result = cache.lookup('HmIP-RF', 'HmIP-WRC2', '1.4.2', 0, 'MAINTENANCE', 'VALUES');
+    const result = cache.lookup('HmIP-RF', 'HmIP-WRC2', '1.4.2', 2, 'MAINTENANCE', 'VALUES');
     expect(result).toBeUndefined();
   });
 
@@ -68,7 +73,7 @@ describe('ParamsetCache', () => {
     const cache = new ParamsetCache(makeLogger(), cacheDir);
     await cache.load('/nonexistent/paramsets.json');
 
-    const result = cache.lookup('HmIP-RF', undefined, '1.4.2', 0, 'MAINTENANCE', 'VALUES');
+    const result = cache.lookup('HmIP-RF', undefined, '1.4.2', 2, 'MAINTENANCE', 'VALUES');
     expect(result).toBeUndefined();
   });
 
@@ -77,9 +82,9 @@ describe('ParamsetCache', () => {
     await cache.load('/nonexistent/paramsets.json');
 
     const desc = { LOW_BAT: { TYPE: 'BOOL' } };
-    cache.store('HmIP-RF', 'HmIP-WRC2', '1.4.2', 0, 'MAINTENANCE', 'VALUES', desc);
+    cache.store('HmIP-RF', 'HmIP-WRC2', '1.4.2', 2, 'MAINTENANCE', 'VALUES', desc);
 
-    const result = cache.lookup('HmIP-RF', 'HmIP-WRC2', '1.4.2', 0, 'MAINTENANCE', 'VALUES');
+    const result = cache.lookup('HmIP-RF', 'HmIP-WRC2', '1.4.2', 2, 'MAINTENANCE', 'VALUES');
     expect(result).toEqual(desc);
   });
 
@@ -87,9 +92,9 @@ describe('ParamsetCache', () => {
     const cache = new ParamsetCache(makeLogger(), cacheDir);
     await cache.load('/nonexistent/paramsets.json');
 
-    cache.store('HmIP-RF', undefined, '1.4.2', 0, 'MAINTENANCE', 'VALUES', { LOW_BAT: { TYPE: 'BOOL' } });
+    cache.store('HmIP-RF', undefined, '1.4.2', 2, 'MAINTENANCE', 'VALUES', { LOW_BAT: { TYPE: 'BOOL' } });
 
-    const result = cache.lookup('HmIP-RF', undefined, '1.4.2', 0, 'MAINTENANCE', 'VALUES');
+    const result = cache.lookup('HmIP-RF', undefined, '1.4.2', 2, 'MAINTENANCE', 'VALUES');
     expect(result).toBeUndefined();
   });
 
@@ -102,14 +107,14 @@ describe('ParamsetCache', () => {
     await cache1.load('/nonexistent/paramsets.json');
 
     const desc = { LOW_BAT: { TYPE: 'BOOL' } };
-    cache1.store('HmIP-RF', 'HmIP-WRC2', '1.4.2', 0, 'MAINTENANCE', 'VALUES', desc);
+    cache1.store('HmIP-RF', 'HmIP-WRC2', '1.4.2', 2, 'MAINTENANCE', 'VALUES', desc);
     await cache1.save();
 
     // New instance should load the overlay from disk
     const cache2 = new ParamsetCache(logger, cacheDir);
     await cache2.load('/nonexistent/paramsets.json');
 
-    const result = cache2.lookup('HmIP-RF', 'HmIP-WRC2', '1.4.2', 0, 'MAINTENANCE', 'VALUES');
+    const result = cache2.lookup('HmIP-RF', 'HmIP-WRC2', '1.4.2', 2, 'MAINTENANCE', 'VALUES');
     expect(result).toEqual(desc);
   });
 

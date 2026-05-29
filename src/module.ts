@@ -37,7 +37,7 @@ import {
   resolveChannelsForMatter,
 } from './ccu/device-mapper.js';
 import { getBatteryVoltageRange, getMatchingMainsPoweredPrefix, isAlwaysMainsPoweredDeviceType, MAINS_POWERED_DEVICE_TYPE_PREFIXES } from './ccu/device-power.js';
-import { ParamsetCache } from './ccu/paramset-cache.js';
+import { ParamsetCache, buildParamsetKey } from './ccu/paramset-cache.js';
 import { CcuChannelInfo, CcuChannelOverride, CcuInterfaceName } from './ccu/types.js';
 
 /**
@@ -281,6 +281,10 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     }
 
     const rawChannels = await this.ccuConnection.discoverChannels();
+    // Wait for the CCU's newDevices callback to patch device VERSION into the channel objects.
+    // This ensures primeBatteryHintsFromRpc uses the correct VERSION for paramset cache keys
+    // even when the discovery cache was populated before the newDevices payload arrived.
+    await this.ccuConnection.waitForNewDevices(5000);
     const cachedChannels = this.ccuConnection.getCachedChannels();
     const enabledInterfaces = this.ccuConnection.getStatusSnapshot().enabledInterfaces;
     this.updateMainsPoweredDeviceSet(rawChannels);
@@ -747,10 +751,6 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       if (channel.channelIndex !== 0) continue;
       const classifierType = channel.deviceType ?? channel.type;
       if (isAlwaysMainsPoweredDeviceType(classifierType)) {
-        const prefix = getMatchingMainsPoweredPrefix(classifierType);
-        this.log.debug(
-          `Battery classify startup <- device=${channel.deviceAddress} channelType=${channel.type} deviceType=${channel.deviceType ?? 'unknown'} classifierType=${classifierType} mainsPrefix=${prefix ?? 'none'} batteryHint=false (forced mains)`,
-        );
         this.deviceBatteryHints.set(channel.deviceAddress, false);
         continue;
       }
@@ -776,9 +776,6 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         if (!description || !this.hasLowBatKey(description)) return;
 
         this.deviceBatteryHints.set(deviceAddress, true);
-        this.log.debug(
-          `Battery classify startup <- device=${deviceAddress} channelType=${rootChannel?.type ?? 'unknown'} deviceType=${rootChannel?.deviceType ?? 'unknown'} classifierType=${rootChannel?.deviceType ?? rootChannel?.type ?? 'unknown'} mainsPrefix=none batteryHint=true source=getParamsetDescription`,
-        );
         detectedCount++;
 
         for (const channel of channels) {
@@ -793,7 +790,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       this.log.info(`Detected ${detectedCount} battery-powered devices from RPC paramset descriptions`);
     }
     if (cacheHits > 0) {
-      this.log.debug(`Paramset cache: served ${cacheHits} battery-hint lookups from cache (no RPC call needed)`);
+      this.log.debug(`Paramset cache: ${cacheHits}/${candidates.size} paramset descriptions served from cache`);
     }
 
     // Persist any newly learned overlay entries.
@@ -816,19 +813,21 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     channelInfo: CcuChannelInfo | undefined,
     onCacheResult?: (hit: boolean) => void,
   ): Promise<Record<string, unknown> | undefined> {
-    const channelIndex = parseInt(address.split(':')[1] ?? '0', 10);
-
     for (const paramsetKey of ['VALUES', 'MASTER'] as const) {
+      const cacheKey = buildParamsetKey(iface, channelInfo?.deviceType, channelInfo?.deviceFirmware, channelInfo?.deviceVersion, channelInfo?.type ?? '', paramsetKey);
+
       // 1. Try cache.
       if (this.paramsetCache && channelInfo?.deviceType) {
-        const cached = this.paramsetCache.lookup(iface, channelInfo.deviceType, channelInfo.deviceFirmware, channelIndex, channelInfo.type, paramsetKey);
+        const cached = this.paramsetCache.lookup(iface, channelInfo.deviceType, channelInfo.deviceFirmware, channelInfo.deviceVersion, channelInfo.type, paramsetKey);
         if (cached) {
+          this.log.debug(`getParamsetDescription <- address=${address} key=${cacheKey ?? 'n/a'} HIT`);
           onCacheResult?.(true);
           return cached;
         }
       }
 
       // 2. Live RPC.
+      this.log.debug(`getParamsetDescription <- address=${address} key=${cacheKey ?? 'n/a'} MISS (live RPC)`);
       const result = await this.getParamsetDescriptionSafe(iface, address, paramsetKey);
       onCacheResult?.(false);
 
@@ -836,7 +835,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
       // 3. Write-through: store successful RPC result in overlay.
       if (this.paramsetCache && channelInfo?.deviceType) {
-        this.paramsetCache.store(iface, channelInfo.deviceType, channelInfo.deviceFirmware, channelIndex, channelInfo.type, paramsetKey, result);
+        this.paramsetCache.store(iface, channelInfo.deviceType, channelInfo.deviceFirmware, channelInfo.deviceVersion, channelInfo.type, paramsetKey, result);
       }
 
       return result;
@@ -898,11 +897,11 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
     const unreachValue = event.value === true;
     const reachable = !unreachValue;
-    this.log.debug(`UNREACH event: iface=${String(event.iface ?? 'unknown')} device=${deviceAddress ?? 'unknown'} reachable=${reachable}`);
 
     if (deviceAddress) {
       const device = this.deviceAddressToDevice.get(deviceAddress);
       if (!device) return;
+      this.log.debug(`UNREACH event: iface=${String(event.iface ?? 'unknown')} device=${deviceAddress} reachable=${reachable}`);
       await this.updateDeviceReachable(deviceAddress, device, reachable);
       return;
     }
@@ -2316,7 +2315,6 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
   private getChannelDisplayName(channel: CcuChannelInfo): string {
     const regaName = channel.name?.trim();
-    this.log.debug(`getChannelDisplayName <- address=${channel.address} regaName=${regaName ? `"${regaName}"` : 'empty'} fallbacks=${channel.address}`);
     if (regaName && regaName.length > 0) return regaName;
     return channel.address;
   }

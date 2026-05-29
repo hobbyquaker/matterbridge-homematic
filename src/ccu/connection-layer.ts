@@ -39,6 +39,7 @@ interface RpcDeviceDescription {
   ADDRESS: string;
   TYPE: string;
   FIRMWARE?: string;
+  VERSION?: number;
 }
 
 interface RpcInterfaceDefinition {
@@ -78,6 +79,18 @@ export class CcuConnectionLayer extends EventEmitter {
   private readonly discoveredHosts = new Set<string>();
 
   private readonly deviceBatteryHints = new Map<string, boolean>();
+
+  /**
+   * Device VERSION values collected from the CCU's `newDevices` callback.
+   * Key: `${iface}:${deviceAddress}`. Populated by {@link processNewDevicesCallback}.
+   */
+  private readonly deviceVersionFromNewDevices = new Map<string, number>();
+
+  /** Interfaces that have already delivered their `newDevices` callback payload. */
+  private readonly newDevicesReceivedByIface = new Set<string>();
+
+  /** Resolve callbacks waiting for all interfaces to deliver `newDevices`. */
+  private readonly pendingNewDevicesWaiters: Array<() => void> = [];
 
   private readonly cacheFilePath: string;
 
@@ -304,6 +317,7 @@ export class CcuConnectionLayer extends EventEmitter {
           const devices = (await this.callRpc(iface, 'listDevices', [])) as RpcDeviceDescription[];
           const deviceTypeByAddress = new Map<string, string>();
           const deviceFirmwareByAddress = new Map<string, string>();
+          const deviceVersionByAddress = new Map<string, number>();
 
           for (const dev of devices) {
             if (typeof dev.ADDRESS !== 'string' || dev.ADDRESS.includes(':')) continue;
@@ -311,6 +325,10 @@ export class CcuConnectionLayer extends EventEmitter {
             deviceTypeByAddress.set(dev.ADDRESS, dev.TYPE);
             if (typeof dev.FIRMWARE === 'string' && dev.FIRMWARE.length > 0) {
               deviceFirmwareByAddress.set(dev.ADDRESS, dev.FIRMWARE);
+            }
+            const rawVersion = dev.VERSION;
+            if (typeof rawVersion === 'number') {
+              deviceVersionByAddress.set(dev.ADDRESS, rawVersion);
             }
           }
 
@@ -330,6 +348,10 @@ export class CcuConnectionLayer extends EventEmitter {
               type: dev.TYPE,
               deviceType: deviceTypeByAddress.get(deviceAddress),
               deviceFirmware: deviceFirmwareByAddress.get(deviceAddress),
+              // Prefer VERSION from the newDevices callback (always the authoritative source);
+              // fall back to the listDevices value for the first-start empty-cache path where
+              // newDevices may not have arrived yet.
+              deviceVersion: this.deviceVersionFromNewDevices.get(`${iface}:${deviceAddress}`) ?? deviceVersionByAddress.get(deviceAddress),
               interfaceName: iface,
               name: nameMap.get(dev.ADDRESS),
               batteryPowered: this.deviceBatteryHints.get(deviceAddress),
@@ -396,7 +418,6 @@ export class CcuConnectionLayer extends EventEmitter {
         const hasValidAddress = typeof channel.address === 'string' && channel.address.includes(':');
 
         if (!hasValidAddress) {
-          this.log.debug(`ReGa channel skipped <- invalid address: ${JSON.stringify(channel)}`);
           continue;
         }
 
@@ -404,9 +425,6 @@ export class CcuConnectionLayer extends EventEmitter {
 
         if (trimmedName) {
           nameMap.set(channel.address, trimmedName);
-          this.log.debug(`ReGa channel name added <- address=${channel.address} name=${trimmedName}`);
-        } else {
-          this.log.debug(`ReGa channel has no name <- address=${channel.address} rawName=${JSON.stringify(channel.name)}`);
         }
       }
 
@@ -554,6 +572,8 @@ export class CcuConnectionLayer extends EventEmitter {
     const payload = Array.isArray(parameters[1]) ? parameters[1] : [];
     const deviceTypeByAddress = new Map<string, string>();
 
+    this.log.debug(`newDevices callback <- iface=${iface ?? 'unknown'} entries=${payload.length}`);
+
     for (const entry of payload) {
       if (!entry || typeof entry !== 'object') continue;
       const addressValue = (entry as Record<string, unknown>).ADDRESS;
@@ -561,6 +581,29 @@ export class CcuConnectionLayer extends EventEmitter {
       if (typeof addressValue !== 'string' || addressValue.includes(':')) continue;
       if (typeof typeValue !== 'string') continue;
       deviceTypeByAddress.set(addressValue, typeValue);
+      // Collect the VERSION for each root device from the newDevices payload.
+      // This is the authoritative source for device VERSION because the CCU always
+      // sends it after init() and it is guaranteed to carry the correct value.
+      const rawVersion = (entry as Record<string, unknown>).VERSION;
+      if (typeof rawVersion === 'number') {
+        this.deviceVersionFromNewDevices.set(`${iface ?? ''}:${addressValue}`, rawVersion);
+      }
+    }
+
+    // Patch deviceVersion in-place on any already-discovered cache channels so
+    // that a concurrent primeBatteryHintsFromRpc call sees the correct VERSION
+    // value for the paramset cache key even when the discovery cache was stale.
+    let channelsCacheUpdated = false;
+    for (const channel of this.cache.channels) {
+      if (channel.interfaceName !== iface) continue;
+      const version = this.deviceVersionFromNewDevices.get(`${iface ?? ''}:${channel.deviceAddress}`);
+      if (version !== undefined && channel.deviceVersion !== version) {
+        channel.deviceVersion = version;
+        channelsCacheUpdated = true;
+      }
+    }
+    if (channelsCacheUpdated) {
+      void this.saveCache();
     }
 
     for (const entry of payload) {
@@ -576,10 +619,6 @@ export class CcuConnectionLayer extends EventEmitter {
       const hasLowBatMarker = this.containsLowBatMarker(entry);
       const batteryHint = isAlwaysMainsPoweredDeviceType(deviceType) ? false : hasLowBatMarker ? true : undefined;
       const previous = this.deviceBatteryHints.get(deviceAddress);
-
-      this.log.debug(
-        `RPC newDevices classify <- iface=${iface ?? 'unknown'} device=${deviceAddress} channelType=${channelType ?? 'unknown'} deviceType=${deviceType ?? 'unknown'} mainsPrefix=${mainsMatchPrefix ?? 'none'} hasLowBatMarker=${hasLowBatMarker} batteryHint=${batteryHint === undefined ? 'unknown' : String(batteryHint)} previous=${String(previous)}`,
-      );
 
       // Absence of a LOWBAT marker in newDevices is not reliable evidence that a device is mains-powered.
       // Many battery devices (for example HmIP-WRC2) do not expose the marker in this callback payload.
@@ -597,6 +636,49 @@ export class CcuConnectionLayer extends EventEmitter {
         });
       }
     }
+
+    // Signal waiters that are blocking on this interface's newDevices payload.
+    if (iface !== undefined) {
+      this.newDevicesReceivedByIface.add(iface);
+    }
+    if (this.allIfacesHaveReceivedNewDevices()) {
+      for (const resolve of this.pendingNewDevicesWaiters) {
+        resolve();
+      }
+      this.pendingNewDevicesWaiters.length = 0;
+    }
+  }
+
+  private allIfacesHaveReceivedNewDevices(): boolean {
+    return [...this.clients.keys()].every((iface) => this.newDevicesReceivedByIface.has(iface));
+  }
+
+  /**
+   * Resolve when all configured RPC interfaces have delivered their `newDevices` callback,
+   * or immediately if they have already done so. Resolves after `timeoutMs` regardless.
+   *
+   * @param {number} timeoutMs Maximum milliseconds to wait.
+   * @returns {Promise<void>} Promise that resolves when all newDevices payloads have arrived or timeout elapses.
+   */
+  async waitForNewDevices(timeoutMs: number): Promise<void> {
+    if (this.allIfacesHaveReceivedNewDevices()) return;
+    return new Promise<void>((resolve) => {
+      let done = false;
+      const timer = setTimeout(() => {
+        done = true;
+        const idx = this.pendingNewDevicesWaiters.indexOf(waiter);
+        if (idx !== -1) this.pendingNewDevicesWaiters.splice(idx, 1);
+        this.log.debug(`waitForNewDevices: timed out after ${timeoutMs} ms — proceeding without complete newDevices data`);
+        resolve();
+      }, timeoutMs);
+      const waiter = (): void => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve();
+      };
+      this.pendingNewDevicesWaiters.push(waiter);
+    });
   }
 
   private containsLowBatMarker(value: unknown, depth = 0): boolean {

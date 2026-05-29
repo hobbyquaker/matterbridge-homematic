@@ -7,7 +7,7 @@
  * served from disk on every startup after the first live RPC call.
  *
  * Cache key format (compatible with node-red-contrib-ccu's paramsets.json):
- *   `{interface}/{deviceType}/{firmware}/{channelIndex}/{channelType}/{paramsetKey}`
+ *   `{interface}/{deviceType}/{firmware}/{deviceVersion}/{channelType}/{paramsetKey}`
  *
  * @example
  *   `HmIP-RF/HmIP-WRC2/1.4.2/0/MAINTENANCE/VALUES`
@@ -40,7 +40,7 @@ export type ParamsetKey = 'VALUES' | 'MASTER';
  * @param {string} iface RPC interface name (e.g. `'HmIP-RF'`).
  * @param {string | undefined} deviceType Homematic device model string (e.g. `'HmIP-WRC2'`).
  * @param {string | undefined} firmware Firmware version string (e.g. `'1.4.2'`). Use empty string when not known.
- * @param {number} channelIndex Zero-based channel index as parsed from the CCU channel address.
+ * @param {number | undefined} deviceVersion `VERSION` integer of the root device as reported by `listDevices`. This is the 4th segment of the key (matches node-red-contrib-ccu's `paramsetName` format). Use `undefined` when not known.
  * @param {string} channelType Homematic channel type string (e.g. `'MAINTENANCE'`).
  * @param {ParamsetKey} paramsetKey Paramset selector: `'VALUES'` or `'MASTER'`.
  * @returns {string | undefined} Cache key string, or `undefined` when `deviceType` is missing.
@@ -49,12 +49,12 @@ export function buildParamsetKey(
   iface: string,
   deviceType: string | undefined,
   firmware: string | undefined,
-  channelIndex: number,
+  deviceVersion: number | undefined,
   channelType: string,
   paramsetKey: ParamsetKey,
 ): string | undefined {
   if (!deviceType) return undefined;
-  return `${iface}/${deviceType}/${firmware ?? ''}/${channelIndex}/${channelType}/${paramsetKey}`;
+  return `${iface}/${deviceType}/${firmware ?? ''}/${deviceVersion ?? ''}/${channelType}/${paramsetKey}`;
 }
 
 /**
@@ -121,7 +121,7 @@ export class ParamsetCache {
    * @param {string} iface RPC interface name.
    * @param {string | undefined} deviceType Homematic device model string.
    * @param {string | undefined} firmware Firmware version string.
-   * @param {number} channelIndex Zero-based channel index.
+   * @param {number | undefined} deviceVersion `VERSION` integer of the root device.
    * @param {string} channelType Homematic channel type string.
    * @param {ParamsetKey} paramsetKey Paramset selector.
    * @returns {Record<string, unknown> | undefined} Cached description, or `undefined` on cache miss.
@@ -130,17 +130,14 @@ export class ParamsetCache {
     iface: string,
     deviceType: string | undefined,
     firmware: string | undefined,
-    channelIndex: number,
+    deviceVersion: number | undefined,
     channelType: string,
     paramsetKey: ParamsetKey,
   ): Record<string, unknown> | undefined {
-    const key = buildParamsetKey(iface, deviceType, firmware, channelIndex, channelType, paramsetKey);
+    const key = buildParamsetKey(iface, deviceType, firmware, deviceVersion, channelType, paramsetKey);
     if (!key) return undefined;
 
     const hit = this.overlay[key] ?? this.seed[key];
-    if (hit) {
-      this.log.debug(`Paramset cache hit <- key=${key}`);
-    }
     return hit;
   }
 
@@ -153,7 +150,7 @@ export class ParamsetCache {
    * @param {string} iface RPC interface name.
    * @param {string | undefined} deviceType Homematic device model string.
    * @param {string | undefined} firmware Firmware version string.
-   * @param {number} channelIndex Zero-based channel index.
+   * @param {number | undefined} deviceVersion `VERSION` integer of the root device.
    * @param {string} channelType Homematic channel type string.
    * @param {ParamsetKey} paramsetKey Paramset selector.
    * @param {Record<string, unknown>} description Raw paramset description from the CCU.
@@ -162,12 +159,12 @@ export class ParamsetCache {
     iface: string,
     deviceType: string | undefined,
     firmware: string | undefined,
-    channelIndex: number,
+    deviceVersion: number | undefined,
     channelType: string,
     paramsetKey: ParamsetKey,
     description: Record<string, unknown>,
   ): void {
-    const key = buildParamsetKey(iface, deviceType, firmware, channelIndex, channelType, paramsetKey);
+    const key = buildParamsetKey(iface, deviceType, firmware, deviceVersion, channelType, paramsetKey);
     if (!key) return;
 
     this.overlay[key] = description;

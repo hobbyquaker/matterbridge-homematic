@@ -151,6 +151,8 @@ export interface CcuChannelInfo {
   deviceType?: string;
   /** Firmware version of the root device as reported by `listDevices`, e.g. `'1.4.2'`. Used for paramset cache key construction. */
   deviceFirmware?: string;
+  /** VERSION integer of the root device as reported by `listDevices`. Used as the 4th segment of the paramset cache key (matches node-red-contrib-ccu's `paramsetName` format). */
+  deviceVersion?: number;
   /** RPC interface on which this channel was discovered. */
   interfaceName: Exclude<CcuInterfaceName, 'ReGaHSS'>;
   /** ReGa display name for the channel, if available. */
