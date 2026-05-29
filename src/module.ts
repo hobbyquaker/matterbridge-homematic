@@ -57,6 +57,12 @@ interface HomematicPlatformConfig extends PlatformConfig {
   channelOverrides?: CcuChannelOverride[];
   /** When true, fetch current datapoint values from ReGa on startup to seed initial Matter state. Default false. */
   initialValuesFromRega?: boolean;
+  /**
+   * When false, newly discovered channels that have never been registered before are automatically
+   * added to the blacklist and start disabled. Has no effect on the very first startup (when no
+   * channels have been registered yet). Default true preserves existing behavior.
+   */
+  newDevicesDefaultEnabled?: boolean;
 }
 
 // Here we define the TemplatePlatform class, which extends the MatterbridgeDynamicPlatform.
@@ -311,6 +317,12 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     let enabledCount = 0;
     let registeredCount = 0;
 
+    // Snapshot before any setSelectDevice calls: treat zero registered channels as first install
+    // so we never auto-blacklist on a brand-new deployment or after a full reset.
+    const isFirstInstall = this.getSelectDevices().length === 0;
+    const shouldAutoDisable = !isFirstInstall && this.getPlatformConfig().newDevicesDefaultEnabled === false;
+    let autoDisabledCount = 0;
+
     // Group resolved channels by device address (used by the channel loop and select/enabled logic).
     const channelsByDevice = new Map<string, CcuChannelInfo[]>();
     for (const ch of channels) {
@@ -370,6 +382,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         for (const ch of resolvedSupportedChannels) {
           const displayName = this.getChannelDisplayName(ch);
           const selectSerial = this.getChannelSelectSerial(ch);
+          if (shouldAutoDisable && this.autoBlacklistIfNew(selectSerial, ch)) autoDisabledCount++;
           for (const oldKey of this.getLegacyChannelSelectKeys(ch)) {
             if (this.getSelectDevice(oldKey) !== undefined) {
               await this.clearDeviceSelect(oldKey);
@@ -399,6 +412,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         const displayName = this.getChannelDisplayName(resolvedChannel);
         const override = this.getChannelOverride(resolvedChannel.address);
         const selectSerial = this.getChannelSelectSerial(resolvedChannel);
+        if (shouldAutoDisable && this.autoBlacklistIfNew(selectSerial, resolvedChannel)) autoDisabledCount++;
         for (const oldKey of this.getLegacyChannelSelectKeys(resolvedChannel)) {
           if (this.getSelectDevice(oldKey) !== undefined) {
             await this.clearDeviceSelect(oldKey);
@@ -431,6 +445,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const override = this.getChannelOverride(channel.address);
       // Serial format: <interface>:<short-type>:<device>:<channel> — matches serialNumber in createEndpointForChannel.
       const selectSerial = this.getChannelSelectSerial(channel);
+      if (shouldAutoDisable && this.autoBlacklistIfNew(selectSerial, channel)) autoDisabledCount++;
       for (const oldKey of this.getLegacyChannelSelectKeys(channel)) {
         if (this.getSelectDevice(oldKey) !== undefined) {
           await this.clearDeviceSelect(oldKey);
@@ -455,6 +470,11 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       registeredCount++;
       this.deviceAddressToDevice.set(channel.deviceAddress, endpoint);
       await this.wireChannelEndpoint(endpoint, channel);
+    }
+
+    if (autoDisabledCount > 0) {
+      this.saveConfig(this.getPlatformConfig());
+      this.log.info(`Auto-disabled ${autoDisabledCount} newly discovered channel(s) (newDevicesDefaultEnabled=false). Enable them individually in the Matterbridge device list.`);
     }
 
     this.log.info(
@@ -2284,6 +2304,26 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   private getChannelSelectSerial(channel: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'type'>): string {
     const typeLabel = isSupportedChannelType(channel.type) ? channelTypeLabel(channel.type) : channel.type;
     return `${channel.interfaceName}:${typeLabel}:${channel.address}`;
+  }
+
+  /**
+   * Add selectSerial to the in-memory blackList if the channel has never been registered before.
+   * Updates the config object in place; callers must call `this.saveConfig()` after all
+   * auto-blacklisting for the current discovery pass is complete.
+   *
+   * @param selectSerial The canonical select serial for the channel.
+   * @param channel Channel info used to check legacy select keys.
+   * @returns true if selectSerial was newly added to the blackList, false if already known or listed.
+   */
+  private autoBlacklistIfNew(selectSerial: string, channel: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'type'>): boolean {
+    const isKnown = this.getSelectDevice(selectSerial) !== undefined || this.getLegacyChannelSelectKeys(channel).some((k) => this.getSelectDevice(k) !== undefined);
+    if (isKnown) return false;
+    const config = this.getPlatformConfig();
+    const blackList = Array.isArray(config.blackList) ? (config.blackList as string[]) : [];
+    if (blackList.includes(selectSerial)) return false;
+    blackList.push(selectSerial);
+    config.blackList = blackList;
+    return true;
   }
 
   private getLegacyChannelSelectKeys(channel: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'type'>): string[] {

@@ -213,6 +213,12 @@
       "type": "string",
       "default": ""
     },
+    "newDevicesDefaultEnabled": {
+      "title": "New Devices Default Enabled",
+      "description": "When false, newly discovered channels that have never been registered before are automatically added to the blacklist and start disabled. Has no effect on the very first startup. Default true preserves existing behavior.",
+      "type": "boolean",
+      "default": true
+    },
     "logRpcEvents": {
       "title": "Log RPC Events",
       "description": "Log individual RPC callback/event lines. Disable to reduce log volume during normal operation.",
