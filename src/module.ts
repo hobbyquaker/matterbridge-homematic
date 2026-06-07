@@ -396,6 +396,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const results = mapper(rawDeviceChannels, this.matterbridge.aggregatorVendorId, mappingOptions);
       if (results.length === 0) continue;
 
+      this.logDeviceMapperSelection(deviceAddress, deviceType, rawDeviceChannels);
+
       // Mark the device handled so the channel loop skips its channels entirely, regardless of
       // which individual endpoints are enabled below.
       deviceMapperHandled.add(deviceAddress);
@@ -2353,6 +2355,11 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
   private logChannelMapperSelection(channel: Pick<CcuChannelInfo, 'address' | 'name' | 'type'>, displayName: string): void {
     this.log.info(`Channel mapper: channel=${channel.address} name="${displayName}" type=${channel.type} mapper=${this.getChannelMapperKey(channel.type)}`);
+  }
+
+  private logDeviceMapperSelection(deviceAddress: string, deviceType: string, channels: Pick<CcuChannelInfo, 'name'>[]): void {
+    const names = [...new Set(channels.map((c) => c.name).filter(Boolean))].join(' | ');
+    this.log.info(`Device mapper: device=${deviceAddress} names="${names}" deviceType=${deviceType} mapper=${this.getDeviceMapperKey(deviceType)}`);
   }
 
   private getChannelMapperKey(channelType: string): string {
