@@ -73,7 +73,7 @@ export function buildModel(channel: CcuChannelInfo): string {
 }
 
 /**
- * Add the appropriate power source cluster to an endpoint and call `addRequiredClusterServers`.
+ * Add the appropriate power source cluster to an endpoint and call `addRequiredClusters`.
  * Battery-powered devices get a replaceable-battery cluster; all others get a wired cluster.
  *
  * @param {MatterbridgeEndpoint} endpoint The endpoint to finalize.
@@ -86,5 +86,5 @@ export function finalizeEndpoint(endpoint: MatterbridgeEndpoint, options: Channe
   } else {
     endpoint.createDefaultPowerSourceWiredClusterServer();
   }
-  return endpoint.addRequiredClusterServers();
+  return endpoint.addRequiredClusters();
 }
