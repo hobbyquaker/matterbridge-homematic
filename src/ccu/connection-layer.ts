@@ -710,6 +710,13 @@ export class CcuConnectionLayer extends EventEmitter {
       this.log.info(`RPC callback server listening protocol=${protocol} host=${host} port=${port}`);
     });
 
+    // binrpc's Server class wraps the underlying net.Server as `.server` and does not expose
+    // `.close()` directly. Shim it so shutdown can always call server.close(callback).
+    if (typeof (server as unknown as { close?: unknown }).close !== 'function') {
+      const underlying = (server as unknown as { server: { close(cb?: () => void): void } }).server;
+      (server as { close(cb?: () => void): void }).close = (cb?: () => void): void => underlying.close(cb);
+    }
+
     server.on('NotFound', (method: unknown, params: unknown) => {
       if (this.config.logging.logRpcEvents) {
         this.log.debug(`RPC callback <- protocol=${protocol} method=NotFound originalMethod=${String(method)} params=${this.formatPayload(params)}`);

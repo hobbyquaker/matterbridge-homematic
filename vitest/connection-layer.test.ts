@@ -116,3 +116,45 @@ describe('CcuConnectionLayer.discoverChannels', () => {
     expect(channels[0]?.address).toBe('000A1B2C3D:1');
   });
 });
+
+describe('CcuConnectionLayer.createRpcCallbackServer binrpc close shim', () => {
+  test('should shim close() on a binrpc server that lacks it', () => {
+    const innerClose = vi.fn();
+    const fakeServer = {
+      on: vi.fn(),
+      server: { close: innerClose },
+      // intentionally no close() — mirrors real binrpc Server
+    };
+    const mockFactory = {
+      createClient: vi.fn(),
+      createServer: vi.fn().mockReturnValue(fakeServer),
+    };
+
+    const layer = new CcuConnectionLayer(makeConfig(), makeLogger());
+    const result = (layer as any).createRpcCallbackServer('binrpc', mockFactory, '0.0.0.0', 2048);
+
+    expect(typeof result.close).toBe('function');
+    const cb = vi.fn();
+    result.close(cb);
+    expect(innerClose).toHaveBeenCalledWith(cb);
+  });
+
+  test('should not overwrite close() when the server already has one', () => {
+    const directClose = vi.fn();
+    const fakeServer = {
+      on: vi.fn(),
+      close: directClose,
+    };
+    const mockFactory = {
+      createClient: vi.fn(),
+      createServer: vi.fn().mockReturnValue(fakeServer),
+    };
+
+    const layer = new CcuConnectionLayer(makeConfig(), makeLogger());
+    const result = (layer as any).createRpcCallbackServer('xmlrpc', mockFactory, '0.0.0.0', 2049);
+
+    const cb = vi.fn();
+    result.close(cb);
+    expect(directClose).toHaveBeenCalledWith(cb);
+  });
+});
