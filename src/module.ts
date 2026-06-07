@@ -436,7 +436,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         this.log.info(`Device mapper: channel=${resolvedChannel.address} name="${displayName}" deviceType=${deviceType} mapper=${this.getDeviceMapperKey(deviceType)}`);
         this.deviceAddressToDevice.set(deviceAddress, endpoint);
         for (const ch of mappedChannels) {
-          await this.wireChannelEndpoint(endpoint, ch);
+          this.wireChannelEndpoint(endpoint, ch);
         }
       }
     }
@@ -480,7 +480,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       await this.registerDevice(endpoint);
       registeredCount++;
       this.deviceAddressToDevice.set(channel.deviceAddress, endpoint);
-      await this.wireChannelEndpoint(endpoint, channel);
+      this.wireChannelEndpoint(endpoint, channel);
     }
 
     if (autoDisabledCount > 0) {
@@ -506,14 +506,14 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    * @param {MatterbridgeEndpoint} endpoint The registered endpoint to wire.
    * @param {CcuChannelInfo} channel The Homematic channel this endpoint handles.
    */
-  private async wireChannelEndpoint(endpoint: MatterbridgeEndpoint, channel: CcuChannelInfo): Promise<void> {
+  private wireChannelEndpoint(endpoint: MatterbridgeEndpoint, channel: CcuChannelInfo): void {
     // Wire OnOff attribute for SWITCH channels
     if (channel.type === 'SWITCH' && this.ccuConnection) {
       const ccuConn = this.ccuConnection;
       // Track channel address for precise inbound event matching.
       this.channelAddressToDevice.set(channel.address, endpoint);
       try {
-        await endpoint.subscribeAttribute('OnOff', 'onOff', (value: boolean) => {
+        void endpoint.subscribeAttribute('OnOff', 'onOff', (value: boolean) => {
           const iface = channel.interfaceName;
           const address = channel.address;
           // Suppress setValue when this change was triggered by an incoming RPC event.
@@ -550,7 +550,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       // Track channel address for precise inbound event matching.
       this.channelAddressToDevice.set(channel.address, endpoint);
       try {
-        await endpoint.subscribeAttribute('LevelControl', 'currentLevel', (value: number | null) => {
+        void endpoint.subscribeAttribute('LevelControl', 'currentLevel', (value: number | null) => {
           const iface = channel.interfaceName;
           const address = channel.address;
           const level = value != null ? Math.round((value / 254) * 100) / 100 : 0;
@@ -570,7 +570,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       }
       // Wire OnOff for DIMMER: on -> LEVEL 1.005 (restore last level), off -> LEVEL 0.0.
       try {
-        await endpoint.subscribeAttribute('OnOff', 'onOff', (value: boolean) => {
+        void endpoint.subscribeAttribute('OnOff', 'onOff', (value: boolean) => {
           const iface = channel.interfaceName;
           const address = channel.address;
           // Suppress setValue when this change was triggered by an incoming RPC event.
@@ -637,7 +637,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       }
       // Subscribe to setpoint — write Homematic SET_POINT_TEMPERATURE on change.
       try {
-        await endpoint.subscribeAttribute('Thermostat', 'occupiedHeatingSetpoint', (value: number) => {
+        void endpoint.subscribeAttribute('Thermostat', 'occupiedHeatingSetpoint', (value: number) => {
           const address = channel.address;
           // Matter sends 0.01°C (hundredths); Homematic wants plain °C.
           const setpointDegC = value / 100;
@@ -663,7 +663,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       // Both use putParamset with CONTROL_MODE=1 (manual) + SET_POINT_TEMPERATURE, which is the
       // only reliable way to change the setpoint on HmIP-eTRV-style devices.
       try {
-        await endpoint.subscribeAttribute('Thermostat', 'systemMode', (value: number) => {
+        void endpoint.subscribeAttribute('Thermostat', 'systemMode', (value: number) => {
           const address = channel.address;
           const suppress = this.rpcEchoSuppress.get(address + ':thermMode');
           if (suppress !== undefined && suppress === value) {
@@ -746,7 +746,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const isTiltSupported = channel.tiltSupported === true;
       this.channelAddressToDevice.set(channel.address, endpoint);
       try {
-        await endpoint.subscribeAttribute('WindowCovering', 'targetPositionLiftPercent100ths', (value: number | null) => {
+        void endpoint.subscribeAttribute('WindowCovering', 'targetPositionLiftPercent100ths', (value: number | null) => {
           const iface = channel.interfaceName;
           const address = channel.address;
           const hmLevel = value != null ? Math.round((1 - value / 10000) * 100) / 100 : 0;
@@ -775,7 +775,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       }
       if (isTiltSupported) {
         try {
-          await endpoint.subscribeAttribute('WindowCovering', 'targetPositionTiltPercent100ths', (value: number | null) => {
+          void endpoint.subscribeAttribute('WindowCovering', 'targetPositionTiltPercent100ths', (value: number | null) => {
             const iface = channel.interfaceName;
             const address = channel.address;
             // Matter 0 = open tilt, 10000 = closed tilt → Homematic LEVEL_2: 0=closed, 1=open.
