@@ -122,7 +122,8 @@ describe('Matterbridge Plugin Template', () => {
         await device.executeCommandHandler('off', {}, 'onOff', {} as any, device);
       }
     }
-    // No real CCU in unit tests — getDevices() is empty, so no handlers are invoked.
+    // No real CCU in unit tests — no devices are registered, so no handlers are invoked.
+    expect(instance.getDevices()).toHaveLength(0);
   });
 
   it('should configure', async () => {
@@ -162,7 +163,6 @@ describe('Matterbridge Plugin Template', () => {
     };
 
     const validateDevice = vi.fn((candidates: string[]) => candidates.includes('HmIP-RF:SWITCH:000A1B2C3D:1'));
-    // @ts-expect-error Accessing inherited method for testing purposes
     instance.validateDevice = validateDevice;
 
     // @ts-expect-error Accessing private method for testing purposes
