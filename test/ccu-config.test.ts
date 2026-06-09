@@ -142,4 +142,57 @@ describe('CCU config parser', () => {
     expect(parsed.logging.logRpcEvents).toBe(true);
     expect(parsed.logging.truncatePayloadsToSingleLine).toBe(true);
   });
+
+  test('should parse string boolean values for boolean fields', () => {
+    const config = {
+      name: 'matterbridge-homematic',
+      type: 'DynamicPlatform',
+      version: '0.0.1',
+      bcrfEnabled: 'true',
+      iprfEnabled: 'false',
+      virtEnabled: 'true',
+      cuxdEnabled: 'false',
+    } as unknown as PlatformConfig;
+
+    const parsed = parseCcuConnectionConfig(config);
+
+    expect(parsed.bcrfEnabled).toBe(true);
+    expect(parsed.iprfEnabled).toBe(false);
+    expect(parsed.virtEnabled).toBe(true);
+    expect(parsed.cuxdEnabled).toBe(false);
+  });
+
+  test('should parse string number values for numeric fields', () => {
+    const config = {
+      name: 'matterbridge-homematic',
+      type: 'DynamicPlatform',
+      version: '0.0.1',
+      rpcBinPort: '9001',
+      rpcXmlPort: '9002',
+      queueTimeout: '8000',
+      queuePause: '500',
+    } as unknown as PlatformConfig;
+
+    const parsed = parseCcuConnectionConfig(config);
+
+    expect(parsed.rpcBinPort).toBe(9001);
+    expect(parsed.rpcXmlPort).toBe(9002);
+    expect(parsed.queueTimeout).toBe(8000);
+    expect(parsed.queuePause).toBe(500);
+  });
+
+  test('should fall back to defaults when string number values are not finite', () => {
+    const config = {
+      name: 'matterbridge-homematic',
+      type: 'DynamicPlatform',
+      version: '0.0.1',
+      rpcBinPort: 'notanumber',
+      rpcXmlPort: 'NaN',
+    } as unknown as PlatformConfig;
+
+    const parsed = parseCcuConnectionConfig(config);
+
+    expect(parsed.rpcBinPort).toBe(2048);
+    expect(parsed.rpcXmlPort).toBe(2049);
+  });
 });

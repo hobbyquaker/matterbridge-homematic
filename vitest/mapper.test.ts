@@ -382,6 +382,17 @@ describe('device mapper: HmIP-DRSI4', () => {
     // First SWITCH_VIRTUAL_RECEIVER of the single output.
     expect(results[0].channels[0].address).toBe(drsiRxAddress(0));
   });
+
+  test('should skip a SWITCH_TRANSMITTER that has no following SWITCH_VIRTUAL_RECEIVER', () => {
+    const mapper = getDeviceMapper('HmIP-DRSI4') as DeviceMapper;
+    // Only transmitters, no virtual receivers at all.
+    const channels = [
+      makeRawChannel({ type: 'SWITCH_TRANSMITTER', deviceType: 'HmIP-DRSI4', address: 'DRSI4XXXXX:1', deviceAddress: 'DRSI4XXXXX', channelIndex: 1 }),
+      makeRawChannel({ type: 'SWITCH_TRANSMITTER', deviceType: 'HmIP-DRSI4', address: 'DRSI4XXXXX:5', deviceAddress: 'DRSI4XXXXX', channelIndex: 5 }),
+    ];
+    const results = mapper(channels, VENDOR_ID, {});
+    expect(results).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------

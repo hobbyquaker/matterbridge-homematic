@@ -324,6 +324,15 @@ describe('TemplatePlatform private method coverage', () => {
     expect((inst as any).parseServiceMessageEntry({ DATAPOINT: 'UNREACH' })).toBeUndefined();
   });
 
+  test('parseServiceMessageEntry parses plain string format with address and datapoint', () => {
+    const result = (inst as any).parseServiceMessageEntry('AABB001122:0');
+    expect(result).toMatchObject({ deviceAddress: 'AABB001122', hasUnreach: false, hasLowBat: false });
+  });
+
+  test('parseServiceMessageEntry returns undefined for plain string with no extractable address', () => {
+    expect((inst as any).parseServiceMessageEntry('UNREACH')).toBeUndefined();
+  });
+
   test('collectServiceMessages collects unreachable and low-battery devices from array payload', () => {
     const unreachable = new Set<string>();
     const lowBattery = new Set<string>();

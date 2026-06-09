@@ -4,6 +4,7 @@
  * @file vitest/paramset-cache.test.ts
  */
 
+import { promises as nodeFs } from 'node:fs';
 import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -156,4 +157,44 @@ describe('ParamsetCache', () => {
     // Overlay wins over seed
     expect(result).toEqual(overlayEntry);
   });
+  test('should log a warning when the seed file contains a JSON array instead of an object', async () => {
+    const logger = makeLogger();
+    const { promises: fs } = await import('node:fs');
+    const seedPath = path.join(cacheDir, 'bad-seed.json');
+    await fs.mkdir(cacheDir, { recursive: true });
+    await fs.writeFile(seedPath, JSON.stringify([1, 2, 3]), 'utf-8');
+
+    const cache = new ParamsetCache(logger, cacheDir);
+    await cache.load(seedPath);
+
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('is not a JSON object'));
+  });
+
+  test('should log a warning when the overlay file contains a JSON array instead of an object', async () => {
+    const logger = makeLogger();
+    const { promises: fs } = await import('node:fs');
+    await fs.mkdir(cacheDir, { recursive: true });
+    const overlayPath = path.join(cacheDir, 'matterbridge-homematic-paramset.cache.json');
+    await fs.writeFile(overlayPath, JSON.stringify([1, 2, 3]), 'utf-8');
+
+    const cache = new ParamsetCache(logger, cacheDir);
+    await cache.load('/nonexistent/paramsets.json');
+
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('is not a JSON object'));
+  });
+
+  test('should log a warning when overlay write fails', async () => {
+    const logger = makeLogger();
+    const cache = new ParamsetCache(logger, cacheDir);
+    await cache.load('/nonexistent/paramsets.json');
+
+    cache.store('HmIP-RF', 'HmIP-WRC2', '1.4.2', 2, 'MAINTENANCE', 'VALUES', { LOW_BAT: { TYPE: 'BOOL' } });
+
+    const writeFileSpy = vi.spyOn(nodeFs, 'writeFile').mockRejectedValueOnce(new Error('disk full'));
+    await cache.save();
+
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Paramset cache overlay save failed'));
+    writeFileSpy.mockRestore();
+  });
 });
+
