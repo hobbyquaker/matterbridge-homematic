@@ -913,4 +913,42 @@ describe('TemplatePlatform private method coverage', () => {
     await (inst as any).updateDeviceReachable('REACH004', ep, true);
     expect(ep.updateAttribute).not.toHaveBeenCalled();
   });
+
+  // === updateMainsPoweredDeviceSet ===
+
+  test('updateMainsPoweredDeviceSet classifies HM-LC prefix devices and skips non-mains and non-zero-index channels', () => {
+    const channels: CcuChannelInfo[] = [
+      // channelIndex 0 + HM-LC prefix → mains-powered
+      {
+        address: 'HM123456:0',
+        deviceAddress: 'HM123456',
+        channelIndex: 0,
+        type: 'SWITCH_TRANSMITTER',
+        deviceType: 'HM-LC-Sw1-FM',
+        interfaceName: 'BidCos-RF',
+        batteryPowered: false,
+      },
+      // channelIndex 1 + HM-LC prefix → skipped (non-zero index)
+      { address: 'HM123456:1', deviceAddress: 'HM123456', channelIndex: 1, type: 'SWITCH', deviceType: 'HM-LC-Sw1-FM', interfaceName: 'BidCos-RF', batteryPowered: false },
+      // channelIndex 0 + HmIP prefix → not mains
+      { address: 'HMIP001:0', deviceAddress: 'HMIP001', channelIndex: 0, type: 'MAINTENANCE', deviceType: 'HmIP-BSM', interfaceName: 'HmIP-RF', batteryPowered: false },
+    ];
+
+    (inst as any).updateMainsPoweredDeviceSet(channels);
+
+    expect((inst as any).mainsPoweredDevices.has('HM123456')).toBe(true);
+    expect((inst as any).mainsPoweredDevices.has('HMIP001')).toBe(false);
+    expect((inst as any).mainsPoweredDevices.size).toBe(1);
+    expect((inst as any).deviceBatteryHints.get('HM123456')).toBe(false);
+
+    (inst as any).mainsPoweredDevices.clear();
+    (inst as any).deviceBatteryHints.delete('HM123456');
+  });
+
+  test('updateMainsPoweredDeviceSet clears stale entries before reclassifying', () => {
+    (inst as any).mainsPoweredDevices.add('STALE_MAINS');
+    (inst as any).updateMainsPoweredDeviceSet([]);
+    expect((inst as any).mainsPoweredDevices.has('STALE_MAINS')).toBe(false);
+    expect((inst as any).mainsPoweredDevices.size).toBe(0);
+  });
 });
