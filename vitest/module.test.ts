@@ -1061,4 +1061,113 @@ describe('TemplatePlatform private method coverage', () => {
     discoverSpy.mockRestore();
     vi.useRealTimers();
   });
+
+  // === wireChannelEndpoint — non-subscription tracking paths ===
+  // These channel types only register the endpoint in a lookup map (no CCU connection required).
+
+  test('wireChannelEndpoint registers SHUTTER_CONTACT in channelAddressToDevice', () => {
+    const ep = makeEndpoint(['BooleanState']);
+    const channel: CcuChannelInfo = {
+      address: 'WIRE001:1',
+      deviceAddress: 'WIRE001',
+      channelIndex: 1,
+      type: 'SHUTTER_CONTACT',
+      interfaceName: 'HmIP-RF',
+      batteryPowered: false,
+    };
+    (inst as any).wireChannelEndpoint(ep, channel);
+    expect((inst as any).channelAddressToDevice.get('WIRE001:1')).toBe(ep);
+    (inst as any).channelAddressToDevice.delete('WIRE001:1');
+  });
+
+  test('wireChannelEndpoint registers MOTION_DETECTOR in channelAddressToDevice', () => {
+    const ep = makeEndpoint(['OccupancySensing']);
+    const channel: CcuChannelInfo = {
+      address: 'WIRE002:1',
+      deviceAddress: 'WIRE002',
+      channelIndex: 1,
+      type: 'MOTION_DETECTOR',
+      interfaceName: 'HmIP-RF',
+      batteryPowered: false,
+    };
+    (inst as any).wireChannelEndpoint(ep, channel);
+    expect((inst as any).channelAddressToDevice.get('WIRE002:1')).toBe(ep);
+    (inst as any).channelAddressToDevice.delete('WIRE002:1');
+  });
+
+  test('wireChannelEndpoint registers TEMPERATURE_HUMIDITY_TRANSMITTER in channelAddressToDevice', () => {
+    const ep = makeEndpoint(['TemperatureMeasurement', 'RelativeHumidityMeasurement']);
+    const channel: CcuChannelInfo = {
+      address: 'WIRE003:1',
+      deviceAddress: 'WIRE003',
+      channelIndex: 1,
+      type: 'TEMPERATURE_HUMIDITY_TRANSMITTER',
+      interfaceName: 'HmIP-RF',
+      batteryPowered: false,
+    };
+    (inst as any).wireChannelEndpoint(ep, channel);
+    expect((inst as any).channelAddressToDevice.get('WIRE003:1')).toBe(ep);
+    (inst as any).channelAddressToDevice.delete('WIRE003:1');
+  });
+
+  test('wireChannelEndpoint registers WEATHER in channelAddressToDevice', () => {
+    const ep = makeEndpoint(['TemperatureMeasurement']);
+    const channel: CcuChannelInfo = {
+      address: 'WIRE004:1',
+      deviceAddress: 'WIRE004',
+      channelIndex: 1,
+      type: 'WEATHER',
+      interfaceName: 'HmIP-RF',
+      batteryPowered: false,
+    };
+    (inst as any).wireChannelEndpoint(ep, channel);
+    expect((inst as any).channelAddressToDevice.get('WIRE004:1')).toBe(ep);
+    (inst as any).channelAddressToDevice.delete('WIRE004:1');
+  });
+
+  test('wireChannelEndpoint registers SMOKE_DETECTOR in channelAddressToDevice', () => {
+    const ep = makeEndpoint(['SmokeCoAlarm']);
+    const channel: CcuChannelInfo = {
+      address: 'WIRE005:1',
+      deviceAddress: 'WIRE005',
+      channelIndex: 1,
+      type: 'SMOKE_DETECTOR',
+      interfaceName: 'HmIP-RF',
+      batteryPowered: false,
+    };
+    (inst as any).wireChannelEndpoint(ep, channel);
+    expect((inst as any).channelAddressToDevice.get('WIRE005:1')).toBe(ep);
+    (inst as any).channelAddressToDevice.delete('WIRE005:1');
+  });
+
+  test('wireChannelEndpoint registers ALARMSTATE in channelAddressToDevice', () => {
+    const ep = makeEndpoint(['BooleanState']);
+    const channel: CcuChannelInfo = {
+      address: 'WIRE006:1',
+      deviceAddress: 'WIRE006',
+      channelIndex: 1,
+      type: 'ALARMSTATE',
+      interfaceName: 'HmIP-RF',
+      batteryPowered: false,
+    };
+    (inst as any).wireChannelEndpoint(ep, channel);
+    expect((inst as any).channelAddressToDevice.get('WIRE006:1')).toBe(ep);
+    (inst as any).channelAddressToDevice.delete('WIRE006:1');
+  });
+
+  test('wireChannelEndpoint registers ROTARY_HANDLE_SENSOR in rotaryHandleChannels (not channelAddressToDevice)', () => {
+    const ep = makeEndpoint(['BooleanState']);
+    const channel: CcuChannelInfo = {
+      address: 'WIRE007:1',
+      deviceAddress: 'WIRE007',
+      channelIndex: 1,
+      type: 'ROTARY_HANDLE_SENSOR',
+      interfaceName: 'HmIP-RF',
+      batteryPowered: false,
+    };
+    (inst as any).wireChannelEndpoint(ep, channel);
+    expect((inst as any).rotaryHandleChannels.get('WIRE007:1')).toBe(ep);
+    expect((inst as any).channelAddressToDevice.get('WIRE007:1')).toBeUndefined();
+    (inst as any).rotaryHandleChannels.delete('WIRE007:1');
+  });
 });
