@@ -15,7 +15,7 @@
 import { MatterbridgeEndpoint } from 'matterbridge';
 
 import { CHANNEL_MAPPERS, channelTypeToKey } from '../src/ccu/channel-mapper/index.js';
-import { createEndpointForChannel, getDeviceMapper } from '../src/ccu/device-mapper.js';
+import { createEndpointForChannel, getDeviceMapper, inferSwitchMatterTypeFromName, isSupportedChannelType } from '../src/ccu/device-mapper.js';
 import { DEVICE_MAPPERS, deviceTypeToKey } from '../src/ccu/device-mapper/index.js';
 import type { CcuChannelInfo, DeviceMapper, SupportedChannelType } from '../src/ccu/types.js';
 import { SUPPORTED_CHANNEL_TYPES } from '../src/ccu/types.js';
@@ -487,4 +487,220 @@ describe('device mapper: HmIP-STHD', () => {
       expect(ep.hasClusterServer('RelativeHumidityMeasurement')).toBe(true);
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// inferSwitchMatterTypeFromName
+// ---------------------------------------------------------------------------
+
+describe('inferSwitchMatterTypeFromName', () => {
+  test('should return undefined for undefined input', () => {
+    expect(inferSwitchMatterTypeFromName(undefined)).toBeUndefined();
+  });
+
+  test('should return undefined for empty string', () => {
+    expect(inferSwitchMatterTypeFromName('')).toBeUndefined();
+  });
+
+  test('should return undefined when no keyword matches', () => {
+    expect(inferSwitchMatterTypeFromName('Heizung')).toBeUndefined();
+    expect(inferSwitchMatterTypeFromName('Fenster')).toBeUndefined();
+  });
+
+  test.each([
+    ['standby'],
+    ['Standby Küche'],
+    ['plug socket'],
+    ['Steckdose Bad'],
+    ['Buchse'],
+  ])('should return "outlet" for name containing outlet keyword: %s', (name) => {
+    expect(inferSwitchMatterTypeFromName(name)).toBe('outlet');
+  });
+
+  test.each([
+    ['Licht'],
+    ['licht wohnzimmer'],
+    ['light switch'],
+    ['Lampe'],
+    ['lamp 1'],
+    ['Leuchte'],
+  ])('should return "light" for name containing light keyword: %s', (name) => {
+    expect(inferSwitchMatterTypeFromName(name)).toBe('light');
+  });
+
+  test('should be case-insensitive (STECKDOSE → outlet)', () => {
+    expect(inferSwitchMatterTypeFromName('STECKDOSE')).toBe('outlet');
+  });
+
+  test('should be case-insensitive (LICHT → light)', () => {
+    expect(inferSwitchMatterTypeFromName('LICHT')).toBe('light');
+  });
+
+  test('should prefer outlet over light when name contains both keywords', () => {
+    // 'plug' is checked before 'light', so outlet wins.
+    expect(inferSwitchMatterTypeFromName('standby light')).toBe('outlet');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isSupportedChannelType
+// ---------------------------------------------------------------------------
+
+describe('isSupportedChannelType', () => {
+  test.each(SUPPORTED_CHANNEL_TYPES)('should return true for supported type: %s', (type) => {
+    expect(isSupportedChannelType(type)).toBe(true);
+  });
+
+  test.each(['MAINTENANCE', 'POWERMETER', 'SWITCH_TRANSMITTER', 'SWITCH_VIRTUAL_RECEIVER', 'ENERGIE_METER_TRANSMITTER', ''])(
+    'should return false for unsupported type: %s',
+    (type) => {
+      expect(isSupportedChannelType(type)).toBe(false);
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// createEndpointForChannel – error path
+// ---------------------------------------------------------------------------
+
+describe('createEndpointForChannel – error path', () => {
+  test('should throw when the channel type has no registered mapper', () => {
+    const ch = {
+      address: 'X:1',
+      deviceAddress: 'X',
+      channelIndex: 1,
+      type: 'MAINTENANCE' as SupportedChannelType,
+      interfaceName: 'BidCos-RF' as const,
+      batteryPowered: false,
+    };
+    expect(() => createEndpointForChannel(ch, VENDOR_ID)).toThrow(/No channel mapper registered for type/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-mapper cluster verification
+// ---------------------------------------------------------------------------
+
+describe('channel mapper clusters: ALARMSTATE', () => {
+  test('should have BooleanState cluster', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'ALARMSTATE' }), VENDOR_ID);
+    expect(ep.hasClusterServer('BooleanState')).toBe(true);
+  });
+
+  test('should have PowerSource cluster', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'ALARMSTATE' }), VENDOR_ID);
+    expect(ep.hasClusterServer('PowerSource')).toBe(true);
+  });
+});
+
+describe('channel mapper clusters: KEY', () => {
+  test('should have Switch cluster', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'KEY' }), VENDOR_ID);
+    expect(ep.hasClusterServer('Switch')).toBe(true);
+  });
+
+  test('should have PowerSource cluster', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'KEY' }), VENDOR_ID);
+    expect(ep.hasClusterServer('PowerSource')).toBe(true);
+  });
+});
+
+describe('channel mapper clusters: KEY_TRANSCEIVER', () => {
+  test('should have Switch cluster', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'KEY_TRANSCEIVER' }), VENDOR_ID);
+    expect(ep.hasClusterServer('Switch')).toBe(true);
+  });
+
+  test('should have PowerSource cluster', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'KEY_TRANSCEIVER' }), VENDOR_ID);
+    expect(ep.hasClusterServer('PowerSource')).toBe(true);
+  });
+});
+
+describe('channel mapper clusters: ROTARY_HANDLE_SENSOR', () => {
+  test('should have BooleanState cluster', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'ROTARY_HANDLE_SENSOR' }), VENDOR_ID);
+    expect(ep.hasClusterServer('BooleanState')).toBe(true);
+  });
+
+  test('should have PowerSource cluster', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'ROTARY_HANDLE_SENSOR' }), VENDOR_ID);
+    expect(ep.hasClusterServer('PowerSource')).toBe(true);
+  });
+});
+
+describe('channel mapper clusters: SMOKE_DETECTOR', () => {
+  test('should have SmokeCoAlarm cluster', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'SMOKE_DETECTOR' }), VENDOR_ID);
+    expect(ep.hasClusterServer('SmokeCoAlarm')).toBe(true);
+  });
+
+  test('should have PowerSource cluster', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'SMOKE_DETECTOR' }), VENDOR_ID);
+    expect(ep.hasClusterServer('PowerSource')).toBe(true);
+  });
+});
+
+describe('channel mapper clusters: TEMPERATURE_HUMIDITY_TRANSMITTER', () => {
+  test('should have TemperatureMeasurement cluster', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'TEMPERATURE_HUMIDITY_TRANSMITTER' }), VENDOR_ID);
+    expect(ep.hasClusterServer('TemperatureMeasurement')).toBe(true);
+  });
+
+  test('should have RelativeHumidityMeasurement cluster', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'TEMPERATURE_HUMIDITY_TRANSMITTER' }), VENDOR_ID);
+    expect(ep.hasClusterServer('RelativeHumidityMeasurement')).toBe(true);
+  });
+
+  test('should have PowerSource cluster', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'TEMPERATURE_HUMIDITY_TRANSMITTER' }), VENDOR_ID);
+    expect(ep.hasClusterServer('PowerSource')).toBe(true);
+  });
+});
+
+describe('channel mapper clusters: THERMALCONTROL_TRANSMIT', () => {
+  test('should have Thermostat cluster', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'THERMALCONTROL_TRANSMIT' }), VENDOR_ID);
+    expect(ep.hasClusterServer('Thermostat')).toBe(true);
+  });
+
+  test('should have PowerSource cluster', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'THERMALCONTROL_TRANSMIT' }), VENDOR_ID);
+    expect(ep.hasClusterServer('PowerSource')).toBe(true);
+  });
+});
+
+describe('channel mapper clusters: HEATING_CLIMATECONTROL_TRANSCEIVER', () => {
+  test('should have Thermostat cluster', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'HEATING_CLIMATECONTROL_TRANSCEIVER' }), VENDOR_ID);
+    expect(ep.hasClusterServer('Thermostat')).toBe(true);
+  });
+});
+
+describe('channel mapper clusters: SWITCH with power meter', () => {
+  test('should have ElectricalPowerMeasurement cluster when powerMeterChannelAddress is set', () => {
+    const ch = makeChannel({ type: 'SWITCH', powerMeterChannelAddress: 'OEQ001:4' });
+    const ep = createEndpointForChannel(ch, VENDOR_ID);
+    expect(ep.hasClusterServer('ElectricalPowerMeasurement')).toBe(true);
+  });
+
+  test('should NOT have ElectricalPowerMeasurement cluster when powerMeterChannelAddress is absent', () => {
+    const ch = makeChannel({ type: 'SWITCH' });
+    const ep = createEndpointForChannel(ch, VENDOR_ID);
+    expect(ep.hasClusterServer('ElectricalPowerMeasurement')).toBe(false);
+  });
+});
+
+describe('channel mapper clusters: battery-powered variant', () => {
+  test('should have PowerSource cluster for battery-powered SHUTTER_CONTACT', () => {
+    const ch = makeChannel({ type: 'SHUTTER_CONTACT', batteryPowered: true });
+    const ep = createEndpointForChannel(ch, VENDOR_ID);
+    expect(ep.hasClusterServer('PowerSource')).toBe(true);
+  });
+
+  test('should have PowerSource cluster for battery-powered MOTION_DETECTOR', () => {
+    const ch = makeChannel({ type: 'MOTION_DETECTOR', batteryPowered: true });
+    const ep = createEndpointForChannel(ch, VENDOR_ID);
+    expect(ep.hasClusterServer('PowerSource')).toBe(true);
+  });
 });
