@@ -18,24 +18,11 @@ import { getBatteryVoltageRange, getMatchingMainsPoweredPrefix, isAlwaysMainsPow
 // ---------------------------------------------------------------------------
 
 describe('isAlwaysMainsPoweredDeviceType', () => {
-  test.each([
-    ['HM-LC-Sw1-Pl'],
-    ['HM-LC-Sw2-FM'],
-    ['HM-LC-Dim1L-Pl3'],
-    ['HM-ES-TX-WM'],
-    ['HM-ES-PMSw1-Pl'],
-  ])('should return true for mains-powered prefix: %s', (deviceType) => {
+  test.each([['HM-LC-Sw1-Pl'], ['HM-LC-Sw2-FM'], ['HM-LC-Dim1L-Pl3'], ['HM-ES-TX-WM'], ['HM-ES-PMSw1-Pl']])('should return true for mains-powered prefix: %s', (deviceType) => {
     expect(isAlwaysMainsPoweredDeviceType(deviceType)).toBe(true);
   });
 
-  test.each([
-    ['HmIP-BSM'],
-    ['HmIP-STH'],
-    ['HmIP-STHD'],
-    ['HM-CC-RT-DN'],
-    ['HMIP-WRC2'],
-    [''],
-  ])('should return false for non-mains-powered type: %s', (deviceType) => {
+  test.each([['HmIP-BSM'], ['HmIP-STH'], ['HmIP-STHD'], ['HM-CC-RT-DN'], ['HMIP-WRC2'], ['']])('should return false for non-mains-powered type: %s', (deviceType) => {
     expect(isAlwaysMainsPoweredDeviceType(deviceType)).toBe(false);
   });
 

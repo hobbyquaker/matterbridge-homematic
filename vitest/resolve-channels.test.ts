@@ -21,9 +21,7 @@ import type { CcuChannelInfo } from '../src/ccu/types.js';
 // Helper
 // ---------------------------------------------------------------------------
 
-function makeChannel(
-  overrides: Pick<CcuChannelInfo, 'address' | 'deviceAddress' | 'channelIndex' | 'type' | 'interfaceName'> & Partial<CcuChannelInfo>,
-): CcuChannelInfo {
+function makeChannel(overrides: Pick<CcuChannelInfo, 'address' | 'deviceAddress' | 'channelIndex' | 'type' | 'interfaceName'> & Partial<CcuChannelInfo>): CcuChannelInfo {
   return { ...overrides } as CcuChannelInfo;
 }
 
@@ -65,7 +63,15 @@ describe('resolveChannelsForMatter – classic passthrough', () => {
   });
 
   test('should preserve optional fields on classic channels', () => {
-    const ch = makeChannel({ address: 'OEQ001:1', deviceAddress: 'OEQ001', channelIndex: 1, type: 'SWITCH', interfaceName: 'BidCos-RF', name: 'Küchen Licht', batteryPowered: false });
+    const ch = makeChannel({
+      address: 'OEQ001:1',
+      deviceAddress: 'OEQ001',
+      channelIndex: 1,
+      type: 'SWITCH',
+      interfaceName: 'BidCos-RF',
+      name: 'Küchen Licht',
+      batteryPowered: false,
+    });
     const result = resolveChannelsForMatter([ch]);
     expect(result[0].name).toBe('Küchen Licht');
     expect(result[0].batteryPowered).toBe(false);
@@ -348,30 +354,22 @@ describe('resolveChannelsForMatter – KEY_TRANSCEIVER filtering', () => {
 
 describe('resolveChannelsForMatter – HmIP-HEATING ch5/VirtualDevices filtering', () => {
   test('should filter out HmIP-HEATING channel 5 on VirtualDevices', () => {
-    const channels = [
-      makeChannel({ address: 'HTG001:5', deviceAddress: 'HTG001', channelIndex: 5, type: 'SWITCH', deviceType: 'HmIP-HEATING', interfaceName: 'VirtualDevices' }),
-    ];
+    const channels = [makeChannel({ address: 'HTG001:5', deviceAddress: 'HTG001', channelIndex: 5, type: 'SWITCH', deviceType: 'HmIP-HEATING', interfaceName: 'VirtualDevices' })];
     expect(resolveChannelsForMatter(channels)).toHaveLength(0);
   });
 
   test('should NOT filter HmIP-HEATING channel 5 on HmIP-RF', () => {
-    const channels = [
-      makeChannel({ address: 'HTG001:5', deviceAddress: 'HTG001', channelIndex: 5, type: 'SWITCH', deviceType: 'HmIP-HEATING', interfaceName: 'HmIP-RF' }),
-    ];
+    const channels = [makeChannel({ address: 'HTG001:5', deviceAddress: 'HTG001', channelIndex: 5, type: 'SWITCH', deviceType: 'HmIP-HEATING', interfaceName: 'HmIP-RF' })];
     expect(resolveChannelsForMatter(channels)).toHaveLength(1);
   });
 
   test('should NOT filter HmIP-HEATING channel 4 on VirtualDevices', () => {
-    const channels = [
-      makeChannel({ address: 'HTG001:4', deviceAddress: 'HTG001', channelIndex: 4, type: 'SWITCH', deviceType: 'HmIP-HEATING', interfaceName: 'VirtualDevices' }),
-    ];
+    const channels = [makeChannel({ address: 'HTG001:4', deviceAddress: 'HTG001', channelIndex: 4, type: 'SWITCH', deviceType: 'HmIP-HEATING', interfaceName: 'VirtualDevices' })];
     expect(resolveChannelsForMatter(channels)).toHaveLength(1);
   });
 
   test('should NOT filter channel 5 from a different deviceType on VirtualDevices', () => {
-    const channels = [
-      makeChannel({ address: 'DEV001:5', deviceAddress: 'DEV001', channelIndex: 5, type: 'SWITCH', deviceType: 'HmIP-OTHER', interfaceName: 'VirtualDevices' }),
-    ];
+    const channels = [makeChannel({ address: 'DEV001:5', deviceAddress: 'DEV001', channelIndex: 5, type: 'SWITCH', deviceType: 'HmIP-OTHER', interfaceName: 'VirtualDevices' })];
     expect(resolveChannelsForMatter(channels)).toHaveLength(1);
   });
 });

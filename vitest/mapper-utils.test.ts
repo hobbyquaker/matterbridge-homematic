@@ -49,19 +49,12 @@ describe('channelTypeLabel', () => {
     expect(channelTypeLabel(type as SupportedChannelType)).toBe(expected);
   });
 
-  test.each([
-    ['SWITCH'],
-    ['BLIND'],
-    ['DIMMER'],
-    ['WEATHER'],
-    ['KEYMATIC'],
-    ['ALARMSTATE'],
-    ['KEY'],
-    ['ROTARY_HANDLE_SENSOR'],
-    ['TEMPERATURE_HUMIDITY_TRANSMITTER'],
-  ])('should return type unchanged for %s (no abbreviation defined)', (type) => {
-    expect(channelTypeLabel(type as SupportedChannelType)).toBe(type);
-  });
+  test.each([['SWITCH'], ['BLIND'], ['DIMMER'], ['WEATHER'], ['KEYMATIC'], ['ALARMSTATE'], ['KEY'], ['ROTARY_HANDLE_SENSOR'], ['TEMPERATURE_HUMIDITY_TRANSMITTER']])(
+    'should return type unchanged for %s (no abbreviation defined)',
+    (type) => {
+      expect(channelTypeLabel(type as SupportedChannelType)).toBe(type);
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------

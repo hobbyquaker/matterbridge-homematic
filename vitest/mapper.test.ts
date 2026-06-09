@@ -507,24 +507,11 @@ describe('inferSwitchMatterTypeFromName', () => {
     expect(inferSwitchMatterTypeFromName('Fenster')).toBeUndefined();
   });
 
-  test.each([
-    ['standby'],
-    ['Standby Küche'],
-    ['plug socket'],
-    ['Steckdose Bad'],
-    ['Buchse'],
-  ])('should return "outlet" for name containing outlet keyword: %s', (name) => {
+  test.each([['standby'], ['Standby Küche'], ['plug socket'], ['Steckdose Bad'], ['Buchse']])('should return "outlet" for name containing outlet keyword: %s', (name) => {
     expect(inferSwitchMatterTypeFromName(name)).toBe('outlet');
   });
 
-  test.each([
-    ['Licht'],
-    ['licht wohnzimmer'],
-    ['light switch'],
-    ['Lampe'],
-    ['lamp 1'],
-    ['Leuchte'],
-  ])('should return "light" for name containing light keyword: %s', (name) => {
+  test.each([['Licht'], ['licht wohnzimmer'], ['light switch'], ['Lampe'], ['lamp 1'], ['Leuchte']])('should return "light" for name containing light keyword: %s', (name) => {
     expect(inferSwitchMatterTypeFromName(name)).toBe('light');
   });
 
