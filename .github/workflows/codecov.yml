@@ -56,10 +56,14 @@ jobs:
       - name: Link matterbridge in the project
         run: npm link matterbridge --no-fund --no-audit
 
-      - name: Run tests
+      - name: Run tests (Jest)
         run: npm run test:coverage -- --forceExit --testTimeout=30000
+
+      - name: Run tests (Vitest)
+        run: npm run test:vitest:coverage
 
       - name: Upload results to Codecov
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage/lcov.info,coverage/vitest/lcov.info
