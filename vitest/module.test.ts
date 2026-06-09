@@ -951,4 +951,74 @@ describe('TemplatePlatform private method coverage', () => {
     expect((inst as any).mainsPoweredDevices.has('STALE_MAINS')).toBe(false);
     expect((inst as any).mainsPoweredDevices.size).toBe(0);
   });
+
+  // === refreshDeviceNames ===
+
+  test('refreshDeviceNames updates endpoint deviceName and nodeLabel when channel name changes', async () => {
+    const ep = makeEndpoint(['BridgedDeviceBasicInformation']);
+    ep.deviceName = 'OldName';
+    (inst as any).channelAddressToDevice.set('REFRESH001:1', ep);
+    const setSelectSpy = vi.spyOn(inst, 'setSelectDevice').mockImplementation(() => {});
+
+    const updatedChannels: CcuChannelInfo[] = [
+      {
+        address: 'REFRESH001:1',
+        deviceAddress: 'REFRESH001',
+        channelIndex: 1,
+        type: 'SWITCH',
+        interfaceName: 'HmIP-RF',
+        batteryPowered: false,
+        name: 'NewName',
+      },
+    ];
+
+    await (inst as any).refreshDeviceNames(updatedChannels);
+
+    expect(ep.deviceName).toBe('NewName');
+    expect(ep.updateAttribute).toHaveBeenCalledWith('BridgedDeviceBasicInformation', 'nodeLabel', 'NewName');
+    expect(setSelectSpy).toHaveBeenCalled();
+
+    (inst as any).channelAddressToDevice.delete('REFRESH001:1');
+    setSelectSpy.mockRestore();
+  });
+
+  test('refreshDeviceNames does not update when name is unchanged', async () => {
+    const ep = makeEndpoint(['BridgedDeviceBasicInformation']);
+    ep.deviceName = 'SameName';
+    (inst as any).channelAddressToDevice.set('REFRESH002:1', ep);
+
+    const updatedChannels: CcuChannelInfo[] = [
+      {
+        address: 'REFRESH002:1',
+        deviceAddress: 'REFRESH002',
+        channelIndex: 1,
+        type: 'SWITCH',
+        interfaceName: 'HmIP-RF',
+        batteryPowered: false,
+        name: 'SameName',
+      },
+    ];
+
+    await (inst as any).refreshDeviceNames(updatedChannels);
+
+    expect(ep.updateAttribute).not.toHaveBeenCalled();
+
+    (inst as any).channelAddressToDevice.delete('REFRESH002:1');
+  });
+
+  test('refreshDeviceNames skips channels not registered in channelAddressToDevice', async () => {
+    const updatedChannels: CcuChannelInfo[] = [
+      {
+        address: 'REFRESH003:1',
+        deviceAddress: 'REFRESH003',
+        channelIndex: 1,
+        type: 'SWITCH',
+        interfaceName: 'HmIP-RF',
+        batteryPowered: false,
+        name: 'SomeName',
+      },
+    ];
+
+    await expect((inst as any).refreshDeviceNames(updatedChannels)).resolves.not.toThrow();
+  });
 });
