@@ -231,6 +231,11 @@ describe('CcuConnectionLayer with hm-simulator', () => {
     await expect(layer.setChannelDatapointValue('HmIP-RF', '000213C990986A:3', 'STATE', true)).resolves.not.toThrow();
   });
 
+  test('should write a paramset via putChannelParamsetValues without throwing', async () => {
+    // putParamset on a SWITCH_VIRTUAL_RECEIVER channel with a known VALUES key.
+    await expect(layer.putChannelParamsetValues('HmIP-RF', '000213C990986A:3', { STATE: false })).resolves.not.toThrow();
+  });
+
   // ---------------------------------------------------------------------------
   // RPC event reception
   // ---------------------------------------------------------------------------
