@@ -1021,4 +1021,44 @@ describe('TemplatePlatform private method coverage', () => {
 
     await expect((inst as any).refreshDeviceNames(updatedChannels)).resolves.not.toThrow();
   });
+
+  // === scheduleBatteryRediscovery ===
+
+  test('scheduleBatteryRediscovery sets a timer and is idempotent on repeated calls', () => {
+    vi.useFakeTimers();
+
+    (inst as any).batteryRediscoveryTimer = undefined;
+    (inst as any).scheduleBatteryRediscovery('test-reason');
+
+    const timer = (inst as any).batteryRediscoveryTimer;
+    expect(timer).toBeDefined();
+
+    // Second call must be a no-op — timer reference must not change.
+    (inst as any).scheduleBatteryRediscovery('test-reason-2');
+    expect((inst as any).batteryRediscoveryTimer).toBe(timer);
+
+    clearTimeout(timer);
+    (inst as any).batteryRediscoveryTimer = undefined;
+    vi.useRealTimers();
+  });
+
+  test('scheduleBatteryRediscovery clears the timer reference when the callback fires', async () => {
+    vi.useFakeTimers();
+
+    // discoverDevices does nothing useful without a CCU — just ensure it doesn't throw.
+    const discoverSpy = vi.spyOn(inst as any, 'discoverDevices').mockResolvedValue(undefined);
+
+    (inst as any).batteryRediscoveryTimer = undefined;
+    (inst as any).scheduleBatteryRediscovery('test-fire');
+
+    expect((inst as any).batteryRediscoveryTimer).toBeDefined();
+
+    await vi.runAllTimersAsync();
+
+    expect((inst as any).batteryRediscoveryTimer).toBeUndefined();
+    expect(discoverSpy).toHaveBeenCalled();
+
+    discoverSpy.mockRestore();
+    vi.useRealTimers();
+  });
 });
