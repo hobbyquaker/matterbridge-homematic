@@ -1,87 +1,63 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Matterbridge Homematic</title>
-    <link rel="stylesheet" href="style.css" />
-  </head>
-  <body>
-    <header>
-      <div class="header-inner">
-        <h1>Homematic Channel Configuration</h1>
-        <input id="search" type="search" placeholder="Filter by name or address…" autocomplete="off" />
-      </div>
-    </header>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Homematic Channel Config</title>
+  <style>
+    body { font-family: Segoe UI, sans-serif; margin: 0; background: #f5f7fb; color: #1a2233; }
+    .wrap { max-width: 600px; margin: 24px auto; background: #fff; border-radius: 10px; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); }
+    h1 { margin: 0 0 4px 0; font-size: 20px; }
+    .subtitle { margin: 0 0 20px 0; color: #4a5a78; font-size: 13px; }
+    .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+    label { font-size: 12px; font-weight: 600; color: #4a5a78; text-transform: uppercase; letter-spacing: 0.05em; }
+    select { border: 1px solid #cfd6e4; border-radius: 8px; padding: 8px 10px; font-size: 14px; background: #fff; }
+    .checkbox-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+    .checkbox-row input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+    .checkbox-row span { font-size: 14px; }
+    .note { font-size: 12px; color: #8896b0; margin: -8px 0 16px; }
+    .actions { display: flex; gap: 10px; align-items: center; margin-top: 20px; }
+    button { border: 0; border-radius: 8px; background: #1f6feb; color: #fff; padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    .btn-secondary { background: #e8ecf4; color: #1a2233; }
+    .status { font-size: 13px; color: #4a5a78; }
+    .status.error { color: #c0392b; }
+    .status.success { color: #27ae60; }
+    .status.warning { color: #d68910; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1 id="title">Loading…</h1>
+    <p class="subtitle" id="subtitle"></p>
 
-    <main>
-      <div id="status-bar"></div>
+    <div id="field-switchMatterType" class="field hidden">
+      <label for="input-switchMatterType">Matter device type</label>
+      <select id="input-switchMatterType">
+        <option value="light">Light (on/off)</option>
+        <option value="outlet">Outlet (on/off)</option>
+        <option value="switch">Generic switch (on/off)</option>
+        <option value="fan">Fan (on/off)</option>
+      </select>
+    </div>
 
-      <div class="table-wrap">
-        <table id="channel-table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Address</th>
-              <th>Type</th>
-              <th>Interface</th>
-              <th>Matter type</th>
-              <th>Humidity</th>
-              <th>Enabled</th>
-              <th>Registered</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="channel-tbody">
-            <tr class="loading-row">
-              <td colspan="9">Loading channels…</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </main>
-
-    <!-- Edit modal -->
-    <div id="modal-overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-      <div class="modal-box">
-        <h2 id="modal-title"></h2>
-        <p id="modal-address" class="modal-subtitle"></p>
-
-        <form id="modal-form" novalidate>
-          <div id="field-enabled" class="field-row">
-            <label for="input-enabled">Enabled</label>
-            <input id="input-enabled" type="checkbox" />
-          </div>
-
-          <div id="field-switchMatterType" class="field-row hidden">
-            <label for="input-switchMatterType">Matter device type</label>
-            <select id="input-switchMatterType">
-              <option value="light">Light (on/off)</option>
-              <option value="outlet">Outlet (on/off)</option>
-              <option value="switch">Switch (on/off)</option>
-              <option value="fan">Fan (on/off)</option>
-            </select>
-          </div>
-
-          <div id="field-exposeHumidity" class="field-row hidden">
-            <label for="input-exposeHumidity">Expose humidity</label>
-            <input id="input-exposeHumidity" type="checkbox" />
-          </div>
-
-          <p id="modal-note" class="modal-note hidden"></p>
-
-          <div class="modal-actions">
-            <button type="submit" id="btn-save" class="btn btn-primary">Save</button>
-            <button type="button" id="btn-reset" class="btn btn-secondary">Reset to default</button>
-            <button type="button" id="btn-cancel" class="btn btn-ghost">Cancel</button>
-          </div>
-        </form>
+    <div id="field-exposeHumidity" class="field hidden">
+      <label>Humidity sensor</label>
+      <div class="checkbox-row">
+        <input id="input-exposeHumidity" type="checkbox" />
+        <span>Expose humidity as a separate Matter sensor</span>
       </div>
     </div>
 
-    <!-- Toast container -->
-    <div id="toasts" aria-live="polite"></div>
+    <p id="note" class="note hidden"></p>
 
-    <script src="main.js"></script>
-  </body>
+    <div class="actions">
+      <button id="btn-save" type="button" disabled>Save</button>
+      <button id="btn-reset" type="button" class="btn-secondary">Reset to default</button>
+      <span id="status" class="status"></span>
+    </div>
+  </div>
+  <script src="main.js"></script>
+</body>
 </html>
