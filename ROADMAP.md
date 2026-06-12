@@ -427,10 +427,10 @@ Each key maps to the raw paramset description object returned by the CCU. We sho
 
 #### HM-3 — HM-CC-VG-1 virtual thermostat group
 
-**Done:** [`956cceb`](https://github.com/hobbyquaker/matterbridge-homematic/commit/956cceb)
+**Done:** [`e91c318`](https://github.com/hobbyquaker/matterbridge-homematic/commit/e91c318)
 
 **Effort: Low–Medium** (endpoint creation is easy; event routing needs research)
-**Status: DONE** — no extra code required; the existing `THERMALCONTROL_TRANSMIT` channel mapper and VirtualDevices interface support already cover this device fully.
+**Status: DONE** — dedicated device mapper `hm-cc-vg-1.ts` creates two separate endpoints: a thermostat endpoint from `CLIMATECONTROL_RT_TRANSCEIVER` (ch:1, uses `MANU_MODE` for setpoint writes) and a contact-sensor endpoint from `SHUTTER_CONTACT` (ch:2, when present).
 
 ---
 
