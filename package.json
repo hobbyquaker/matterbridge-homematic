@@ -1,6 +1,6 @@
 {
   "name": "matterbridge-homematic",
-  "version": "0.12.1",
+  "version": "0.12.2",
   "description": "Matterbridge Homematic CCU Plugin",
   "author": "https://github.com/hobbyquaker",
   "license": "Apache-2.0",
@@ -149,6 +149,7 @@
     "eslint-plugin-simple-import-sort": "13.0.0",
     "hm-simulator": "^0.1.1",
     "jest": "30.4.2",
+    "matterbridge": "^3.9.0",
     "npm-check-updates": "22.2.0",
     "prettier": "3.8.3",
     "shx": "0.4.0",

@@ -4,7 +4,7 @@
  * @file module.ts
  * @author hobbyquaker (https://github.com/hobbyquaker)
  * @created 2025-06-15
- * @version 0.12.1
+ * @version 0.12.2
  * @license Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -637,7 +637,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
             await this.clearDeviceSelect(oldKey);
           }
         }
-        this.setSelectDevice(selectSerial, displayName, this.getChannelConfigUrl(resolvedChannel, selectSerial), 'switch');
+        const configUrl = this.getChannelConfigUrl(resolvedChannel, selectSerial);
+        this.setSelectDevice(selectSerial, displayName, configUrl, 'switch');
 
         if (!this.isChannelEnabled(resolvedChannel, override, displayName)) {
           continue;
@@ -649,6 +650,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
           s.add(resolvedChannel.deviceType);
           enabledDeviceTypesByInterface.set(resolvedChannel.interfaceName, s);
         }
+        if (configUrl) endpoint.configUrl = configUrl;
         await this.registerDevice(endpoint);
         registeredCount++;
         this.log.info(`Device mapper: channel=${resolvedChannel.address} name="${displayName}" deviceType=${deviceType} mapper=${this.getDeviceMapperKey(deviceType)}`);
@@ -676,7 +678,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         }
       }
 
-      this.setSelectDevice(selectSerial, displayName, this.getChannelConfigUrl(channel, selectSerial), 'switch');
+      const configUrl = this.getChannelConfigUrl(channel, selectSerial);
+      this.setSelectDevice(selectSerial, displayName, configUrl, 'switch');
 
       if (!this.isChannelEnabled(channel, override, displayName)) {
         continue;
@@ -695,6 +698,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         batteryPowered: this.deviceBatteryHints.get(channel.deviceAddress) ?? channel.batteryPowered,
       });
 
+      if (configUrl) endpoint.configUrl = configUrl;
       await this.registerDevice(endpoint);
       registeredCount++;
       this.deviceAddressToDevice.set(channel.deviceAddress, endpoint);
