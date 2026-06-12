@@ -353,8 +353,10 @@ Documentation + CI:
 
 #### UI-0 — Per-device / per-channel configuration web UI
 
+**Done:** [`b7d0f20`](https://github.com/hobbyquaker/matterbridge-homematic/commit/b7d0f20)
+
 **Effort: Medium** (frontend + backend, depends on upstream API)  
-**Status: BLOCKED** — waiting on [Luligu/matterbridge#561](https://github.com/Luligu/matterbridge/issues/561)
+**Status: ~~BLOCKED~~ DONE** — [Luligu/matterbridge#561](https://github.com/Luligu/matterbridge/issues/561) resolved in matterbridge 3.8.0/3.9.0
 
 Users currently configure per-channel overrides (e.g. `switchMatterType`, `enabled`) by hand-editing the JSON config file. A web UI inside the Matterbridge frontend would make this accessible without touching raw JSON.
 
