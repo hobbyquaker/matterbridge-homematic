@@ -698,6 +698,103 @@ describe('channel mapper clusters: THERMALCONTROL_TRANSMIT', () => {
   });
 });
 
+describe('channel mapper clusters: CLIMATECONTROL_RT_TRANSCEIVER', () => {
+  test('should have Thermostat cluster', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'CLIMATECONTROL_RT_TRANSCEIVER' }), VENDOR_ID);
+    expect(ep.hasClusterServer('Thermostat')).toBe(true);
+  });
+
+  test('should NOT have RelativeHumidityMeasurement cluster', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'CLIMATECONTROL_RT_TRANSCEIVER' }), VENDOR_ID);
+    expect(ep.hasClusterServer('RelativeHumidityMeasurement')).toBe(false);
+  });
+
+  test('should have PowerSource cluster', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'CLIMATECONTROL_RT_TRANSCEIVER' }), VENDOR_ID);
+    expect(ep.hasClusterServer('PowerSource')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Device mapper: HM-CC-VG-1
+// ---------------------------------------------------------------------------
+
+describe('device mapper: HM-CC-VG-1', () => {
+  function makeVg1Channels() {
+    return [
+      makeRawChannel({
+        type: 'CLIMATECONTROL_RT_TRANSCEIVER',
+        deviceType: 'HM-CC-VG-1',
+        address: 'VG1XXXXXXX:1',
+        deviceAddress: 'VG1XXXXXXX',
+        channelIndex: 1,
+        interfaceName: 'VirtualDevices',
+        name: 'Living Room Group',
+        batteryPowered: false,
+      }),
+      makeRawChannel({
+        type: 'SHUTTER_CONTACT',
+        deviceType: 'HM-CC-VG-1',
+        address: 'VG1XXXXXXX:2',
+        deviceAddress: 'VG1XXXXXXX',
+        channelIndex: 2,
+        interfaceName: 'VirtualDevices',
+        name: 'Living Room Window',
+        batteryPowered: false,
+      }),
+    ];
+  }
+
+  test('should be registered for HM-CC-VG-1', () => {
+    expect(getDeviceMapper('HM-CC-VG-1')).toBeDefined();
+  });
+
+  test('should return two separate endpoints (thermostat + contact sensor)', () => {
+    const mapper = getDeviceMapper('HM-CC-VG-1') as DeviceMapper;
+    const results = mapper(makeVg1Channels(), VENDOR_ID, {});
+    expect(results).toHaveLength(2);
+    for (const { endpoint } of results) {
+      expect(endpoint).toBeInstanceOf(MatterbridgeEndpoint);
+    }
+  });
+
+  test('first endpoint should have Thermostat cluster and no RelativeHumidityMeasurement', () => {
+    const mapper = getDeviceMapper('HM-CC-VG-1') as DeviceMapper;
+    const [{ endpoint: ep }] = mapper(makeVg1Channels(), VENDOR_ID, {});
+    expect(ep.hasClusterServer('Thermostat')).toBe(true);
+    expect(ep.hasClusterServer('RelativeHumidityMeasurement')).toBe(false);
+  });
+
+  test('second endpoint should have BooleanState cluster (contact sensor)', () => {
+    const mapper = getDeviceMapper('HM-CC-VG-1') as DeviceMapper;
+    const results = mapper(makeVg1Channels(), VENDOR_ID, {});
+    expect(results[1].endpoint.hasClusterServer('BooleanState')).toBe(true);
+  });
+
+  test('each endpoint should list only its own channel for wiring', () => {
+    const mapper = getDeviceMapper('HM-CC-VG-1') as DeviceMapper;
+    const results = mapper(makeVg1Channels(), VENDOR_ID, {});
+    expect(results[0].channels).toHaveLength(1);
+    expect(results[0].channels[0].type).toBe('CLIMATECONTROL_RT_TRANSCEIVER');
+    expect(results[1].channels).toHaveLength(1);
+    expect(results[1].channels[0].type).toBe('SHUTTER_CONTACT');
+  });
+
+  test('should return one thermostat endpoint when SHUTTER_CONTACT channel is absent', () => {
+    const mapper = getDeviceMapper('HM-CC-VG-1') as DeviceMapper;
+    const channels = makeVg1Channels().filter((c) => c.type !== 'SHUTTER_CONTACT');
+    const results = mapper(channels, VENDOR_ID, {});
+    expect(results).toHaveLength(1);
+    expect(results[0].endpoint.hasClusterServer('Thermostat')).toBe(true);
+  });
+
+  test('should return empty array when CLIMATECONTROL_RT_TRANSCEIVER channel is absent', () => {
+    const mapper = getDeviceMapper('HM-CC-VG-1') as DeviceMapper;
+    const results = mapper([], VENDOR_ID, {});
+    expect(results).toHaveLength(0);
+  });
+});
+
 describe('channel mapper clusters: HEATING_CLIMATECONTROL_TRANSCEIVER', () => {
   test('should have Thermostat cluster', () => {
     const ep = createEndpointForChannel(makeChannel({ type: 'HEATING_CLIMATECONTROL_TRANSCEIVER' }), VENDOR_ID);

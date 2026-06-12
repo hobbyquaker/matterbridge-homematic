@@ -938,6 +938,64 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       }
     }
 
+    // Wire Thermostat setpoint and mode for CLIMATECONTROL_RT_TRANSCEIVER channels (HM-CC-VG-1).
+    // Setpoint writes use MANU_MODE which simultaneously switches the device to manual mode.
+    if (channel.type === 'CLIMATECONTROL_RT_TRANSCEIVER' && this.ccuConnection) {
+      const ccuConn = this.ccuConnection;
+      this.channelAddressToDevice.set(channel.address, endpoint);
+      // Subscribe to setpoint — write Homematic MANU_MODE on change (manual mode + setpoint).
+      try {
+        void endpoint.subscribeAttribute('Thermostat', 'occupiedHeatingSetpoint', (value: number) => {
+          const address = channel.address;
+          // Matter sends 0.01°C (hundredths); Homematic wants plain °C.
+          const setpointDegC = value / 100;
+          const suppress = this.rpcEchoSuppress.get(address + ':heatingSetpoint');
+          if (suppress !== undefined && suppress === value) {
+            this.rpcEchoSuppress.delete(address + ':heatingSetpoint');
+            return;
+          }
+          // Remember last non-frost setpoint so mode switches can restore it.
+          if (setpointDegC > 4.5) {
+            this.thermostatLastSetpoint.set(address, setpointDegC);
+          }
+          this.log.debug(`Matter Thermostat setpoint -> Homematic MANU_MODE: channel=${address} setpoint=${setpointDegC}`);
+          ccuConn.setChannelDatapointValue(channel.interfaceName, address, 'MANU_MODE', setpointDegC).catch((err: unknown) => {
+            this.log.warn(`Failed to set Homematic MANU_MODE for ${address}: ${String(err)}`);
+          });
+        });
+      } catch (err) {
+        this.log.warn(`Failed to subscribe Thermostat setpoint for ${channel.address}: ${String(err)}`);
+      }
+      // Subscribe to systemMode — Matter 0=Off maps to frost-protection (MANU_MODE=4.5);
+      // Matter 4=Heat restores the last non-frost setpoint via MANU_MODE.
+      try {
+        void endpoint.subscribeAttribute('Thermostat', 'systemMode', (value: number) => {
+          const address = channel.address;
+          const suppress = this.rpcEchoSuppress.get(address + ':thermMode');
+          if (suppress !== undefined && suppress === value) {
+            this.rpcEchoSuppress.delete(address + ':thermMode');
+            return;
+          }
+          if (value === 0) {
+            // systemMode=Off: manual mode with frost-protection temperature.
+            this.log.debug(`Matter Thermostat systemMode=Off -> Homematic MANU_MODE=4.5: channel=${address}`);
+            ccuConn.setChannelDatapointValue(channel.interfaceName, address, 'MANU_MODE', 4.5).catch((err: unknown) => {
+              this.log.warn(`Failed to set frost protection MANU_MODE for ${address}: ${String(err)}`);
+            });
+          } else if (value === 4) {
+            // systemMode=Heat: restore last non-frost setpoint via MANU_MODE.
+            const setpointDegC = this.thermostatLastSetpoint.get(address) ?? 21;
+            this.log.debug(`Matter Thermostat systemMode=Heat -> Homematic MANU_MODE=${setpointDegC}: channel=${address}`);
+            ccuConn.setChannelDatapointValue(channel.interfaceName, address, 'MANU_MODE', setpointDegC).catch((err: unknown) => {
+              this.log.warn(`Failed to set Homematic MANU_MODE on heat mode for ${address}: ${String(err)}`);
+            });
+          }
+        });
+      } catch (err) {
+        this.log.warn(`Failed to subscribe Thermostat mode for ${channel.address}: ${String(err)}`);
+      }
+    }
+
     // Wire DoorLock commands for KEYMATIC channels.
     // Matter lockDoor → Homematic STATE=false (locked); unlockDoor → STATE=true (unlocked).
     if (channel.type === 'KEYMATIC' && this.ccuConnection) {
@@ -1862,21 +1920,21 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   }
 
   /**
-   * Handle incoming RPC event for THERMOSTAT channels (HEATING_CLIMATECONTROL_TRANSCEIVER / THERMALCONTROL_TRANSMIT).
-   * Maps ACTUAL_TEMPERATURE to Thermostat.localTemperature and SET_POINT_TEMPERATURE/SETPOINT to
+   * Handle incoming RPC event for THERMOSTAT channels (HEATING_CLIMATECONTROL_TRANSCEIVER / THERMALCONTROL_TRANSMIT / CLIMATECONTROL_RT_TRANSCEIVER).
+   * Maps ACTUAL_TEMPERATURE to Thermostat.localTemperature and SET_POINT_TEMPERATURE/SETPOINT/SET_TEMPERATURE to
    * Thermostat.occupiedHeatingSetpoint. Derives systemMode from the setpoint level (≤4.5°C = Off).
    *
    * @param {object} event RPC event payload.
    * @param {string} [event.iface] RPC interface name.
    * @param {string} [event.idInit] Device init ID.
    * @param {unknown} [event.channel] Channel address string.
-   * @param {string} [event.datapoint] Datapoint name ('ACTUAL_TEMPERATURE', 'SET_POINT_TEMPERATURE', or 'SETPOINT').
+   * @param {string} [event.datapoint] Datapoint name ('ACTUAL_TEMPERATURE', 'SET_POINT_TEMPERATURE', 'SETPOINT', or 'SET_TEMPERATURE').
    * @param {unknown} [event.value] Datapoint value (float, °C).
    * @returns {Promise<void>} Resolves when the Matter attribute(s) have been updated.
    */
   private async handleRpcEventThermostat(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
     const datapoint = typeof event.datapoint === 'string' ? event.datapoint.trim().toUpperCase() : '';
-    if (datapoint !== 'ACTUAL_TEMPERATURE' && datapoint !== 'SET_POINT_TEMPERATURE' && datapoint !== 'SETPOINT') return;
+    if (datapoint !== 'ACTUAL_TEMPERATURE' && datapoint !== 'SET_POINT_TEMPERATURE' && datapoint !== 'SETPOINT' && datapoint !== 'SET_TEMPERATURE') return;
 
     const channelAddress = typeof event.channel === 'string' ? event.channel : undefined;
     if (!channelAddress) return;

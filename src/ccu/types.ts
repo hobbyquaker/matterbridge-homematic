@@ -12,6 +12,7 @@ export type CcuInterfaceName = 'ReGaHSS' | 'BidCos-RF' | 'BidCos-Wired' | 'HmIP-
 export const SUPPORTED_CHANNEL_TYPES = [
   'ALARMSTATE',
   'BLIND',
+  'CLIMATECONTROL_RT_TRANSCEIVER',
   'DIMMER',
   'HEATING_CLIMATECONTROL_TRANSCEIVER',
   'KEY',

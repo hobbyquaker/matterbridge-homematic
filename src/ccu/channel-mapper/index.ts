@@ -10,6 +10,7 @@
 import { ChannelMapper } from '../types.js';
 import { mapChannel as alarmstate } from './alarmstate.js';
 import { mapChannel as blind } from './blind.js';
+import { mapChannel as climatecontrolRtTransceiver } from './climatecontrol-rt-transceiver.js';
 import { mapChannel as dimmer } from './dimmer.js';
 import { mapChannel as heatingClimatecontrolTransceiver } from './heating-climatecontrol-transceiver.js';
 import { mapChannel as key } from './key.js';
@@ -33,6 +34,7 @@ import { mapChannel as weather } from './weather.js';
 export const CHANNEL_MAPPERS: Record<string, ChannelMapper> = {
   alarmstate,
   blind,
+  'climatecontrol-rt-transceiver': climatecontrolRtTransceiver,
   dimmer,
   'heating-climatecontrol-transceiver': heatingClimatecontrolTransceiver,
   key,

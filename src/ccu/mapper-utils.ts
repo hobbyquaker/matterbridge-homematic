@@ -10,6 +10,7 @@ import { CcuChannelInfo, ChannelMappingOptions, SupportedChannelType } from './t
 
 /** Short display labels for verbose channel type names used in the serial number column. */
 const CHANNEL_TYPE_LABEL: Partial<Record<SupportedChannelType, string>> = {
+  CLIMATECONTROL_RT_TRANSCEIVER: 'THERMOSTAT_RT',
   HEATING_CLIMATECONTROL_TRANSCEIVER: 'HEATING',
   KEY_TRANSCEIVER: 'KEY',
   MOTION_DETECTOR: 'MOTION',

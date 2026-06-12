@@ -12,6 +12,7 @@
  */
 
 import { DeviceMapper } from '../types.js';
+import { mapDevice as hmCcVg1 } from './hm-cc-vg-1.js';
 import { mapDevice as hmipDrsi4 } from './hmip-drsi4.js';
 import { mapDevice as hmipWth } from './hmip-wth.js';
 
@@ -22,6 +23,8 @@ import { mapDevice as hmipWth } from './hmip-wth.js';
  * For example `'HmIP-WTH'` → `'hmip-wth'`, `'HmIP-STE2+'` → `'hmip-ste2'`.
  */
 export const DEVICE_MAPPERS: Record<string, DeviceMapper> = {
+  // HM-CC-VG-1 — virtual group thermostat with CLIMATECONTROL_RT_TRANSCEIVER + SHUTTER_CONTACT.
+  'hm-cc-vg-1': hmCcVg1,
   // HmIP-DRSI family — multi-channel DIN rail switch actuators (mains-powered, one endpoint per output).
   'hmip-drsi1': hmipDrsi4,
   'hmip-drsi4': hmipDrsi4,
