@@ -67,29 +67,120 @@ function makePlatform(config: PlatformConfig = makeConfig()): TemplatePlatform {
 }
 
 describe('TemplatePlatform config selection migration', () => {
-  test('should remove disabled-interface channels from select devices and blacklist', async () => {
+  test('should remove disabled-interface channels from select list, clean whiteList, and pre-blacklist them', async () => {
     const config = makeConfig();
-    config.blackList = ['BidCos-RF:SWITCH:LEQ1234567:1', 'BidCos-RF:SHUTTER_CONTACT:OLD9999999:1', 'LEQ1234567:1', 'Legacy Switch'];
+    // One channel was previously enabled (in whiteList), one was already blacklisted.
+    config.whiteList = ['BidCos-RF:SWITCH:LEQ1234567:1'];
+    config.blackList = ['BidCos-RF:SHUTTER_CONTACT:OLD9999999:1'];
 
     const instance = makePlatform(config);
     const saveConfigSpy = vi.spyOn(instance, 'saveConfig').mockImplementation(() => {});
     const logInfoSpy = vi.spyOn(instance.log, 'info');
 
     instance.setSelectDevice('BidCos-RF:SWITCH:LEQ1234567:1', 'Legacy Switch', undefined, 'switch');
-    instance.setSelectDevice('SWITCH:LEQ1234567:1', 'Legacy Switch', undefined, 'switch');
-    instance.setSelectDevice('BidCos-RF:SHUTTER_CONTACT:OLD9999999:1', 'Stale Legacy Contact', undefined, 'switch');
-
-    const channels: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'name' | 'type'>[] = [
-      { address: 'LEQ1234567:1', interfaceName: 'BidCos-RF', name: 'Legacy Switch', type: 'SWITCH' },
-    ];
+    instance.setSelectDevice('BidCos-RF:SHUTTER_CONTACT:OLD9999999:1', 'Old Contact', undefined, 'switch');
 
     // @ts-expect-error Accessing private method for testing purposes
-    await instance.cleanupDisabledInterfaceChannels(channels, ['HmIP-RF']);
+    await instance.cleanupDisabledInterfaceChannels(['HmIP-RF']);
 
-    expect(config.blackList).toEqual([]);
+    // Both select entries removed.
     expect(instance.getSelectDevices()).toEqual([]);
+    // WhiteList entry for the disabled interface cleaned.
+    expect(config.whiteList).toEqual([]);
+    // Both channels pre-disabled: the blacklisted one remains, the whitelisted one is added.
+    expect(config.blackList).toEqual(expect.arrayContaining(['BidCos-RF:SWITCH:LEQ1234567:1', 'BidCos-RF:SHUTTER_CONTACT:OLD9999999:1']));
+    expect((config.blackList as string[]).length).toBe(2);
     expect(saveConfigSpy).toHaveBeenCalledExactlyOnceWith(config);
-    expect(logInfoSpy).toHaveBeenCalledWith('Disabled interface cleanup summary: removedSelectDevices=3 removedBlacklistEntries=4');
+    expect(logInfoSpy).toHaveBeenCalledWith(expect.stringContaining('removedSelectDevices=2'));
+  });
+
+  test('should pre-disable channels from all disabled interfaces, not just one', async () => {
+    const config = makeConfig();
+    config.blackList = [];
+    config.whiteList = [];
+
+    const instance = makePlatform(config);
+    vi.spyOn(instance, 'saveConfig').mockImplementation(() => {});
+
+    instance.setSelectDevice('BidCos-RF:SWITCH:LEQ0000001:1', 'BidCos Switch', undefined, 'switch');
+    instance.setSelectDevice('HmIP-RF:SWITCH:000111222333:1', 'HmIP Switch', undefined, 'switch');
+    instance.setSelectDevice('VirtualDevices:SWITCH:V0000001:1', 'Virtual Switch', undefined, 'switch');
+
+    // Only HmIP-RF is enabled; BidCos-RF and VirtualDevices are disabled.
+    // @ts-expect-error Accessing private method for testing purposes
+    await instance.cleanupDisabledInterfaceChannels(['HmIP-RF']);
+
+    const remaining = instance.getSelectDevices().map((d) => d.serial);
+    expect(remaining).toEqual(['HmIP-RF:SWITCH:000111222333:1']);
+    expect(config.blackList as string[]).toEqual(
+      expect.arrayContaining(['BidCos-RF:SWITCH:LEQ0000001:1', 'VirtualDevices:SWITCH:V0000001:1']),
+    );
+    expect((config.blackList as string[]).length).toBe(2);
+  });
+
+  test('re-enable scenario: pre-blacklisted channels come back disabled on next discovery', async () => {
+    // Simulate the state left by a cleanup run: the channel's serial is in the blackList
+    // (placed there by the previous cleanup), no select entry exists yet.
+    const config = makeConfig();
+    config.blackList = ['BidCos-RF:SWITCH:LEQ1234567:1'];
+
+    const instance = makePlatform(config);
+    vi.spyOn(instance, 'saveConfig').mockImplementation(() => {});
+    // No select entry — as if clearDeviceSelect removed it in the previous session.
+    instance.getSelectDevice = vi.fn(() => undefined);
+
+    // autoBlacklistIfNew must not modify the blackList (channel is already there).
+    // @ts-expect-error Accessing private method for testing purposes
+    const added = instance.autoBlacklistIfNew('BidCos-RF:SWITCH:LEQ1234567:1', {
+      address: 'LEQ1234567:1',
+      interfaceName: 'BidCos-RF',
+      type: 'SWITCH',
+    });
+
+    expect(added).toBe(false);
+    // BlackList unchanged — channel stays disabled.
+    expect(config.blackList as string[]).toEqual(['BidCos-RF:SWITCH:LEQ1234567:1']);
+  });
+
+  test('should not touch channels from enabled interfaces', async () => {
+    const config = makeConfig();
+    // HmIP-RF channel is whitelisted (enabled); BidCos-RF channel is whitelisted (enabled) and should be moved to blackList.
+    config.whiteList = ['HmIP-RF:SWITCH:AAABBB:1', 'BidCos-RF:SWITCH:LEQ0000001:1'];
+    config.blackList = [];
+
+    const instance = makePlatform(config);
+    const saveConfigSpy = vi.spyOn(instance, 'saveConfig').mockImplementation(() => {});
+
+    instance.setSelectDevice('HmIP-RF:SWITCH:AAABBB:1', 'HmIP enabled', undefined, 'switch');
+    instance.setSelectDevice('BidCos-RF:SWITCH:LEQ0000001:1', 'BidCos disabled', undefined, 'switch');
+
+    // BidCos-RF disabled, HmIP-RF enabled.
+    // @ts-expect-error Accessing private method for testing purposes
+    await instance.cleanupDisabledInterfaceChannels(['HmIP-RF']);
+
+    // HmIP-RF entry untouched in select list.
+    expect(instance.getSelectDevices().map((d) => d.serial)).toContain('HmIP-RF:SWITCH:AAABBB:1');
+    // HmIP-RF whiteList entry untouched.
+    expect(config.whiteList as string[]).toContain('HmIP-RF:SWITCH:AAABBB:1');
+    // BidCos-RF whiteList entry removed, moved to blackList.
+    expect(config.whiteList as string[]).not.toContain('BidCos-RF:SWITCH:LEQ0000001:1');
+    expect(config.blackList as string[]).toContain('BidCos-RF:SWITCH:LEQ0000001:1');
+    // Config saved because whiteList changed.
+    expect(saveConfigSpy).toHaveBeenCalled();
+  });
+
+  test('should not save config when no disabled interfaces have registered channels', async () => {
+    const config = makeConfig();
+
+    const instance = makePlatform(config);
+    const saveConfigSpy = vi.spyOn(instance, 'saveConfig').mockImplementation(() => {});
+
+    // No select devices registered for any interface.
+
+    // @ts-expect-error Accessing private method for testing purposes
+    await instance.cleanupDisabledInterfaceChannels(['HmIP-RF']);
+
+    expect(saveConfigSpy).not.toHaveBeenCalled();
   });
 
   test('should migrate address-based entries to selectSerial in both white and blacklist', () => {

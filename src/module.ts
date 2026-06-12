@@ -511,7 +511,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     const enabledInterfaces = this.ccuConnection.getStatusSnapshot().enabledInterfaces;
     this.updateMainsPoweredDeviceSet(rawChannels);
     await this.primeBatteryHintsFromRpc(rawChannels);
-    await this.cleanupDisabledInterfaceChannels(cachedChannels, enabledInterfaces);
+    await this.cleanupDisabledInterfaceChannels(enabledInterfaces);
     this.migrateSelectListEntriesToSerial(rawChannels);
     const channels = resolveChannelsForMatter(rawChannels);
     this.discoveredChannels = channels;
@@ -2512,61 +2512,51 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     }
   }
 
-  private async cleanupDisabledInterfaceChannels(
-    channels: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'name' | 'type'>[],
-    enabledInterfaces: readonly CcuInterfaceName[],
-  ): Promise<void> {
-    const enabledInterfaceSet = new Set(enabledInterfaces);
-    const disabledInterfacePrefixes = this.getDisabledInterfacePrefixes(enabledInterfaceSet);
-    const blacklistEntriesToRemove = new Set<string>();
-    let removedSelectDevices = 0;
+  private async cleanupDisabledInterfaceChannels(enabledInterfaces: readonly CcuInterfaceName[]): Promise<void> {
+    const disabledInterfacePrefixes = this.getDisabledInterfacePrefixes(new Set(enabledInterfaces));
+    if (disabledInterfacePrefixes.length === 0) return;
 
+    const matchesDisabled = (entry: string): boolean => disabledInterfacePrefixes.some((p) => entry.startsWith(p));
+
+    // Remove select-list entries for disabled interfaces and collect their serials for pre-blacklisting.
+    const evictedSerials: string[] = [];
+    let removedSelectDevices = 0;
     for (const selectDevice of this.getSelectDevices()) {
-      if (!disabledInterfacePrefixes.some((prefix) => selectDevice.serial.startsWith(prefix))) continue;
+      if (!matchesDisabled(selectDevice.serial)) continue;
       await this.clearDeviceSelect(selectDevice.serial);
+      evictedSerials.push(selectDevice.serial);
       removedSelectDevices++;
     }
 
     const config = this.getPlatformConfig();
-    const currentBlackList = Array.isArray(config.blackList) ? config.blackList : [];
-    for (const entry of currentBlackList) {
-      if (typeof entry !== 'string') continue;
-      if (disabledInterfacePrefixes.some((prefix) => entry.startsWith(prefix))) {
-        blacklistEntriesToRemove.add(entry);
-      }
+
+    // Remove whiteList entries for disabled interfaces so they cannot override the blackList on re-enable.
+    const currentWhiteList = Array.isArray(config.whiteList) ? (config.whiteList as string[]) : [];
+    const nextWhiteList = currentWhiteList.filter((e) => typeof e !== 'string' || !matchesDisabled(e));
+    const removedWhiteListEntries = currentWhiteList.length - nextWhiteList.length;
+
+    // Update blackList: drop stale prefix-matching entries, then re-add the evicted serials so that
+    // channels from a re-enabled interface always come back disabled — regardless of newDevicesDefaultEnabled.
+    const currentBlackList = Array.isArray(config.blackList) ? (config.blackList as string[]) : [];
+    const nextBlackList = currentBlackList.filter((e) => typeof e !== 'string' || !matchesDisabled(e));
+    for (const serial of evictedSerials) {
+      if (!nextBlackList.includes(serial)) nextBlackList.push(serial);
     }
 
-    for (const channel of channels) {
-      if (enabledInterfaceSet.has(channel.interfaceName)) continue;
+    const prevSet = new Set<string>(currentBlackList);
+    const nextSet = new Set<string>(nextBlackList);
+    const blackListChanged = nextSet.size !== prevSet.size || Array.from(nextSet).some((e) => !prevSet.has(e));
 
-      const removalKeys = [this.getChannelSelectSerial(channel), ...this.getLegacyChannelSelectKeys(channel)];
-      for (const key of removalKeys) {
-        if (this.getSelectDevice(key) === undefined) continue;
-        await this.clearDeviceSelect(key);
-        removedSelectDevices++;
-      }
-
-      blacklistEntriesToRemove.add(this.getChannelSelectSerial(channel));
-      blacklistEntriesToRemove.add(channel.address);
-      const regaName = channel.name?.trim();
-      if (regaName) {
-        blacklistEntriesToRemove.add(regaName);
-      }
-      for (const legacyKey of this.getLegacyChannelSelectKeys(channel)) {
-        blacklistEntriesToRemove.add(legacyKey);
-      }
-    }
-
-    const nextBlackList = currentBlackList.filter((entry): entry is string => typeof entry === 'string' && !blacklistEntriesToRemove.has(entry));
-    const removedBlacklistEntries = currentBlackList.length - nextBlackList.length;
-
-    if (removedBlacklistEntries > 0) {
+    if (removedWhiteListEntries > 0 || blackListChanged) {
+      config.whiteList = nextWhiteList;
       config.blackList = nextBlackList;
       this.saveConfig(config);
     }
 
-    if (removedSelectDevices > 0 || removedBlacklistEntries > 0) {
-      this.log.info(`Disabled interface cleanup summary: removedSelectDevices=${removedSelectDevices} removedBlacklistEntries=${removedBlacklistEntries}`);
+    if (removedSelectDevices > 0 || removedWhiteListEntries > 0 || blackListChanged) {
+      this.log.info(
+        `Disabled interface cleanup: removedSelectDevices=${removedSelectDevices} removedFromWhiteList=${removedWhiteListEntries} preDisabledForReactivation=${evictedSerials.length}`,
+      );
     }
   }
 
