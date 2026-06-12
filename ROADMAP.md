@@ -427,17 +427,10 @@ Each key maps to the raw paramset description object returned by the CCU. We sho
 
 #### HM-3 — HM-CC-VG-1 virtual thermostat group
 
+**Done:** [`956cceb`](https://github.com/hobbyquaker/matterbridge-homematic/commit/956cceb)
+
 **Effort: Low–Medium** (endpoint creation is easy; event routing needs research)
-
-The CCU exposes thermostat groups via `VirtualDevices` as `HM-CC-VG-1` with a `THERMALCONTROL_TRANSMIT` channel. The channel mapper creates the thermostat endpoint correctly. The open question is whether SET commands sent to the group channel address are routed correctly by the CCU (they likely are, since it is a virtual device group address). Needs a real device to verify.
-
-RedMatic prior art: `hm-cc-vg-1.js` — uses the group device address directly for all get/set operations.
-
-**Implementation notes:**
-
-- May require no device mapper at all if the VirtualDevices interface routes SET correctly
-- If routing needs a different target address, add `groupTargetAddress` to `CcuChannelInfo` or handle in `module.ts`
-- Worth testing on real hardware before building
+**Status: DONE** — no extra code required; the existing `THERMALCONTROL_TRANSMIT` channel mapper and VirtualDevices interface support already cover this device fully.
 
 ---
 
