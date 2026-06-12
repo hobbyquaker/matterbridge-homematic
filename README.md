@@ -15,7 +15,7 @@ This plugin bridges your Homematic CCU's devices to the Matter ecosystem
 - [Installation](#installation)
 - [Configuration](#configuration)
   - [RPC Server Configuration](#rpc-server-configuration)
-  - [Device Editor Configuration](#device-editor-configuration)
+  - [Channel Configuration UI](#channel-configuration-ui)
 - [Troubleshooting](#troubleshooting)
 - [Architecture](#architecture)
   - [Three-Layer Design](#three-layer-design)
