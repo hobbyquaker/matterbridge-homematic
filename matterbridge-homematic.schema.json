@@ -174,8 +174,14 @@
           },
           "switchMatterType": {
             "title": "SWITCH Matter Type",
+            "description": "Matter device type for SWITCH channels. 'fan' maps to a Fan device with on/off control.",
             "type": "string",
-            "enum": ["light", "outlet", "switch"]
+            "enum": ["light", "outlet", "switch", "fan"]
+          },
+          "exposeHumidity": {
+            "title": "Expose Humidity",
+            "description": "When false, disables the humidity endpoint on WTH/STHD thermostats. Only applies to devices with a HEATING_CLIMATECONTROL_TRANSCEIVER channel.",
+            "type": "boolean"
           }
         },
         "required": ["address"]

@@ -5,7 +5,7 @@
  * @file channel-mapper/switch.ts
  */
 
-import { MatterbridgeEndpoint, onOffLight, onOffOutlet, onOffSwitch } from 'matterbridge';
+import { fanDevice, MatterbridgeEndpoint, onOffLight, onOffOutlet, onOffSwitch } from 'matterbridge';
 
 import { buildDisplayName, buildEndpointId, buildModel, buildSerialNumber, finalizeEndpoint } from '../mapper-utils.js';
 import { ChannelMapper } from '../types.js';
@@ -29,6 +29,11 @@ export const mapChannel: ChannelMapper = (channel, vendorId, options) => {
       break;
     case 'switch':
       ep = new MatterbridgeEndpoint(onOffSwitch, { id }).createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model);
+      break;
+    case 'fan':
+      ep = new MatterbridgeEndpoint(fanDevice, { id })
+        .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
+        .createOnOffFanControlClusterServer();
       break;
     case 'light':
     default:

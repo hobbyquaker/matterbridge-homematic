@@ -17,6 +17,8 @@ import { DeviceMapper } from '../types.js';
  * Device mapper for HmIP-WTH, HmIP-WTH-2, HmIP-WTH-B, HmIP-STHD, HmIP-STH, and related variants.
  * Returns a single endpoint combining thermostatDevice and humiditySensor device types so that
  * temperature control and humidity measurement appear as one accessory in the Matter home.
+ * When `options.exposeHumidity` is explicitly `false`, the humiditySensor device type and the
+ * RelativeHumidityMeasurement cluster are omitted from the endpoint.
  *
  * @type {DeviceMapper}
  */
@@ -29,16 +31,20 @@ export const mapDevice: DeviceMapper = (channels, vendorId, options) => {
   const serialNumber = buildSerialNumber(heatingChannel, 'HEATING_CLIMATECONTROL_TRANSCEIVER');
   const model = buildModel(heatingChannel);
 
+  const exposeHumidity = options.exposeHumidity !== false;
+
+  const ep = exposeHumidity
+    ? new MatterbridgeEndpoint([thermostatDevice, humiditySensor], { id })
+        .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
+        .createDefaultHeatingThermostatClusterServer(23, 21)
+        .createDefaultRelativeHumidityMeasurementClusterServer()
+    : new MatterbridgeEndpoint(thermostatDevice, { id })
+        .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
+        .createDefaultHeatingThermostatClusterServer(23, 21);
+
   return [
     {
-      endpoint: finalizeEndpoint(
-        new MatterbridgeEndpoint([thermostatDevice, humiditySensor], { id })
-          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
-          // localTemperature=23°C, occupiedHeatingSetpoint=21°C as defaults; updated from RPC on startup.
-          .createDefaultHeatingThermostatClusterServer(23, 21)
-          .createDefaultRelativeHumidityMeasurementClusterServer(),
-        { ...options, batteryPowered: heatingChannel.batteryPowered },
-      ),
+      endpoint: finalizeEndpoint(ep, { ...options, batteryPowered: heatingChannel.batteryPowered }),
       channels: [heatingChannel],
     },
   ];

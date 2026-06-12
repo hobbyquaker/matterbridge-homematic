@@ -31,7 +31,7 @@ export const SUPPORTED_CHANNEL_TYPES = [
 export type SupportedChannelType = (typeof SUPPORTED_CHANNEL_TYPES)[number];
 
 /** Matter device type selection for Homematic SWITCH channels. */
-export type SwitchMatterType = 'light' | 'outlet' | 'switch';
+export type SwitchMatterType = 'light' | 'outlet' | 'switch' | 'fan';
 
 export interface CcuRegaFeatureConfig {
   enabled: boolean;
@@ -179,6 +179,12 @@ export interface CcuChannelOverride {
   address: string;
   enabled?: boolean;
   switchMatterType?: SwitchMatterType;
+  /**
+   * When explicitly `false`, disables the humidity endpoint on WTH-family thermostats
+   * (HEATING_CLIMATECONTROL_TRANSCEIVER channels handled by the hmip-wth device mapper).
+   * Defaults to `true` (humidity exposed).
+   */
+  exposeHumidity?: boolean;
 }
 
 /** Cache for discovered channels and ReGa names to avoid repeated RPC/ReGa calls. */
@@ -194,6 +200,12 @@ export interface ChannelMappingOptions {
   switchMatterType?: SwitchMatterType;
   /** Whether the parent device is battery powered; controls which PowerSource cluster is added. */
   batteryPowered?: boolean;
+  /**
+   * When explicitly `false`, skips the humidity endpoint on WTH-family devices.
+   * Only meaningful for mappers that expose HUMIDITY (hmip-wth device mapper).
+   * Defaults to `true`.
+   */
+  exposeHumidity?: boolean;
 }
 
 /**

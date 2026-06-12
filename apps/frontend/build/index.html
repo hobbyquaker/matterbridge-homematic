@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Matterbridge Homematic</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="header-inner">
+        <h1>Homematic Channel Configuration</h1>
+        <input id="search" type="search" placeholder="Filter by name or address…" autocomplete="off" />
+      </div>
+    </header>
+
+    <main>
+      <div id="status-bar"></div>
+
+      <div class="table-wrap">
+        <table id="channel-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Address</th>
+              <th>Type</th>
+              <th>Interface</th>
+              <th>Matter type</th>
+              <th>Humidity</th>
+              <th>Enabled</th>
+              <th>Registered</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="channel-tbody">
+            <tr class="loading-row">
+              <td colspan="9">Loading channels…</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+
+    <!-- Edit modal -->
+    <div id="modal-overlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-box">
+        <h2 id="modal-title"></h2>
+        <p id="modal-address" class="modal-subtitle"></p>
+
+        <form id="modal-form" novalidate>
+          <div id="field-enabled" class="field-row">
+            <label for="input-enabled">Enabled</label>
+            <input id="input-enabled" type="checkbox" />
+          </div>
+
+          <div id="field-switchMatterType" class="field-row hidden">
+            <label for="input-switchMatterType">Matter device type</label>
+            <select id="input-switchMatterType">
+              <option value="light">Light (on/off)</option>
+              <option value="outlet">Outlet (on/off)</option>
+              <option value="switch">Switch (on/off)</option>
+              <option value="fan">Fan (on/off)</option>
+            </select>
+          </div>
+
+          <div id="field-exposeHumidity" class="field-row hidden">
+            <label for="input-exposeHumidity">Expose humidity</label>
+            <input id="input-exposeHumidity" type="checkbox" />
+          </div>
+
+          <p id="modal-note" class="modal-note hidden"></p>
+
+          <div class="modal-actions">
+            <button type="submit" id="btn-save" class="btn btn-primary">Save</button>
+            <button type="button" id="btn-reset" class="btn btn-secondary">Reset to default</button>
+            <button type="button" id="btn-cancel" class="btn btn-ghost">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Toast container -->
+    <div id="toasts" aria-live="polite"></div>
+
+    <script src="main.js"></script>
+  </body>
+</html>

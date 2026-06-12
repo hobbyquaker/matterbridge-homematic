@@ -255,6 +255,223 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     // Change here the logger level of the api you use or of your devices
   }
 
+  /**
+   * Handle HTTP requests from the plugin's frontend SPA served at `/plugins/matterbridge-homematic/`.
+   * Routes are dispatched from the path segments after `/api/`.
+   *
+   * Supported routes:
+   * - `GET  channels`                     → list all discovered channels with current state and overrides
+   * - `PUT  channels/:address/override`   → write or update a per-channel override
+   * - `DELETE channels/:address/override` → remove the override for a channel
+   *
+   * @param {string} method HTTP method string.
+   * @param {string} [path] Path after `/api/` (e.g. `'channels'`, `'channels/OEQ%3A1/override'`).
+   * @param {Record<string, unknown>} [_query] Query string parameters (unused).
+   * @param {unknown} [body] Request body (JSON-parsed by Matterbridge ≥ 3.9.0).
+   * @returns {Promise<unknown>} Response value serialised as JSON.
+   */
+  override async onFetch(method: string, path?: string, _query?: Record<string, unknown>, body?: unknown): Promise<unknown> {
+    const segments = (path ?? '').split('/').filter(Boolean);
+    const resource = segments[0] ?? '';
+
+    // GET /channels
+    if (method === 'GET' && resource === 'channels' && segments.length === 1) {
+      return this.handleFetchGetChannels();
+    }
+
+    // PUT /channels/:address/override
+    if (method === 'PUT' && resource === 'channels' && segments[2] === 'override' && segments.length === 3) {
+      const address = decodeURIComponent(segments[1]);
+      return this.handleFetchPutOverride(address, body);
+    }
+
+    // DELETE /channels/:address/override
+    if (method === 'DELETE' && resource === 'channels' && segments[2] === 'override' && segments.length === 3) {
+      const address = decodeURIComponent(segments[1]);
+      return this.handleFetchDeleteOverride(address);
+    }
+
+    this.log.debug(`onFetch: unhandled method=${method} path=${path ?? 'undefined'}`);
+    return undefined;
+  }
+
+  /**
+   * Build the channel list response for the frontend.
+   *
+   * @returns {unknown} An object containing the `channels` array.
+   */
+  private handleFetchGetChannels(): unknown {
+    const channels = this.discoveredChannels.map((channel) => {
+      const override = this.getChannelOverride(channel.address);
+      const displayName = this.getChannelDisplayName(channel);
+      const enabled = this.isChannelEnabled(channel, override, displayName);
+      const registered =
+        this.channelAddressToDevice.has(channel.address) || this.rotaryHandleChannels.has(channel.address) || this.deviceAddressToDevice.has(channel.deviceAddress);
+      const hasDeviceMapper = channel.deviceType ? getDeviceMapper(channel.deviceType) !== undefined : false;
+      return {
+        address: channel.address,
+        deviceAddress: channel.deviceAddress,
+        deviceType: channel.deviceType ?? null,
+        channelType: channel.type,
+        displayName,
+        name: channel.name ?? null,
+        interfaceName: channel.interfaceName,
+        batteryPowered: channel.batteryPowered ?? false,
+        enabled,
+        registered,
+        override: override ?? null,
+        capabilities: {
+          switchMatterType: channel.type === 'SWITCH',
+          exposeHumidity: channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' && hasDeviceMapper,
+        },
+      };
+    });
+    return { channels };
+  }
+
+  /**
+   * Apply a per-channel override update from the frontend.
+   *
+   * @param {string} address Channel address.
+   * @param {unknown} body JSON body from PUT request.
+   * @returns {Promise<unknown>} Result object.
+   */
+  private async handleFetchPutOverride(address: string, body: unknown): Promise<unknown> {
+    const channel = this.discoveredChannels.find((c) => c.address === address);
+    if (!channel) return { error: `Channel '${address}' not found` };
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+      return { error: 'Request body must be a JSON object' };
+    }
+
+    const update = body as Record<string, unknown>;
+    const newFields: Partial<CcuChannelOverride> = {};
+
+    if ('switchMatterType' in update) {
+      const v = update.switchMatterType;
+      if (v !== undefined && v !== 'light' && v !== 'outlet' && v !== 'switch' && v !== 'fan') {
+        return { error: `Invalid switchMatterType: '${String(v)}'. Valid values: light, outlet, switch, fan` };
+      }
+      newFields.switchMatterType = v as CcuChannelOverride['switchMatterType'];
+    }
+
+    if ('enabled' in update) {
+      const v = update.enabled;
+      if (v !== undefined && typeof v !== 'boolean') return { error: 'enabled must be a boolean' };
+      newFields.enabled = v as boolean | undefined;
+    }
+
+    if ('exposeHumidity' in update) {
+      const v = update.exposeHumidity;
+      if (v !== undefined && typeof v !== 'boolean') return { error: 'exposeHumidity must be a boolean' };
+      newFields.exposeHumidity = v as boolean | undefined;
+    }
+
+    const existing = this.getChannelOverride(address) ?? { address };
+    const merged: CcuChannelOverride = { ...existing, ...newFields, address };
+
+    // Remove fields that are explicitly undefined (keep the object clean).
+    if (merged.switchMatterType === undefined) delete merged.switchMatterType;
+    if (merged.enabled === undefined) delete merged.enabled;
+    if (merged.exposeHumidity === undefined) delete merged.exposeHumidity;
+
+    const hasContent = 'switchMatterType' in merged || 'enabled' in merged || 'exposeHumidity' in merged;
+    const overrides = this.getChannelOverrides().filter((o) => o.address !== address);
+    if (hasContent) overrides.push(merged);
+    (this.config as HomematicPlatformConfig).channelOverrides = overrides;
+    this.saveConfig(this.getPlatformConfig());
+
+    const reRegistered = await this.tryReRegisterChannel(channel);
+    const finalOverride = hasContent ? merged : null;
+
+    if (reRegistered) {
+      this.wssSendSnackbarMessage('Channel configuration saved and applied', 3000, 'success');
+      return { ok: true, override: finalOverride, restartRequired: false };
+    }
+    this.wssSendRestartRequired(true, false);
+    return { ok: true, override: finalOverride, restartRequired: true };
+  }
+
+  /**
+   * Remove the per-channel override for a channel.
+   *
+   * @param {string} address Channel address.
+   * @returns {Promise<unknown>} Result object.
+   */
+  private async handleFetchDeleteOverride(address: string): Promise<unknown> {
+    const channel = this.discoveredChannels.find((c) => c.address === address);
+    if (!channel) return { error: `Channel '${address}' not found` };
+
+    const overrides = this.getChannelOverrides().filter((o) => o.address !== address);
+    (this.config as HomematicPlatformConfig).channelOverrides = overrides;
+    this.saveConfig(this.getPlatformConfig());
+
+    const reRegistered = await this.tryReRegisterChannel(channel);
+
+    if (reRegistered) {
+      this.wssSendSnackbarMessage('Channel override removed and applied', 3000, 'success');
+      return { ok: true, restartRequired: false };
+    }
+    this.wssSendRestartRequired(true, false);
+    return { ok: true, restartRequired: true };
+  }
+
+  /**
+   * Attempt a live unregister → re-create → re-register cycle for a single channel-mapper channel.
+   * Returns `true` when re-registration succeeded, `false` when a plugin restart is required
+   * (e.g. the channel is handled by a device mapper, or `registerDevice` throws).
+   *
+   * @param {CcuChannelInfo} channel The channel to re-register.
+   * @returns {Promise<boolean>} Whether live re-registration succeeded.
+   */
+  private async tryReRegisterChannel(channel: CcuChannelInfo): Promise<boolean> {
+    // Device-mapper channels require a full restart for safe re-registration.
+    if (channel.deviceType && getDeviceMapper(channel.deviceType)) return false;
+    if (!isSupportedChannelType(channel.type)) return false;
+
+    // Unregister the existing endpoint if present.
+    const existing = this.channelAddressToDevice.get(channel.address) ?? this.rotaryHandleChannels.get(channel.address);
+    if (existing) {
+      try {
+        await this.unregisterDevice(existing);
+      } catch (err) {
+        this.log.warn(`Live re-registration: unregister failed for ${channel.address}: ${String(err)}`);
+      }
+      this.channelAddressToDevice.delete(channel.address);
+      this.rotaryHandleChannels.delete(channel.address);
+      if (channel.powerMeterChannelAddress) {
+        if (channel.powerMeterIsHmIP) {
+          this.energieMeterChannels.delete(channel.powerMeterChannelAddress);
+        } else {
+          this.channelAddressToDevice.delete(channel.powerMeterChannelAddress);
+        }
+      }
+      if (this.deviceAddressToDevice.get(channel.deviceAddress) === existing) {
+        this.deviceAddressToDevice.delete(channel.deviceAddress);
+      }
+    }
+
+    const override = this.getChannelOverride(channel.address);
+    const displayName = this.getChannelDisplayName(channel);
+
+    // If channel is now disabled, unregistration is the final step.
+    if (!this.isChannelEnabled(channel, override, displayName)) return true;
+
+    try {
+      const endpoint = createEndpointForChannel(channel as Parameters<typeof createEndpointForChannel>[0], this.matterbridge.aggregatorVendorId, {
+        switchMatterType: override?.switchMatterType ?? inferSwitchMatterTypeFromName(channel.name),
+        batteryPowered: this.deviceBatteryHints.get(channel.deviceAddress) ?? channel.batteryPowered,
+      });
+      await this.registerDevice(endpoint);
+      this.deviceAddressToDevice.set(channel.deviceAddress, endpoint);
+      this.wireChannelEndpoint(endpoint, channel);
+      this.log.info(`Live re-registration: applied updated override for channel=${channel.address}`);
+      return true;
+    } catch (err) {
+      this.log.warn(`Live re-registration: registerDevice failed for ${channel.address}: ${String(err)}`);
+      return false;
+    }
+  }
+
   override async onShutdown(reason?: string): Promise<void> {
     // Always call super.onShutdown(reason)
     await super.onShutdown(reason);
@@ -367,6 +584,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const mappingOptions = {
         switchMatterType: deviceOverride?.switchMatterType ?? (primaryChannel ? inferSwitchMatterTypeFromName(primaryChannel.name) : undefined),
         batteryPowered: this.deviceBatteryHints.get(deviceAddress) ?? primaryChannel?.batteryPowered ?? false,
+        exposeHumidity: deviceOverride?.exposeHumidity,
       };
 
       // Pre-check: if every resolved supported channel for this device is disabled, skip the mapper
@@ -387,7 +605,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
               await this.clearDeviceSelect(oldKey);
             }
           }
-          this.setSelectDevice(selectSerial, displayName, undefined, 'switch');
+          this.setSelectDevice(selectSerial, displayName, `/plugins/matterbridge-homematic/#${selectSerial}`, 'switch');
         }
         continue;
       }
@@ -419,7 +637,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
             await this.clearDeviceSelect(oldKey);
           }
         }
-        this.setSelectDevice(selectSerial, displayName, undefined, 'switch');
+        this.setSelectDevice(selectSerial, displayName, `/plugins/matterbridge-homematic/#${selectSerial}`, 'switch');
 
         if (!this.isChannelEnabled(resolvedChannel, override, displayName)) {
           continue;
@@ -458,7 +676,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         }
       }
 
-      this.setSelectDevice(selectSerial, displayName, undefined, 'switch');
+      this.setSelectDevice(selectSerial, displayName, `/plugins/matterbridge-homematic/#${selectSerial}`, 'switch');
 
       if (!this.isChannelEnabled(channel, override, displayName)) {
         continue;
@@ -512,24 +730,50 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const ccuConn = this.ccuConnection;
       // Track channel address for precise inbound event matching.
       this.channelAddressToDevice.set(channel.address, endpoint);
-      try {
-        void endpoint.subscribeAttribute('OnOff', 'onOff', (value: boolean) => {
-          const iface = channel.interfaceName;
-          const address = channel.address;
-          // Suppress setValue when this change was triggered by an incoming RPC event.
-          const suppress = this.rpcEchoSuppress.get(address);
-          if (suppress !== undefined && suppress === value) {
-            this.rpcEchoSuppress.delete(address);
-            return;
-          }
-          this.log.debug(`Matter OnOff -> Homematic setValue: iface=${iface} channel=${address} value=${value}`);
-          ccuConn.setChannelDatapointValue(iface, address, 'STATE', value).catch((err: unknown) => {
-            this.log.warn(`Failed to set Homematic STATE for ${address}: ${String(err)}`);
+
+      if (endpoint.hasClusterServer('FanControl')) {
+        // Fan device: subscribe to FanControl.fanMode and map to Homematic STATE.
+        // FanMode.Off=0 → STATE=false; any other mode → STATE=true.
+        try {
+          void endpoint.subscribeAttribute('FanControl', 'fanMode', (value: number) => {
+            const iface = channel.interfaceName;
+            const address = channel.address;
+            const state = value !== 0;
+            const suppress = this.rpcEchoSuppress.get(address);
+            if (suppress !== undefined && suppress === state) {
+              this.rpcEchoSuppress.delete(address);
+              return;
+            }
+            this.log.debug(`Matter FanControl fanMode -> Homematic setValue: iface=${iface} channel=${address} state=${state}`);
+            ccuConn.setChannelDatapointValue(iface, address, 'STATE', state).catch((err: unknown) => {
+              this.log.warn(`Failed to set Homematic STATE for ${address}: ${String(err)}`);
+            });
           });
-        });
-      } catch (err) {
-        this.log.warn(`Failed to subscribe OnOff for ${channel.address}: ${String(err)}`);
+        } catch (err) {
+          this.log.warn(`Failed to subscribe FanControl for ${channel.address}: ${String(err)}`);
+        }
+      } else {
+        // Light/outlet/switch device: subscribe to OnOff.onOff.
+        try {
+          void endpoint.subscribeAttribute('OnOff', 'onOff', (value: boolean) => {
+            const iface = channel.interfaceName;
+            const address = channel.address;
+            // Suppress setValue when this change was triggered by an incoming RPC event.
+            const suppress = this.rpcEchoSuppress.get(address);
+            if (suppress !== undefined && suppress === value) {
+              this.rpcEchoSuppress.delete(address);
+              return;
+            }
+            this.log.debug(`Matter OnOff -> Homematic setValue: iface=${iface} channel=${address} value=${value}`);
+            ccuConn.setChannelDatapointValue(iface, address, 'STATE', value).catch((err: unknown) => {
+              this.log.warn(`Failed to set Homematic STATE for ${address}: ${String(err)}`);
+            });
+          });
+        } catch (err) {
+          this.log.warn(`Failed to subscribe OnOff for ${channel.address}: ${String(err)}`);
+        }
       }
+
       // If a power meter channel was merged onto this SWITCH endpoint, register its address
       // in the appropriate event map so incoming RPC events update the merged endpoint.
       if (channel.powerMeterChannelAddress) {
@@ -1046,9 +1290,27 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     const endpoint = this.channelAddressToDevice.get(channelAddress);
     if (!endpoint) return;
 
+    const newValue = event.value === true || event.value === 1 || event.value === '1';
+
+    if (endpoint.hasClusterServer('FanControl')) {
+      // Fan device: map STATE boolean to FanControl.fanMode. FanMode.On=4, FanMode.Off=0.
+      const fanMode = newValue ? 4 : 0;
+      try {
+        const current = await endpoint.getAttribute('FanControl', 'fanMode');
+        if (current !== fanMode) {
+          this.rpcEchoSuppress.set(channelAddress, newValue);
+          await endpoint.updateAttribute('FanControl', 'fanMode', fanMode);
+          this.log.info(`${endpoint.deviceName} SWITCH STATE event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} FanControl fanMode to ${fanMode} (state=${newValue})`);
+        }
+      } catch (err) {
+        this.rpcEchoSuppress.delete(channelAddress);
+        this.log.warn(`Failed to update FanControl.fanMode for ${channelAddress}: ${String(err)}`);
+      }
+      return;
+    }
+
     if (!endpoint.hasClusterServer('OnOff')) return;
 
-    const newValue = event.value === true || event.value === 1 || event.value === '1';
     try {
       const current = await endpoint.getAttribute('OnOff', 'onOff');
       if (current !== newValue) {
@@ -2177,7 +2439,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       if (newName && newName !== oldName && newName !== channelAddress) {
         this.log.info(`Updating device name for ${channelAddress}: "${oldName}" -> "${newName}"`);
         device.deviceName = newName;
-        this.setSelectDevice(this.getChannelSelectSerial(updatedChannel), newName, undefined, 'switch');
+        const selectSerial = this.getChannelSelectSerial(updatedChannel);
+        this.setSelectDevice(selectSerial, newName, `/plugins/matterbridge-homematic/#${selectSerial}`, 'switch');
         try {
           await device.updateAttribute('BridgedDeviceBasicInformation', 'nodeLabel', newName);
         } catch (error) {

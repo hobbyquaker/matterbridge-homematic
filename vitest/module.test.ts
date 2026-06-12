@@ -1170,4 +1170,73 @@ describe('TemplatePlatform private method coverage', () => {
     expect((inst as any).channelAddressToDevice.get('WIRE007:1')).toBeUndefined();
     (inst as any).rotaryHandleChannels.delete('WIRE007:1');
   });
+
+  // ── onFetch ──────────────────────────────────────────────────────────────
+
+  test('onFetch GET channels returns empty channel list when no channels discovered', async () => {
+    (inst as any).discoveredChannels = [];
+    const result = (await inst.onFetch('GET', 'channels', {}, undefined)) as { channels: unknown[] };
+    expect(result).toBeDefined();
+    expect(Array.isArray(result.channels)).toBe(true);
+    expect(result.channels).toHaveLength(0);
+  });
+
+  test('onFetch GET channels includes a discovered channel', async () => {
+    const ch: CcuChannelInfo = {
+      address: 'FETCH001:1',
+      deviceAddress: 'FETCH001',
+      channelIndex: 1,
+      type: 'SWITCH',
+      interfaceName: 'HmIP-RF',
+      batteryPowered: false,
+      name: 'Test Switch',
+    };
+    (inst as any).discoveredChannels = [ch];
+    const result = (await inst.onFetch('GET', 'channels', {}, undefined)) as { channels: unknown[] };
+    expect(result.channels).toHaveLength(1);
+    (inst as any).discoveredChannels = [];
+  });
+
+  test('onFetch unknown path returns undefined', async () => {
+    const result = await inst.onFetch('GET', 'unknown/path', {}, undefined);
+    expect(result).toBeUndefined();
+  });
+
+  test('onFetch PUT override with non-JSON body returns error', async () => {
+    const ch: CcuChannelInfo = {
+      address: 'FETCH002:1',
+      deviceAddress: 'FETCH002',
+      channelIndex: 1,
+      type: 'SWITCH',
+      interfaceName: 'HmIP-RF',
+      batteryPowered: false,
+    };
+    (inst as any).discoveredChannels = [ch];
+    const result = (await inst.onFetch('PUT', 'channels/FETCH002%3A1/override', {}, 'not-an-object')) as { error: string };
+    expect(typeof result.error).toBe('string');
+    (inst as any).discoveredChannels = [];
+  });
+
+  test('onFetch PUT override with invalid switchMatterType returns error', async () => {
+    const ch: CcuChannelInfo = {
+      address: 'FETCH003:1',
+      deviceAddress: 'FETCH003',
+      channelIndex: 1,
+      type: 'SWITCH',
+      interfaceName: 'HmIP-RF',
+      batteryPowered: false,
+    };
+    (inst as any).discoveredChannels = [ch];
+    const result = (await inst.onFetch('PUT', 'channels/FETCH003%3A1/override', {}, { switchMatterType: 'invalid' })) as { error: string };
+    expect(typeof result.error).toBe('string');
+    expect(result.error).toMatch(/switchMatterType/);
+    (inst as any).discoveredChannels = [];
+  });
+
+  test('onFetch DELETE override for unknown address returns error', async () => {
+    (inst as any).discoveredChannels = [];
+    const result = (await inst.onFetch('DELETE', 'channels/UNKNOWN%3A9/override', {}, undefined)) as { error: string };
+    expect(typeof result.error).toBe('string');
+    expect(result.error).toMatch(/not found/i);
+  });
 });

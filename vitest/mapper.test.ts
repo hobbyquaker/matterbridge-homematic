@@ -204,6 +204,14 @@ describe('createEndpointForChannel', () => {
     expect(epOutlet).toBeInstanceOf(MatterbridgeEndpoint);
     expect(epSwitch).toBeInstanceOf(MatterbridgeEndpoint);
   });
+
+  test('switchMatterType fan: should produce a FanControl endpoint without OnOff cluster', () => {
+    const channel = makeChannel({ type: 'SWITCH' });
+    const ep = createEndpointForChannel(channel, VENDOR_ID, { switchMatterType: 'fan' });
+    expect(ep).toBeInstanceOf(MatterbridgeEndpoint);
+    expect(ep.hasClusterServer('FanControl')).toBe(true);
+    expect(ep.hasClusterServer('OnOff')).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -459,6 +467,28 @@ describe('device mapper: HmIP-WTH', () => {
     const mapper = getDeviceMapper('HmIP-WTH') as DeviceMapper;
     const results = mapper([], VENDOR_ID, {});
     expect(results).toHaveLength(0);
+  });
+
+  test('exposeHumidity default: endpoint should have RelativeHumidityMeasurement', () => {
+    const mapper = getDeviceMapper('HmIP-WTH') as DeviceMapper;
+    const channels = makeWthChannels('HmIP-WTH');
+    const [{ endpoint: ep }] = mapper(channels, VENDOR_ID, {});
+    expect(ep.hasClusterServer('RelativeHumidityMeasurement')).toBe(true);
+  });
+
+  test('exposeHumidity=false: endpoint should NOT have RelativeHumidityMeasurement', () => {
+    const mapper = getDeviceMapper('HmIP-WTH') as DeviceMapper;
+    const channels = makeWthChannels('HmIP-WTH');
+    const [{ endpoint: ep }] = mapper(channels, VENDOR_ID, { exposeHumidity: false });
+    expect(ep.hasClusterServer('RelativeHumidityMeasurement')).toBe(false);
+    expect(ep.hasClusterServer('Thermostat')).toBe(true);
+  });
+
+  test('exposeHumidity=true: endpoint should have RelativeHumidityMeasurement', () => {
+    const mapper = getDeviceMapper('HmIP-WTH') as DeviceMapper;
+    const channels = makeWthChannels('HmIP-WTH');
+    const [{ endpoint: ep }] = mapper(channels, VENDOR_ID, { exposeHumidity: true });
+    expect(ep.hasClusterServer('RelativeHumidityMeasurement')).toBe(true);
   });
 });
 
