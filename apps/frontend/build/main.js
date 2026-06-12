@@ -144,16 +144,32 @@
   }
 
   // ── Hash highlight ──
+  // Extracts the channel address from a selectSerial "<iface>:<typeLabel>:<address>"
+  function addressFromSerial(serial) {
+    var first = serial.indexOf(':');
+    if (first < 0) return serial;
+    var second = serial.indexOf(':', first + 1);
+    if (second < 0) return serial;
+    return serial.slice(second + 1);
+  }
+
+  var hashAutoOpened = false;
+
   function applyHashHighlight() {
-    const hash = location.hash.slice(1);
+    var rawHash = decodeURIComponent(location.hash.slice(1));
     tbody.querySelectorAll('tr').forEach(function (tr) {
       tr.classList.remove('highlighted');
     });
-    if (!hash) return;
-    const target = tbody.querySelector('tr[data-address="' + CSS.escape(decodeURIComponent(hash)) + '"]');
+    if (!rawHash) return;
+    var channelAddress = addressFromSerial(rawHash);
+    var target = tbody.querySelector('tr[data-address="' + CSS.escape(channelAddress) + '"]');
     if (target) {
       target.classList.add('highlighted');
       target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (!hashAutoOpened) {
+        hashAutoOpened = true;
+        openModal(channelAddress);
+      }
     }
   }
 
