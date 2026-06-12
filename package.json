@@ -1,6 +1,6 @@
 {
   "name": "matterbridge-homematic",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "description": "Matterbridge Homematic CCU Plugin",
   "author": "https://github.com/hobbyquaker",
   "license": "Apache-2.0",
@@ -121,9 +121,6 @@
     "matterbridge:enable": "matterbridge -enable .",
     "matterbridge:disable": "matterbridge -disable .",
     "matterbridge:list": "matterbridge -list"
-  },
-  "peerDependencies": {
-    "matterbridge": ">=3.9.0"
   },
   "dependencies": {
     "binrpc": "^3.3.1",
