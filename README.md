@@ -42,7 +42,7 @@ Battery (`LOW_BAT` / `LOWBAT` / `OPERATING_VOLTAGE`) and availability (`UNREACH`
 2. Configure your CCU host address and connection settings
 3. Enable desired RPC interfaces (BidCos-RF, BidCos-Wired, HmIP-RF, etc.)
 4. Restart Bridge
-5. Access the web configuration at the provided editor URL
+5. Open the Matterbridge frontend, click the plugin, and use the built-in channel configuration UI
 
 ## Configuration
 
@@ -114,18 +114,16 @@ For the second CCU:
 }
 ```
 
-### Device Editor Configuration
+### Channel Configuration UI
 
-- **`deviceEditorEnabled`** - Enable/disable the web-based device configuration UI
-- **`deviceEditorPort`** - Port for the editor (0 = auto-assign)
-- **`deviceEditorExternalUrl`** - External URL for the editor (useful for reverse proxies)
-
-The device editor allows you to:
+The plugin ships a built-in configuration UI accessible directly from the Matterbridge frontend. Click the plugin entry to open it. From there you can:
 
 - Enable/disable individual channels
-- Choose Matter device type for SWITCH channels (Light, Outlet, or Switch)
-- View discovered device names and addresses
-- Persist custom device configurations
+- Choose the Matter device type for SWITCH channels (Light, Outlet, Switch, or Fan)
+- Enable/disable humidity exposure for WTH/STHD thermostats
+- View discovered device names, addresses, and registration status
+
+Configuration changes that affect only channel-mapper channels (e.g. SWITCH, BLIND, SHUTTER_CONTACT) are applied live without a restart. Changes to device-mapper channels (e.g. WTH thermostats) require a plugin restart.
 
 ## Troubleshooting
 
@@ -137,8 +135,8 @@ The device editor allows you to:
 
 ### Devices not appearing
 
-- Access the device editor UI to verify devices are discovered
-- Check that channels are enabled in the editor
+- Open the channel configuration UI in the Matterbridge frontend to verify devices are discovered
+- Check that channels are enabled
 - Verify the device type is supported by the plugin
 - Check Matterbridge logs for RPC discovery errors
 

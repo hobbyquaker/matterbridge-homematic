@@ -203,8 +203,10 @@ An alternative is to make `false` the default (always auto-disable new channels 
 
 #### TEST-0 — System tests with Homematic simulator
 
+**Done:** [`fe2b24f`](https://github.com/hobbyquaker/matterbridge-homematic/commit/fe2b24f)
+
 **Effort: Medium**  
-**Status: Not started**  
+**Status: ~~Not started~~ DONE**  
 **Prior art:** https://github.com/hobbyquaker/hm-simulator  
 **Reusable prompt:** `hm-simulator-modernize-and-integrate.prompt.md` (VS Code user prompts folder)
 
