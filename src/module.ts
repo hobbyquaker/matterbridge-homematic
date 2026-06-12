@@ -605,7 +605,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
               await this.clearDeviceSelect(oldKey);
             }
           }
-          this.setSelectDevice(selectSerial, displayName, `/plugins/matterbridge-homematic/#${selectSerial}`, 'switch');
+          this.setSelectDevice(selectSerial, displayName, this.getChannelConfigUrl(ch, selectSerial), 'switch');
         }
         continue;
       }
@@ -637,7 +637,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
             await this.clearDeviceSelect(oldKey);
           }
         }
-        this.setSelectDevice(selectSerial, displayName, `/plugins/matterbridge-homematic/#${selectSerial}`, 'switch');
+        this.setSelectDevice(selectSerial, displayName, this.getChannelConfigUrl(resolvedChannel, selectSerial), 'switch');
 
         if (!this.isChannelEnabled(resolvedChannel, override, displayName)) {
           continue;
@@ -676,7 +676,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         }
       }
 
-      this.setSelectDevice(selectSerial, displayName, `/plugins/matterbridge-homematic/#${selectSerial}`, 'switch');
+      this.setSelectDevice(selectSerial, displayName, this.getChannelConfigUrl(channel, selectSerial), 'switch');
 
       if (!this.isChannelEnabled(channel, override, displayName)) {
         continue;
@@ -2440,7 +2440,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         this.log.info(`Updating device name for ${channelAddress}: "${oldName}" -> "${newName}"`);
         device.deviceName = newName;
         const selectSerial = this.getChannelSelectSerial(updatedChannel);
-        this.setSelectDevice(selectSerial, newName, `/plugins/matterbridge-homematic/#${selectSerial}`, 'switch');
+        this.setSelectDevice(selectSerial, newName, this.getChannelConfigUrl(updatedChannel, selectSerial), 'switch');
         try {
           await device.updateAttribute('BridgedDeviceBasicInformation', 'nodeLabel', newName);
         } catch (error) {
@@ -2577,6 +2577,26 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   private getChannelSelectSerial(channel: Pick<CcuChannelInfo, 'address' | 'interfaceName' | 'type'>): string {
     const typeLabel = isSupportedChannelType(channel.type) ? channelTypeLabel(channel.type) : channel.type;
     return `${channel.interfaceName}:${typeLabel}:${channel.address}`;
+  }
+
+  /**
+   * Returns the plugin config page URL for a channel if it has device-specific configuration
+   * options surfaced through the Matterbridge UI gear icon, or `undefined` otherwise.
+   *
+   * Channels with device-specific options:
+   * - `SWITCH` → `switchMatterType` (light / outlet / switch / fan)
+   * - `HEATING_CLIMATECONTROL_TRANSCEIVER` with a device mapper → `exposeHumidity`
+   *
+   * @param {Pick<CcuChannelInfo, 'type' | 'deviceType'>} channel Channel info.
+   * @param {string} selectSerial Canonical select serial for the channel.
+   * @returns {string | undefined} The config URL, or `undefined` when the channel has no device-specific options.
+   */
+  private getChannelConfigUrl(channel: Pick<CcuChannelInfo, 'type' | 'deviceType'>, selectSerial: string): string | undefined {
+    if (channel.type === 'SWITCH') return `/plugins/matterbridge-homematic/#${selectSerial}`;
+    if (channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' && channel.deviceType && getDeviceMapper(channel.deviceType)) {
+      return `/plugins/matterbridge-homematic/#${selectSerial}`;
+    }
+    return undefined;
   }
 
   /**
