@@ -22,6 +22,7 @@ If you like this project and find it useful, please consider giving it a star on
 
 ### Changed
 
+- `newDevicesDefaultEnabled` now defaults to `false`: newly discovered channels (including on first install and after re-enabling an interface) start disabled and must be enabled individually. Set it to `true` to restore the old behavior.
 - Schema uses `selectFrom: "serial"` for `whiteList` and `blackList`; the Matterbridge UI now writes the stable `selectSerial` key on every checkbox toggle, making the lists immune to CCU ReGa renames (RN-0).
 - `refreshDeviceNames` is now `async` and propagates the updated name to the Matter `nodeLabel` attribute via `updateAttribute` (RN-0).
 

@@ -231,7 +231,7 @@ describe('discoverDevices auto-disable', () => {
     expect(instance.saveConfig).toHaveBeenCalled();
   });
 
-  it('should not auto-blacklist when newDevicesDefaultEnabled is true (default behavior)', async () => {
+  it('should not auto-blacklist when newDevicesDefaultEnabled is true', async () => {
     instance = createInstance({ newDevicesDefaultEnabled: true } as Partial<PlatformConfig>);
     injectFakeCcuConnection(instance);
     // @ts-expect-error Accessing private method for testing purposes
@@ -242,6 +242,19 @@ describe('discoverDevices auto-disable', () => {
 
     expect((instance.config.blackList as string[]).length).toBe(0);
     expect(instance.saveConfig).not.toHaveBeenCalled();
+  });
+
+  it('should auto-blacklist by default when newDevicesDefaultEnabled is not set', async () => {
+    instance = createInstance();
+    injectFakeCcuConnection(instance);
+    // @ts-expect-error Accessing private method for testing purposes
+    instance.getSelectDevices = vi.fn(() => [{ name: 'some-existing-device' }]);
+
+    // @ts-expect-error Accessing private method for testing purposes
+    await instance.discoverDevices();
+
+    expect(instance.config.blackList as string[]).toContain(NEW_SERIAL);
+    expect(instance.saveConfig).toHaveBeenCalled();
   });
 
   it('should not auto-blacklist a channel that is already known from a previous run', async () => {

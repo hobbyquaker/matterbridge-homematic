@@ -221,9 +221,9 @@
     },
     "newDevicesDefaultEnabled": {
       "title": "New Devices Default Enabled",
-      "description": "When false, newly discovered channels that have never been registered before are automatically added to the blacklist and start disabled. Has no effect on the very first startup. Default true preserves existing behavior.",
+      "description": "When false (the default), newly discovered channels that have never been registered before are automatically added to the blacklist and start disabled. Set to true to have new channels start enabled instead.",
       "type": "boolean",
-      "default": true
+      "default": false
     },
     "logRpcEvents": {
       "title": "Log RPC Events",

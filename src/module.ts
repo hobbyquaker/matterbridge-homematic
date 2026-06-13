@@ -58,9 +58,9 @@ interface HomematicPlatformConfig extends PlatformConfig {
   /** When true, fetch current datapoint values from ReGa on startup to seed initial Matter state. Default false. */
   initialValuesFromRega?: boolean;
   /**
-   * When false, newly discovered channels that have never been registered before are automatically
-   * added to the blacklist and start disabled. Has no effect on the very first startup (when no
-   * channels have been registered yet). Default true preserves existing behavior.
+   * When false (the default), newly discovered channels that have never been registered before are
+   * automatically added to the blacklist and start disabled. Set to true to have new channels start
+   * enabled instead.
    */
   newDevicesDefaultEnabled?: boolean;
 }
@@ -534,9 +534,9 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     let registeredCount = 0;
     const enabledDeviceTypesByInterface = new Map<string, Set<string>>();
 
-    // Snapshot before any setSelectDevice calls: treat zero registered channels as first install
-    // so we never auto-blacklist on a brand-new deployment or after a full reset.
-    const shouldAutoDisable = this.getPlatformConfig().newDevicesDefaultEnabled === false;
+    // Auto-disable is the default: channels seen for the first time start disabled unless the user
+    // explicitly sets newDevicesDefaultEnabled to true.
+    const shouldAutoDisable = this.getPlatformConfig().newDevicesDefaultEnabled !== true;
     let autoDisabledCount = 0;
 
     // Group resolved channels by device address (used by the channel loop and select/enabled logic).
