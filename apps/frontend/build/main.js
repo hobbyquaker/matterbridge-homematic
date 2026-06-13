@@ -110,12 +110,10 @@
       });
       var result = await res.json();
       if (result.error) { setStatus('Error: ' + result.error, 'error'); saveBtn.disabled = false; return; }
-      if (result.restartRequired) {
-        setStatus('Saved. Plugin restart required to apply changes.', 'warning');
-      } else {
-        setStatus('Saved and applied.', 'success');
-      }
+      var savedMsg = result.restartRequired ? 'Saved. Plugin restart required to apply changes.' : 'Saved and applied.';
+      var savedType = result.restartRequired ? 'warning' : 'success';
       await init();
+      setStatus(savedMsg, savedType);
     } catch (err) {
       setStatus('Save failed: ' + String(err), 'error');
       saveBtn.disabled = false;
@@ -136,12 +134,10 @@
       });
       var result = await res.json();
       if (result.error) { setStatus('Error: ' + result.error, 'error'); resetBtn.disabled = false; return; }
-      if (result.restartRequired) {
-        setStatus('Reset. Plugin restart required to apply changes.', 'warning');
-      } else {
-        setStatus('Override removed.', 'success');
-      }
+      var resetMsg = result.restartRequired ? 'Reset. Plugin restart required to apply changes.' : 'Override removed.';
+      var resetType = result.restartRequired ? 'warning' : 'success';
       await init();
+      setStatus(resetMsg, resetType);
     } catch (err) {
       setStatus('Reset failed: ' + String(err), 'error');
       resetBtn.disabled = false;
