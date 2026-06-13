@@ -11,7 +11,7 @@
  * @file device-mapper/hmip-wth.ts
  */
 
-import { MatterbridgeEndpoint, humiditySensor, thermostatDevice } from 'matterbridge';
+import { humiditySensor, MatterbridgeEndpoint, thermostatDevice } from 'matterbridge';
 
 import { buildDisplayName, buildEndpointId, buildModel, buildSerialNumber, finalizeEndpoint } from '../mapper-utils.js';
 import { DeviceMapper, MapperOptionDescriptor } from '../types.js';
@@ -42,8 +42,7 @@ export const mapDevice: DeviceMapper = (channels, vendorId, options) => {
 
   const exposeHumidity = options.exposeHumidity !== false;
 
-  const deviceTypes = exposeHumidity ? [thermostatDevice, humiditySensor] : thermostatDevice;
-  const ep = new MatterbridgeEndpoint(deviceTypes, { id })
+  const ep = new MatterbridgeEndpoint(exposeHumidity ? [thermostatDevice, humiditySensor] : thermostatDevice, { id })
     .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
     .createDefaultHeatingThermostatClusterServer(23, 21);
 
