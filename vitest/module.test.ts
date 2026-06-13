@@ -1211,6 +1211,23 @@ describe('TemplatePlatform private method coverage', () => {
     (inst as any).rotaryHandleChannels.delete('WIRE008:1');
   });
 
+  test('wireChannelEndpoint registers HEATING_CLIMATECONTROL_TRANSCEIVER with humidity in both maps', () => {
+    const ep = makeEndpoint(['Thermostat', 'RelativeHumidityMeasurement']);
+    const channel: CcuChannelInfo = {
+      address: 'WIRE009:1',
+      deviceAddress: 'WIRE009',
+      channelIndex: 1,
+      type: 'HEATING_CLIMATECONTROL_TRANSCEIVER',
+      interfaceName: 'HmIP-RF',
+      batteryPowered: false,
+    };
+    (inst as any).wireChannelEndpoint(ep, channel);
+    expect((inst as any).channelAddressToDevice.get('WIRE009:1')).toBe(ep);
+    expect((inst as any).wthHumidityChannels.get('WIRE009:1')).toBe(ep);
+    (inst as any).channelAddressToDevice.delete('WIRE009:1');
+    (inst as any).wthHumidityChannels.delete('WIRE009:1');
+  });
+
   // ── onFetch ──────────────────────────────────────────────────────────────
 
   test('onFetch GET channels returns empty channel list when no channels discovered', async () => {

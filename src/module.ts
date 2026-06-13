@@ -1028,6 +1028,23 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       if (channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' && endpoint.hasClusterServer('RelativeHumidityMeasurement')) {
         this.wthHumidityChannels.set(channel.address, endpoint);
         this.log.info(`Registered combined thermostat+humidity endpoint for ${channel.address} (${channel.deviceType ?? 'unknown'})`);
+        // Seed initial HUMIDITY value via RPC getValue. The CCU's startup event dump arrives
+        // before wireChannelEndpoint populates the routing maps, so those events are lost.
+        // A direct getValue after wiring ensures the cluster is correct without ReGa.
+        if (this.ccuConnection) {
+          this.ccuConnection
+            .callRpc(channel.interfaceName, 'getValue', [channel.address, 'HUMIDITY'])
+            .then((rawValue: unknown) => {
+              if (typeof rawValue !== 'number') return;
+              const measuredValue = Math.round(rawValue * 100);
+              endpoint.updateAttribute('RelativeHumidityMeasurement', 'measuredValue', measuredValue).catch((err: unknown) => {
+                this.log.debug(`Initial HUMIDITY attribute update failed for ${channel.address}: ${String(err)}`);
+              });
+            })
+            .catch((err: unknown) => {
+              this.log.debug(`Initial HUMIDITY getValue failed for ${channel.address}: ${String(err)}`);
+            });
+        }
       }
       if (!this.ccuConnection) return;
       const ccuConn = this.ccuConnection;
