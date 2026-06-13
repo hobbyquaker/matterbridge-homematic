@@ -195,6 +195,20 @@ export interface CcuDiscoveryCache {
   timestamp: number;
 }
 
+/**
+ * Descriptor for a single user-configurable option exposed by a channel or device mapper.
+ * Used by the registry to drive gear-icon visibility, capabilities responses, and PUT validation
+ * in `module.ts` without hard-coding per-option conditions in multiple places.
+ */
+export interface MapperOptionDescriptor {
+  /** The override field this option maps to in {@link CcuChannelOverride}. */
+  key: 'switchMatterType' | 'exposeHumidity';
+  /** Value type: `'enum'` requires a `values` list; `'boolean'` accepts true/false/undefined. */
+  type: 'boolean' | 'enum';
+  /** Allowed string values (required when `type` is `'enum'`). */
+  values?: readonly string[];
+}
+
 /** Options forwarded to channel and device mappers. */
 export interface ChannelMappingOptions {
   /** Override the Matter device type for a SWITCH channel. Defaults to `'light'`. */

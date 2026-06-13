@@ -11,7 +11,7 @@
  * @file device-mapper/index.ts
  */
 
-import { DeviceMapper } from '../types.js';
+import { DeviceMapper, MapperOptionDescriptor } from '../types.js';
 import { mapDevice as hmCcVg1 } from './hm-cc-vg-1.js';
 import { mapDevice as hmipDrsi4 } from './hmip-drsi4.js';
 import { mapDevice as hmipWth } from './hmip-wth.js';
@@ -55,4 +55,36 @@ export function deviceTypeToKey(deviceType: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
+}
+
+/**
+ * Declares the user-configurable options for each device mapper.
+ * Only mappers with at least one configurable option need an entry here;
+ * all others default to an empty array via `getDeviceMapperOptions`.
+ *
+ * Keys must match all device type keys in `DEVICE_MAPPERS` that share the same mapper function.
+ */
+export const DEVICE_MAPPER_OPTIONS: Readonly<Record<string, readonly MapperOptionDescriptor[]>> = {
+  // HmIP-WTH / STHD / STH / BWTH family — exposeHumidity controls the RelativeHumidityMeasurement cluster.
+  'hmip-wth': [{ key: 'exposeHumidity', type: 'boolean' }],
+  'hmip-wth-1': [{ key: 'exposeHumidity', type: 'boolean' }],
+  'hmip-wth-2': [{ key: 'exposeHumidity', type: 'boolean' }],
+  'hmip-wth-b': [{ key: 'exposeHumidity', type: 'boolean' }],
+  'hmip-bwth': [{ key: 'exposeHumidity', type: 'boolean' }],
+  'hmip-bwth-a': [{ key: 'exposeHumidity', type: 'boolean' }],
+  'hmip-bwth24': [{ key: 'exposeHumidity', type: 'boolean' }],
+  'hmip-sthd': [{ key: 'exposeHumidity', type: 'boolean' }],
+  'hmip-sthd-a': [{ key: 'exposeHumidity', type: 'boolean' }],
+  'hmip-sth': [{ key: 'exposeHumidity', type: 'boolean' }],
+  'hmip-sth-a': [{ key: 'exposeHumidity', type: 'boolean' }],
+};
+
+/**
+ * Return the configurable option descriptors for a Homematic device type.
+ *
+ * @param {string} deviceType Raw device type string, e.g. `'HmIP-WTH'`.
+ * @returns {readonly MapperOptionDescriptor[]} Option descriptors (empty when the device mapper has none).
+ */
+export function getDeviceMapperOptions(deviceType: string): readonly MapperOptionDescriptor[] {
+  return DEVICE_MAPPER_OPTIONS[deviceTypeToKey(deviceType)] ?? [];
 }

@@ -12,8 +12,10 @@ import { CHANNEL_MAPPERS, channelTypeToKey } from './channel-mapper/index.js';
 import { DEVICE_MAPPERS, deviceTypeToKey } from './device-mapper/index.js';
 import { CcuChannelInfo, ChannelMappingOptions, SUPPORTED_CHANNEL_TYPES, SupportedChannelType, SwitchMatterType } from './types.js';
 
+export { getChannelMapperOptions } from './channel-mapper/index.js';
+export { getDeviceMapperOptions } from './device-mapper/index.js';
 export { channelTypeLabel } from './mapper-utils.js';
-export type { ChannelMappingOptions, MappedDeviceEndpoint, SupportedChannelType, SwitchMatterType } from './types.js';
+export type { ChannelMappingOptions, MappedDeviceEndpoint, MapperOptionDescriptor, SupportedChannelType, SwitchMatterType } from './types.js';
 export { SUPPORTED_CHANNEL_TYPES } from './types.js';
 
 /**

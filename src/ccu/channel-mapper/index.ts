@@ -7,7 +7,7 @@
  * @file channel-mapper/index.ts
  */
 
-import { ChannelMapper } from '../types.js';
+import { ChannelMapper, MapperOptionDescriptor, SupportedChannelType } from '../types.js';
 import { mapChannel as alarmstate } from './alarmstate.js';
 import { mapChannel as blind } from './blind.js';
 import { mapChannel as climatecontrolRtTransceiver } from './climatecontrol-rt-transceiver.js';
@@ -58,4 +58,25 @@ export const CHANNEL_MAPPERS: Record<string, ChannelMapper> = {
  */
 export function channelTypeToKey(channelType: string): string {
   return channelType.toLowerCase().replace(/_/g, '-');
+}
+
+/**
+ * Declares the user-configurable options for each channel mapper.
+ * Only mappers with at least one configurable option need an entry here;
+ * all others default to an empty array via `getChannelMapperOptions`.
+ */
+export const CHANNEL_MAPPER_OPTIONS: Readonly<Record<string, readonly MapperOptionDescriptor[]>> = {
+  'switch': [{ key: 'switchMatterType', type: 'enum', values: ['light', 'outlet', 'switch', 'fan'] }],
+  'heating-climatecontrol-transceiver': [{ key: 'exposeHumidity', type: 'boolean' }],
+  'climatecontrol-rt-transceiver': [{ key: 'exposeHumidity', type: 'boolean' }],
+};
+
+/**
+ * Return the configurable option descriptors for a supported channel type.
+ *
+ * @param {SupportedChannelType} type Supported channel type.
+ * @returns {readonly MapperOptionDescriptor[]} Option descriptors (empty when the mapper has none).
+ */
+export function getChannelMapperOptions(type: SupportedChannelType): readonly MapperOptionDescriptor[] {
+  return CHANNEL_MAPPER_OPTIONS[channelTypeToKey(type)] ?? [];
 }

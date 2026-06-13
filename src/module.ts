@@ -31,14 +31,16 @@ import { CcuConnectionLayer } from './ccu/connection-layer.js';
 import {
   channelTypeLabel,
   createEndpointForChannel,
+  getChannelMapperOptions,
   getDeviceMapper,
+  getDeviceMapperOptions,
   inferSwitchMatterTypeFromName,
   isSupportedChannelType,
   resolveChannelsForMatter,
 } from './ccu/device-mapper.js';
 import { getBatteryVoltageRange, getMatchingMainsPoweredPrefix, isAlwaysMainsPoweredDeviceType, MAINS_POWERED_DEVICE_TYPE_PREFIXES } from './ccu/device-power.js';
 import { buildParamsetKey, ParamsetCache } from './ccu/paramset-cache.js';
-import { CcuChannelInfo, CcuChannelOverride, CcuInterfaceName } from './ccu/types.js';
+import { CcuChannelInfo, CcuChannelOverride, CcuInterfaceName, MapperOptionDescriptor } from './ccu/types.js';
 
 /**
  * This is the standard interface for Matterbridge plugins.
@@ -317,6 +319,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const enabled = this.isChannelEnabled(channel, override, displayName);
       const registered =
         this.channelAddressToDevice.has(channel.address) || this.rotaryHandleChannels.has(channel.address) || this.deviceAddressToDevice.has(channel.deviceAddress);
+      const opts = this.getChannelOptions(channel);
       return {
         address: channel.address,
         deviceAddress: channel.deviceAddress,
@@ -330,8 +333,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         registered,
         override: override ?? null,
         capabilities: {
-          switchMatterType: channel.type === 'SWITCH',
-          exposeHumidity: channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' || channel.type === 'CLIMATECONTROL_RT_TRANSCEIVER',
+          switchMatterType: opts.some((o) => o.key === 'switchMatterType'),
+          exposeHumidity: opts.some((o) => o.key === 'exposeHumidity'),
         },
       };
     });
@@ -355,42 +358,45 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     const update = body as Record<string, unknown>;
     const newFields: Partial<CcuChannelOverride> = {};
 
-    if ('switchMatterType' in update) {
-      const v = update.switchMatterType;
-      if (v !== undefined && v !== 'light' && v !== 'outlet' && v !== 'switch' && v !== 'fan') {
-        return { error: `Invalid switchMatterType: '${String(v)}'. Valid values: light, outlet, switch, fan` };
+    // Validate and collect descriptor-driven fields (switchMatterType, exposeHumidity, …).
+    for (const desc of this.getChannelOptions(channel)) {
+      if (!(desc.key in update)) continue;
+      const v = update[desc.key];
+      if (desc.type === 'enum') {
+        const allowed = desc.values ?? [];
+        if (v !== undefined && !allowed.includes(v as string)) {
+          return { error: `Invalid ${desc.key}: '${String(v)}'. Valid values: ${allowed.join(', ')}` };
+        }
+        if (desc.key === 'switchMatterType') newFields.switchMatterType = v as CcuChannelOverride['switchMatterType'];
+      } else {
+        if (v !== undefined && typeof v !== 'boolean') {
+          return { error: `${desc.key} must be a boolean` };
+        }
+        if (desc.key === 'exposeHumidity') newFields.exposeHumidity = v as boolean | undefined;
       }
-      newFields.switchMatterType = v as CcuChannelOverride['switchMatterType'];
     }
 
+    // 'enabled' is accepted for every channel regardless of mapper options.
     if ('enabled' in update) {
       const v = update.enabled;
       if (v !== undefined && typeof v !== 'boolean') return { error: 'enabled must be a boolean' };
       newFields.enabled = v as boolean | undefined;
     }
 
-    if ('exposeHumidity' in update) {
-      const v = update.exposeHumidity;
-      if (v !== undefined && typeof v !== 'boolean') return { error: 'exposeHumidity must be a boolean' };
-      newFields.exposeHumidity = v as boolean | undefined;
-    }
-
     const existing = this.getChannelOverride(address) ?? { address };
     const merged: CcuChannelOverride = { ...existing, ...newFields, address };
 
-    // Remove fields that are explicitly undefined (keep the object clean).
-    if (merged.switchMatterType === undefined) delete merged.switchMatterType;
-    if (merged.enabled === undefined) delete merged.enabled;
-    if (merged.exposeHumidity === undefined) delete merged.exposeHumidity;
+    // Strip keys with undefined values (keep address always).
+    const cleanedMerged = Object.fromEntries(Object.entries(merged).filter(([k, v]) => k === 'address' || v !== undefined)) as CcuChannelOverride;
 
-    const hasContent = 'switchMatterType' in merged || 'enabled' in merged || 'exposeHumidity' in merged;
+    const hasContent = Object.keys(cleanedMerged).some((k) => k !== 'address');
     const overrides = this.getChannelOverrides().filter((o) => o.address !== address);
-    if (hasContent) overrides.push(merged);
+    if (hasContent) overrides.push(cleanedMerged);
     (this.config as HomematicPlatformConfig).channelOverrides = overrides;
     this.saveConfig(this.getPlatformConfig());
 
     const reRegistered = await this.tryReRegisterChannel(channel);
-    const finalOverride = hasContent ? merged : null;
+    const finalOverride = hasContent ? cleanedMerged : null;
 
     if (reRegistered) {
       this.wssSendSnackbarMessage('Channel configuration saved and applied', 3000, 'success');
@@ -2646,23 +2652,34 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   }
 
   /**
-   * Returns the plugin config page URL for a channel if it has device-specific configuration
-   * options surfaced through the Matterbridge UI gear icon, or `undefined` otherwise.
-   *
-   * Channels with device-specific options:
-   * - `SWITCH` → `switchMatterType` (light / outlet / switch / fan)
-   * - `HEATING_CLIMATECONTROL_TRANSCEIVER` with a device mapper → `exposeHumidity`
+   * Returns the plugin config page URL for a channel if its mapper declares at least one
+   * user-configurable option (surfaced through the Matterbridge UI gear icon), or `undefined`
+   * otherwise. Derived from mapper option descriptors — no hardcoded channel type checks needed.
    *
    * @param {Pick<CcuChannelInfo, 'type' | 'deviceType'>} channel Channel info.
    * @param {string} selectSerial Canonical select serial for the channel.
-   * @returns {string | undefined} The config URL, or `undefined` when the channel has no device-specific options.
+   * @returns {string | undefined} The config URL, or `undefined` when the channel has no options.
    */
   private getChannelConfigUrl(channel: Pick<CcuChannelInfo, 'type' | 'deviceType'>, selectSerial: string): string | undefined {
-    if (channel.type === 'SWITCH') return `/plugins/matterbridge-homematic/#${selectSerial}`;
-    if (channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' || channel.type === 'CLIMATECONTROL_RT_TRANSCEIVER') {
-      return `/plugins/matterbridge-homematic/#${selectSerial}`;
+    return this.getChannelOptions(channel).length > 0 ? `/plugins/matterbridge-homematic/#${selectSerial}` : undefined;
+  }
+
+  /**
+   * Return the configurable option descriptors for a channel, delegating to the device mapper
+   * registry when the channel’s device type has a registered device mapper, and falling back to
+   * the channel mapper registry otherwise.
+   *
+   * @param {Pick<CcuChannelInfo, 'type' | 'deviceType'>} channel Channel info.
+   * @returns {readonly MapperOptionDescriptor[]} Option descriptors (empty array when no options).
+   */
+  private getChannelOptions(channel: Pick<CcuChannelInfo, 'type' | 'deviceType'>): readonly MapperOptionDescriptor[] {
+    if (channel.deviceType && getDeviceMapper(channel.deviceType)) {
+      return getDeviceMapperOptions(channel.deviceType);
     }
-    return undefined;
+    if (isSupportedChannelType(channel.type)) {
+      return getChannelMapperOptions(channel.type);
+    }
+    return [];
   }
 
   /**
