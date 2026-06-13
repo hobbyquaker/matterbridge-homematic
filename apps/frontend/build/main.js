@@ -10,6 +10,8 @@
   var inputSwitch  = document.getElementById('input-switchMatterType');
   var fieldHumid   = document.getElementById('field-exposeHumidity');
   var inputHumid   = document.getElementById('input-exposeHumidity');
+  var fieldBright  = document.getElementById('field-exposeBrightness');
+  var inputBright  = document.getElementById('input-exposeBrightness');
   var noteEl       = document.getElementById('note');
   var saveBtn      = document.getElementById('btn-save');
   var resetBtn     = document.getElementById('btn-reset');
@@ -61,6 +63,7 @@
     // Reset fields
     fieldSwitch.classList.add('hidden');
     fieldHumid.classList.add('hidden');
+    fieldBright.classList.add('hidden');
     noteEl.classList.add('hidden');
     saveBtn.disabled = true;
 
@@ -75,6 +78,12 @@
     if (channel.capabilities.exposeHumidity) {
       fieldHumid.classList.remove('hidden');
       inputHumid.checked = !(channel.override && channel.override.exposeHumidity === false);
+      hasOptions = true;
+    }
+
+    if (channel.capabilities.exposeBrightness) {
+      fieldBright.classList.remove('hidden');
+      inputBright.checked = !!(channel.override && channel.override.exposeBrightness === true);
       hasOptions = true;
     }
 
@@ -98,6 +107,7 @@
     var body = {};
     if (channel.capabilities.switchMatterType) body.switchMatterType = inputSwitch.value;
     if (channel.capabilities.exposeHumidity)   body.exposeHumidity   = inputHumid.checked;
+    if (channel.capabilities.exposeBrightness) body.exposeBrightness = inputBright.checked;
 
     saveBtn.disabled = true;
     setStatus('Saving...', '');

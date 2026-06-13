@@ -335,6 +335,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         capabilities: {
           switchMatterType: opts.some((o) => o.key === 'switchMatterType'),
           exposeHumidity: opts.some((o) => o.key === 'exposeHumidity'),
+          exposeBrightness: opts.some((o) => o.key === 'exposeBrightness'),
         },
       };
     });
