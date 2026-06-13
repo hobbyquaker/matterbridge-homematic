@@ -1271,5 +1271,12 @@ describe('TemplatePlatform private method coverage', () => {
     expect(result.ok).toBe(true);
     // Live re-registration: no restart should be required for device-mapper channels.
     expect(result.restartRequired).toBe(false);
+
+    // The thermostat endpoint should be wired into wthHumidityChannels so ACTUAL_HUMIDITY
+    // RPC events are routed to the RelativeHumidityMeasurement cluster.
+    const wthHumidityChannels: Map<string, MatterbridgeEndpoint> = (inst as any).wthHumidityChannels;
+    const humidityEp = wthHumidityChannels.get('DMREG001:1');
+    expect(humidityEp).toBeDefined();
+    expect(humidityEp?.hasClusterServer('RelativeHumidityMeasurement')).toBe(true);
   });
 });

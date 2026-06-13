@@ -798,6 +798,19 @@ describe('device mapper: HM-CC-VG-1', () => {
     const results = mapper([], VENDOR_ID, {});
     expect(results).toHaveLength(0);
   });
+
+  test('first endpoint should have RelativeHumidityMeasurement when exposeHumidity=true', () => {
+    const mapper = getDeviceMapper('HM-CC-VG-1') as DeviceMapper;
+    const [{ endpoint: ep }] = mapper(makeVg1Channels(), VENDOR_ID, { exposeHumidity: true });
+    expect(ep.hasClusterServer('RelativeHumidityMeasurement')).toBe(true);
+    expect(ep.hasClusterServer('Thermostat')).toBe(true);
+  });
+
+  test('first endpoint should NOT have RelativeHumidityMeasurement when exposeHumidity=false', () => {
+    const mapper = getDeviceMapper('HM-CC-VG-1') as DeviceMapper;
+    const [{ endpoint: ep }] = mapper(makeVg1Channels(), VENDOR_ID, { exposeHumidity: false });
+    expect(ep.hasClusterServer('RelativeHumidityMeasurement')).toBe(false);
+  });
 });
 
 describe('channel mapper clusters: HEATING_CLIMATECONTROL_TRANSCEIVER', () => {

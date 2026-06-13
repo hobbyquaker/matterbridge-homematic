@@ -515,9 +515,13 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const resolvedChannel = (primaryMappedAddress ? resolvedDeviceChannels.find((c) => c.address === primaryMappedAddress) : undefined) ?? primaryChannel;
       if (!resolvedChannel) continue;
 
-      const displayName = this.getChannelDisplayName(resolvedChannel);
       const override = this.getChannelOverride(resolvedChannel.address);
-      if (!this.isChannelEnabled(resolvedChannel, override, displayName)) continue;
+      // During live re-registration triggered by an explicit user action (option change), only
+      // honour the explicit `enabled` override. Do NOT fall back to validateDevice / whitelist
+      // here — the user is actively changing an option, so the channel was presumably enabled,
+      // and an empty whitelist (common in test environments and fresh installations) must not
+      // block the re-registration.
+      if (override?.enabled === false) continue;
 
       try {
         await this.registerDevice(endpoint);
@@ -532,6 +536,13 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     }
 
     this.log.info(`Device mapper live re-registration: device=${deviceAddress} deviceType=${deviceType} mapper=${this.getDeviceMapperKey(deviceType)} registered=${anyRegistered}`);
+
+    // Re-sync initial values from ReGa so newly-wired clusters (e.g. RelativeHumidityMeasurement)
+    // are populated immediately rather than waiting for the next CCU event.
+    if (anyRegistered) {
+      await this.applyInitialValuesFromRega();
+    }
+
     return true;
   }
 
@@ -589,6 +600,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       this.deviceAddressToDevice.set(channel.deviceAddress, endpoint);
       this.wireChannelEndpoint(endpoint, channel);
       this.log.info(`Live re-registration: applied updated override for channel=${channel.address}`);
+      await this.applyInitialValuesFromRega();
       return true;
     } catch (err) {
       this.log.warn(`Live re-registration: registerDevice failed for ${channel.address}: ${String(err)}`);
@@ -1007,14 +1019,17 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     }
 
     // Wire Thermostat setpoint and mode for HEATING_CLIMATECONTROL_TRANSCEIVER/THERMALCONTROL_TRANSMIT channels.
-    if ((channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' || channel.type === 'THERMALCONTROL_TRANSMIT') && this.ccuConnection) {
-      const ccuConn = this.ccuConnection;
+    if (channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' || channel.type === 'THERMALCONTROL_TRANSMIT') {
+      // Routing maps are always set so inbound RPC events (temperature/humidity) are routed correctly
+      // even when the CCU subscription setup below is skipped (e.g. no active CCU connection).
       this.channelAddressToDevice.set(channel.address, endpoint);
       // Track combined thermostat+humidity endpoint for humidity RPC event routing.
       if (channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' && endpoint.hasClusterServer('RelativeHumidityMeasurement')) {
         this.wthHumidityChannels.set(channel.address, endpoint);
         this.log.info(`Registered combined thermostat+humidity endpoint for ${channel.address} (${channel.deviceType ?? 'unknown'})`);
       }
+      if (!this.ccuConnection) return;
+      const ccuConn = this.ccuConnection;
       // Subscribe to setpoint — write Homematic SET_POINT_TEMPERATURE on change.
       try {
         void endpoint.subscribeAttribute('Thermostat', 'occupiedHeatingSetpoint', (value: number) => {
@@ -1072,14 +1087,17 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
     // Wire Thermostat setpoint and mode for CLIMATECONTROL_RT_TRANSCEIVER channels (HM-CC-VG-1).
     // Setpoint writes use MANU_MODE which simultaneously switches the device to manual mode.
-    if (channel.type === 'CLIMATECONTROL_RT_TRANSCEIVER' && this.ccuConnection) {
-      const ccuConn = this.ccuConnection;
+    if (channel.type === 'CLIMATECONTROL_RT_TRANSCEIVER') {
+      // Routing maps are always set so inbound RPC events (temperature/humidity) are routed correctly
+      // even when the CCU subscription setup below is skipped (e.g. no active CCU connection).
       this.channelAddressToDevice.set(channel.address, endpoint);
       // Track combined thermostat+humidity endpoint for ACTUAL_HUMIDITY RPC event routing.
       if (endpoint.hasClusterServer('RelativeHumidityMeasurement')) {
         this.wthHumidityChannels.set(channel.address, endpoint);
         this.log.info(`Registered combined thermostat+humidity endpoint for ${channel.address} (${channel.deviceType ?? 'unknown'})`);
       }
+      if (!this.ccuConnection) return;
+      const ccuConn = this.ccuConnection;
       // Subscribe to setpoint — write Homematic MANU_MODE on change (manual mode + setpoint).
       try {
         void endpoint.subscribeAttribute('Thermostat', 'occupiedHeatingSetpoint', (value: number) => {
