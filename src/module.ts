@@ -4,7 +4,7 @@
  * @file module.ts
  * @author hobbyquaker (https://github.com/hobbyquaker)
  * @created 2025-06-15
- * @version 0.12.3
+ * @version 0.12.4
  * @license Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -317,7 +317,6 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const enabled = this.isChannelEnabled(channel, override, displayName);
       const registered =
         this.channelAddressToDevice.has(channel.address) || this.rotaryHandleChannels.has(channel.address) || this.deviceAddressToDevice.has(channel.deviceAddress);
-      const hasDeviceMapper = channel.deviceType ? getDeviceMapper(channel.deviceType) !== undefined : false;
       return {
         address: channel.address,
         deviceAddress: channel.deviceAddress,
@@ -517,7 +516,6 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     // This ensures primeBatteryHintsFromRpc uses the correct VERSION for paramset cache keys
     // even when the discovery cache was populated before the newDevices payload arrived.
     await this.ccuConnection.waitForNewDevices(5000);
-    const cachedChannels = this.ccuConnection.getCachedChannels();
     const enabledInterfaces = this.ccuConnection.getStatusSnapshot().enabledInterfaces;
     this.updateMainsPoweredDeviceSet(rawChannels);
     await this.primeBatteryHintsFromRpc(rawChannels);
