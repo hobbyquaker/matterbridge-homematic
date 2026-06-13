@@ -18,6 +18,7 @@ import { mapChannel as keyTransceiver } from './key-transceiver.js';
 import { mapChannel as keymatic } from './keymatic.js';
 import { mapChannel as motionDetector, OPTIONS as motionDetectorOptions } from './motion-detector.js';
 import { mapChannel as rotaryHandleSensor } from './rotary-handle-sensor.js';
+import { mapChannel as rotaryHandleTransceiver } from './rotary-handle-transceiver.js';
 import { mapChannel as shutterContact } from './shutter-contact.js';
 import { mapChannel as smokeDetector } from './smoke-detector.js';
 import { mapChannel as switchMapper, OPTIONS as switchOptions } from './switch.js';
@@ -42,6 +43,7 @@ export const CHANNEL_MAPPERS: Record<string, ChannelMapper> = {
   keymatic,
   'motion-detector': motionDetector,
   'rotary-handle-sensor': rotaryHandleSensor,
+  'rotary-handle-transceiver': rotaryHandleTransceiver,
   'shutter-contact': shutterContact,
   'smoke-detector': smokeDetector,
   'switch': switchMapper,

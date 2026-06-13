@@ -657,6 +657,18 @@ describe('channel mapper clusters: ROTARY_HANDLE_SENSOR', () => {
   });
 });
 
+describe('channel mapper clusters: ROTARY_HANDLE_TRANSCEIVER', () => {
+  test('should have BooleanState cluster', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'ROTARY_HANDLE_TRANSCEIVER' }), VENDOR_ID);
+    expect(ep.hasClusterServer('BooleanState')).toBe(true);
+  });
+
+  test('should have PowerSource cluster', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'ROTARY_HANDLE_TRANSCEIVER' }), VENDOR_ID);
+    expect(ep.hasClusterServer('PowerSource')).toBe(true);
+  });
+});
+
 describe('channel mapper clusters: SMOKE_DETECTOR', () => {
   test('should have SmokeCoAlarm cluster', () => {
     const ep = createEndpointForChannel(makeChannel({ type: 'SMOKE_DETECTOR' }), VENDOR_ID);

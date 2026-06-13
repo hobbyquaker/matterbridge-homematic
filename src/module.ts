@@ -1013,8 +1013,9 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       this.channelAddressToDevice.set(channel.address, endpoint);
     }
 
-    // Track ROTARY_HANDLE_SENSOR channel address in its own map to avoid STATE conflicts with SHUTTER_CONTACT.
-    if (channel.type === 'ROTARY_HANDLE_SENSOR') {
+    // Track ROTARY_HANDLE_SENSOR and ROTARY_HANDLE_TRANSCEIVER channel addresses in their own map
+    // to avoid STATE conflicts with SHUTTER_CONTACT (which uses channelAddressToDevice for STATE).
+    if (channel.type === 'ROTARY_HANDLE_SENSOR' || channel.type === 'ROTARY_HANDLE_TRANSCEIVER') {
       this.rotaryHandleChannels.set(channel.address, endpoint);
     }
 
@@ -1943,16 +1944,19 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   }
 
   /**
-   * Handle incoming RPC event for ROTARY_HANDLE_SENSOR channel STATE datapoint.
+   * Handle incoming RPC event for ROTARY_HANDLE_SENSOR / ROTARY_HANDLE_TRANSCEIVER channel STATE.
    * Maps the 3-state Homematic value to the Matter BooleanState cluster on a contactSensor endpoint.
-   * STATE 0 = closed (stateValue=true), STATE 1 (tilted) or 2 (open) = not closed (stateValue=false).
+   *
+   * BidCos ROTARY_HANDLE_SENSOR sends STATE as an integer: 0=closed, 1=tilted, 2=open.
+   * HmIP ROTARY_HANDLE_TRANSCEIVER sends STATE as a string enum: "CLOSED", "TILTED", "OPEN".
+   * In both cases only the closed state maps to stateValue=true; tilted and open both map to false.
    *
    * @param {object} event RPC event payload.
    * @param {string} [event.iface] RPC interface name.
    * @param {string} [event.idInit] Device init ID.
    * @param {unknown} [event.channel] Channel address string.
    * @param {string} [event.datapoint] Datapoint name (e.g. 'STATE').
-   * @param {unknown} [event.value] Integer state value: 0=closed, 1=tilted, 2=open.
+   * @param {unknown} [event.value] State value: 0/false/"CLOSED"=closed, 1/2/"TILTED"/"OPEN"=open.
    * @returns {Promise<void>} Resolves when the Matter attribute has been updated.
    */
   private async handleRpcEventRotaryHandle(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
@@ -1967,15 +1971,15 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     // Guard: only act on rotary handle endpoints (bridged info model suffix distinguishes from SHUTTER_CONTACT).
     if (!endpoint.hasClusterServer('BooleanState')) return;
 
-    // STATE 0 = fully closed → contact detected (stateValue=true).
-    // STATE 1 = tilted, STATE 2 = open → no contact (stateValue=false).
-    const closed = event.value === 0 || event.value === '0' || event.value === false;
+    // STATE 0 / false / "CLOSED" = fully closed → contact detected (stateValue=true).
+    // STATE 1 / "TILTED" or 2 / "OPEN" → no contact (stateValue=false).
+    const closed = event.value === 0 || event.value === '0' || event.value === false || event.value === 'CLOSED';
     try {
       const current = await endpoint.getAttribute('BooleanState', 'stateValue');
       if (current !== closed) {
         await endpoint.updateAttribute('BooleanState', 'stateValue', closed);
         this.log.info(
-          `${endpoint.deviceName} ROTARY_HANDLE_SENSOR STATE event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} stateValue to ${closed} (raw=${String(event.value)})`,
+          `${endpoint.deviceName} ROTARY_HANDLE STATE event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} stateValue to ${closed} (raw=${String(event.value)})`,
         );
       }
     } catch (err) {

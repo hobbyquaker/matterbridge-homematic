@@ -17,7 +17,7 @@
  * @file channel-mapper/climatecontrol-rt-transceiver.ts
  */
 
-import { humiditySensor, MatterbridgeEndpoint, thermostatDevice } from 'matterbridge';
+import { MatterbridgeEndpoint, thermostatDevice } from 'matterbridge';
 
 import { buildDisplayName, buildEndpointId, buildModel, buildSerialNumber, finalizeEndpoint } from '../mapper-utils.js';
 import { ChannelMapper, MapperOptionDescriptor } from '../types.js';
@@ -41,15 +41,13 @@ export const mapChannel: ChannelMapper = (channel, vendorId, options) => {
   const serialNumber = buildSerialNumber(channel, 'CLIMATECONTROL_RT_TRANSCEIVER');
   const model = buildModel(channel);
 
-  const ep =
-    options.exposeHumidity === true
-      ? new MatterbridgeEndpoint([thermostatDevice, humiditySensor], { id })
-          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
-          .createDefaultHeatingThermostatClusterServer(23, 21)
-          .createDefaultRelativeHumidityMeasurementClusterServer()
-      : new MatterbridgeEndpoint(thermostatDevice, { id })
-          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
-          .createDefaultHeatingThermostatClusterServer(23, 21);
+  const ep = new MatterbridgeEndpoint(thermostatDevice, { id })
+    .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
+    .createDefaultHeatingThermostatClusterServer(23, 21);
+
+  if (options.exposeHumidity === true) {
+    ep.createDefaultRelativeHumidityMeasurementClusterServer();
+  }
 
   return finalizeEndpoint(ep, { ...options, batteryPowered: channel.batteryPowered });
 };

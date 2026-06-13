@@ -515,6 +515,30 @@ describe('TemplatePlatform private method coverage', () => {
     (inst as any).rotaryHandleChannels.delete('ROT002:1');
   });
 
+  test('handleRpcEventRotaryHandle sets stateValue=true for STATE="CLOSED" (HmIP string enum)', async () => {
+    const ep = makeEndpoint(['BooleanState'], { 'BooleanState.stateValue': false });
+    (inst as any).rotaryHandleChannels.set('ROT003:1', ep);
+    await (inst as any).handleRpcEventRotaryHandle({ channel: 'ROT003:1', datapoint: 'STATE', value: 'CLOSED' });
+    expect(ep.updateAttribute).toHaveBeenCalledWith('BooleanState', 'stateValue', true);
+    (inst as any).rotaryHandleChannels.delete('ROT003:1');
+  });
+
+  test('handleRpcEventRotaryHandle sets stateValue=false for STATE="TILTED" (HmIP string enum)', async () => {
+    const ep = makeEndpoint(['BooleanState'], { 'BooleanState.stateValue': true });
+    (inst as any).rotaryHandleChannels.set('ROT004:1', ep);
+    await (inst as any).handleRpcEventRotaryHandle({ channel: 'ROT004:1', datapoint: 'STATE', value: 'TILTED' });
+    expect(ep.updateAttribute).toHaveBeenCalledWith('BooleanState', 'stateValue', false);
+    (inst as any).rotaryHandleChannels.delete('ROT004:1');
+  });
+
+  test('handleRpcEventRotaryHandle sets stateValue=false for STATE="OPEN" (HmIP string enum)', async () => {
+    const ep = makeEndpoint(['BooleanState'], { 'BooleanState.stateValue': true });
+    (inst as any).rotaryHandleChannels.set('ROT005:1', ep);
+    await (inst as any).handleRpcEventRotaryHandle({ channel: 'ROT005:1', datapoint: 'STATE', value: 'OPEN' });
+    expect(ep.updateAttribute).toHaveBeenCalledWith('BooleanState', 'stateValue', false);
+    (inst as any).rotaryHandleChannels.delete('ROT005:1');
+  });
+
   // === RPC event handler — temperature / humidity ===
 
   test('handleRpcEventTemperatureHumidity updates TemperatureMeasurement for ACTUAL_TEMPERATURE', async () => {
@@ -1169,6 +1193,22 @@ describe('TemplatePlatform private method coverage', () => {
     expect((inst as any).rotaryHandleChannels.get('WIRE007:1')).toBe(ep);
     expect((inst as any).channelAddressToDevice.get('WIRE007:1')).toBeUndefined();
     (inst as any).rotaryHandleChannels.delete('WIRE007:1');
+  });
+
+  test('wireChannelEndpoint registers ROTARY_HANDLE_TRANSCEIVER in rotaryHandleChannels (not channelAddressToDevice)', () => {
+    const ep = makeEndpoint(['BooleanState']);
+    const channel: CcuChannelInfo = {
+      address: 'WIRE008:1',
+      deviceAddress: 'WIRE008',
+      channelIndex: 1,
+      type: 'ROTARY_HANDLE_TRANSCEIVER',
+      interfaceName: 'HmIP-RF',
+      batteryPowered: false,
+    };
+    (inst as any).wireChannelEndpoint(ep, channel);
+    expect((inst as any).rotaryHandleChannels.get('WIRE008:1')).toBe(ep);
+    expect((inst as any).channelAddressToDevice.get('WIRE008:1')).toBeUndefined();
+    (inst as any).rotaryHandleChannels.delete('WIRE008:1');
   });
 
   // ── onFetch ──────────────────────────────────────────────────────────────
