@@ -112,9 +112,7 @@ describe('TemplatePlatform config selection migration', () => {
 
     const remaining = instance.getSelectDevices().map((d) => d.serial);
     expect(remaining).toEqual(['HmIP-RF:SWITCH:000111222333:1']);
-    expect(config.blackList as string[]).toEqual(
-      expect.arrayContaining(['BidCos-RF:SWITCH:LEQ0000001:1', 'VirtualDevices:SWITCH:V0000001:1']),
-    );
+    expect(config.blackList as string[]).toEqual(expect.arrayContaining(['BidCos-RF:SWITCH:LEQ0000001:1', 'VirtualDevices:SWITCH:V0000001:1']));
     expect((config.blackList as string[]).length).toBe(2);
   });
 

@@ -594,16 +594,19 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
       const resolvedDeviceChannels = channelsByDevice.get(deviceAddress) ?? [];
 
-      // Derive device-level mapping options from the first resolved supported channel.
-      // These options (switchMatterType, batteryPowered) apply to all endpoints produced
-      // by this device mapper. Per-endpoint overrides are not yet supported.
+      // Derive device-level mapping options from overrides on any resolved channel of this device,
+      // merged in channel-index order. This tolerates the user setting options on any of the device's
+      // channels in the UI (all channels of a device-mapped device share the same mapper options).
       const primaryChannel = resolvedDeviceChannels.find((c) => isSupportedChannelType(c.type));
-      const deviceOverride = primaryChannel ? this.getChannelOverride(primaryChannel.address) : undefined;
+      const mergedDeviceOverride = resolvedDeviceChannels
+        .map((c) => this.getChannelOverride(c.address))
+        .filter((o): o is CcuChannelOverride => o !== undefined)
+        .reduce<Partial<CcuChannelOverride>>((acc, o) => ({ ...acc, ...o }), {});
       const mappingOptions = {
-        switchMatterType: deviceOverride?.switchMatterType ?? (primaryChannel ? inferSwitchMatterTypeFromName(primaryChannel.name) : undefined),
+        switchMatterType: (mergedDeviceOverride.switchMatterType as CcuChannelOverride['switchMatterType']) ?? (primaryChannel ? inferSwitchMatterTypeFromName(primaryChannel.name) : undefined),
         batteryPowered: this.deviceBatteryHints.get(deviceAddress) ?? primaryChannel?.batteryPowered ?? false,
-        exposeHumidity: deviceOverride?.exposeHumidity,
-        exposeBrightness: deviceOverride?.exposeBrightness,
+        exposeHumidity: mergedDeviceOverride.exposeHumidity,
+        exposeBrightness: mergedDeviceOverride.exposeBrightness,
       };
 
       // Pre-check: if every resolved supported channel for this device is disabled, skip the mapper
