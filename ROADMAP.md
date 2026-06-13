@@ -201,6 +201,45 @@ An alternative is to make `false` the default (always auto-disable new channels 
 
 ---
 
+#### ARCH-0 — Declare mapper options as registry metadata
+
+**Effort: Medium**  
+**Status: Not started**
+
+Per-channel/per-device configuration *values* are stored in `channelOverrides` in the plugin config (`CcuChannelOverride`: `enabled`, `switchMatterType`, `exposeHumidity`) — that storage is fine and should stay. The problem is where the *definitions* of available options live: they are hardcoded and duplicated across `module.ts`:
+
+1. `handleFetchGetChannels` → the `capabilities` object (`switchMatterType: type === 'SWITCH'`, `exposeHumidity: type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' && hasDeviceMapper`)
+2. `handleFetchPutOverride` → per-field validation (enum values, boolean checks)
+3. `getChannelConfigUrl` → which channels get a gear icon (duplicates the same conditions)
+4. `ChannelMappingOptions` in `types.ts` → the shared option bag passed to all mappers
+5. Both discovery loops → manual pass-through of individual override fields
+
+Adding one new configurable option means touching 4–5 scattered places, and the conditions drift apart (this is how the gear-icon/capabilities inconsistency for SWITCH_VIRTUAL_RECEIVER channels happened). The mappers consume options but never declare which ones they support.
+
+**Plan:** colocate option *declarations* with the mappers, registry-style — the same reasoning that justified the mapper registries themselves:
+
+```ts
+// channel-mapper/switch.ts
+export const switchOptions: MapperOptionDescriptor[] = [
+  { key: 'switchMatterType', type: 'enum', values: ['light', 'outlet', 'switch', 'fan'], default: 'light' },
+];
+```
+
+Registry entries become `type → { mapper, options }`. `module.ts` then derives generically from the descriptors:
+
+- `capabilities` for the config UI → "which options does this channel's mapper declare?"
+- PUT validation → validate against the descriptor (type, enum values)
+- gear icon (`configUrl`) → "declares at least one option"
+- optionally: the frontend renders controls from the descriptors instead of hardcoding them
+
+**Design constraints:**
+
+- Keep persisted values in `channelOverrides` in the plugin config — Matterbridge owns config persistence and the UI round-trip already works. Do not introduce a separate storage file.
+- `ChannelMappingOptions` stays a shared, loosely-typed bag; per-mapper typed option generics through the registry are not worth the complexity.
+- Trigger point: implement this the next time a mapper needs a new configurable option — doing it then pays for itself immediately.
+
+---
+
 #### TEST-0 — System tests with Homematic simulator
 
 **Done:** [`fe2b24f`](https://github.com/hobbyquaker/matterbridge-homematic/commit/fe2b24f)
