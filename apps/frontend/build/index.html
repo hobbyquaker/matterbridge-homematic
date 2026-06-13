@@ -5,30 +5,57 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Homematic Channel Config</title>
   <style>
-    body { font-family: Segoe UI, sans-serif; margin: 0; background: #f5f7fb; color: #1a2233; }
-    .wrap { max-width: 600px; margin: 24px auto; background: #fff; border-radius: 10px; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); }
-    h1 { margin: 0 0 4px 0; font-size: 20px; }
-    .subtitle { margin: 0 0 20px 0; color: #4a5a78; font-size: 13px; }
+    :root {
+      --bg: transparent;
+      --text: #1a2233;
+      --text-muted: #4a5a78;
+      --border: #cfd6e4;
+      --input-bg: #fff;
+      --btn-secondary-bg: #e8ecf4;
+      --btn-secondary-text: #1a2233;
+      --status: #4a5a78;
+      --status-error: #c0392b;
+      --status-success: #27ae60;
+      --status-warning: #d68910;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --text: #e6edf3;
+        --text-muted: #8b949e;
+        --border: #30363d;
+        --input-bg: #21262d;
+        --btn-secondary-bg: #21262d;
+        --btn-secondary-text: #e6edf3;
+        --status: #8b949e;
+        --status-error: #f85149;
+        --status-success: #3fb950;
+        --status-warning: #d29922;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: Segoe UI, sans-serif; font-size: 14px; }
+    .container { padding: 16px 20px; }
+    h1 { margin: 0 0 4px; font-size: 18px; }
+    .subtitle { margin: 0 0 20px; color: var(--text-muted); font-size: 13px; }
     .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
-    label { font-size: 12px; font-weight: 600; color: #4a5a78; text-transform: uppercase; letter-spacing: 0.05em; }
-    select { border: 1px solid #cfd6e4; border-radius: 8px; padding: 8px 10px; font-size: 14px; background: #fff; }
-    .checkbox-row { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
-    .checkbox-row input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
-    .checkbox-row span { font-size: 14px; }
-    .note { font-size: 12px; color: #8896b0; margin: -8px 0 16px; }
+    label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    select { border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 14px; background: var(--input-bg); color: var(--text); }
+    .checkbox-row { display: flex; align-items: center; gap: 10px; padding: 2px 0; }
+    .checkbox-row input[type="checkbox"] { width: 15px; height: 15px; cursor: pointer; flex-shrink: 0; }
+    .note { font-size: 12px; color: var(--text-muted); margin: -8px 0 16px; }
     .actions { display: flex; gap: 10px; align-items: center; margin-top: 20px; }
-    button { border: 0; border-radius: 8px; background: #1f6feb; color: #fff; padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    button { border: 0; border-radius: 6px; background: #1f6feb; color: #fff; padding: 8px 16px; font-size: 14px; font-weight: 600; cursor: pointer; }
     button:disabled { opacity: 0.5; cursor: default; }
-    .btn-secondary { background: #e8ecf4; color: #1a2233; }
-    .status { font-size: 13px; color: #4a5a78; }
-    .status.error { color: #c0392b; }
-    .status.success { color: #27ae60; }
-    .status.warning { color: #d68910; }
+    .btn-secondary { background: var(--btn-secondary-bg); color: var(--btn-secondary-text); }
+    .status { font-size: 13px; color: var(--status); }
+    .status.error { color: var(--status-error); }
+    .status.success { color: var(--status-success); }
+    .status.warning { color: var(--status-warning); }
     .hidden { display: none !important; }
   </style>
 </head>
 <body>
-  <div class="wrap">
+  <div class="container">
     <h1 id="title">Loading…</h1>
     <p class="subtitle" id="subtitle"></p>
 
