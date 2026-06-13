@@ -603,7 +603,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         .filter((o): o is CcuChannelOverride => o !== undefined)
         .reduce<Partial<CcuChannelOverride>>((acc, o) => ({ ...acc, ...o }), {});
       const mappingOptions = {
-        switchMatterType: (mergedDeviceOverride.switchMatterType as CcuChannelOverride['switchMatterType']) ?? (primaryChannel ? inferSwitchMatterTypeFromName(primaryChannel.name) : undefined),
+        switchMatterType:
+          (mergedDeviceOverride.switchMatterType as CcuChannelOverride['switchMatterType']) ?? (primaryChannel ? inferSwitchMatterTypeFromName(primaryChannel.name) : undefined),
         batteryPowered: this.deviceBatteryHints.get(deviceAddress) ?? primaryChannel?.batteryPowered ?? false,
         exposeHumidity: mergedDeviceOverride.exposeHumidity,
         exposeBrightness: mergedDeviceOverride.exposeBrightness,
