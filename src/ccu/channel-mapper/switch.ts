@@ -8,7 +8,13 @@
 import { fanDevice, MatterbridgeEndpoint, onOffLight, onOffOutlet, onOffSwitch } from 'matterbridge';
 
 import { buildDisplayName, buildEndpointId, buildModel, buildSerialNumber, finalizeEndpoint } from '../mapper-utils.js';
-import { ChannelMapper } from '../types.js';
+import { ChannelMapper, MapperOptionDescriptor } from '../types.js';
+
+/**
+ * User-configurable options declared by this mapper.
+ * `switchMatterType` selects the Matter device type the SWITCH channel is exposed as.
+ */
+export const OPTIONS: readonly MapperOptionDescriptor[] = [{ key: 'switchMatterType', type: 'enum', values: ['light', 'outlet', 'switch', 'fan'] }];
 
 /**
  * Map a Homematic SWITCH channel to a Matter on/off endpoint.

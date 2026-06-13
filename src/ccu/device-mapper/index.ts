@@ -14,7 +14,7 @@
 import { DeviceMapper, MapperOptionDescriptor } from '../types.js';
 import { mapDevice as hmCcVg1 } from './hm-cc-vg-1.js';
 import { mapDevice as hmipDrsi4 } from './hmip-drsi4.js';
-import { mapDevice as hmipWth } from './hmip-wth.js';
+import { mapDevice as hmipWth, OPTIONS as hmipWthOptions } from './hmip-wth.js';
 
 /**
  * Map from sanitized device type key to its `DeviceMapper` function.
@@ -58,25 +58,22 @@ export function deviceTypeToKey(deviceType: string): string {
 }
 
 /**
- * Declares the user-configurable options for each device mapper.
- * Only mappers with at least one configurable option need an entry here;
- * all others default to an empty array via `getDeviceMapperOptions`.
- *
- * Keys must match all device type keys in `DEVICE_MAPPERS` that share the same mapper function.
+ * Aggregated option descriptors per device type key, sourced from each mapper file.
+ * All device type keys sharing the same mapper function reference the same OPTIONS object.
  */
 export const DEVICE_MAPPER_OPTIONS: Readonly<Record<string, readonly MapperOptionDescriptor[]>> = {
-  // HmIP-WTH / STHD / STH / BWTH family — exposeHumidity controls the RelativeHumidityMeasurement cluster.
-  'hmip-wth': [{ key: 'exposeHumidity', type: 'boolean' }],
-  'hmip-wth-1': [{ key: 'exposeHumidity', type: 'boolean' }],
-  'hmip-wth-2': [{ key: 'exposeHumidity', type: 'boolean' }],
-  'hmip-wth-b': [{ key: 'exposeHumidity', type: 'boolean' }],
-  'hmip-bwth': [{ key: 'exposeHumidity', type: 'boolean' }],
-  'hmip-bwth-a': [{ key: 'exposeHumidity', type: 'boolean' }],
-  'hmip-bwth24': [{ key: 'exposeHumidity', type: 'boolean' }],
-  'hmip-sthd': [{ key: 'exposeHumidity', type: 'boolean' }],
-  'hmip-sthd-a': [{ key: 'exposeHumidity', type: 'boolean' }],
-  'hmip-sth': [{ key: 'exposeHumidity', type: 'boolean' }],
-  'hmip-sth-a': [{ key: 'exposeHumidity', type: 'boolean' }],
+  // HmIP-WTH / STHD / STH / BWTH family — options defined in hmip-wth.ts.
+  'hmip-wth': hmipWthOptions,
+  'hmip-wth-1': hmipWthOptions,
+  'hmip-wth-2': hmipWthOptions,
+  'hmip-wth-b': hmipWthOptions,
+  'hmip-bwth': hmipWthOptions,
+  'hmip-bwth-a': hmipWthOptions,
+  'hmip-bwth24': hmipWthOptions,
+  'hmip-sthd': hmipWthOptions,
+  'hmip-sthd-a': hmipWthOptions,
+  'hmip-sth': hmipWthOptions,
+  'hmip-sth-a': hmipWthOptions,
 };
 
 /**

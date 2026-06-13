@@ -10,9 +10,9 @@
 import { ChannelMapper, MapperOptionDescriptor, SupportedChannelType } from '../types.js';
 import { mapChannel as alarmstate } from './alarmstate.js';
 import { mapChannel as blind } from './blind.js';
-import { mapChannel as climatecontrolRtTransceiver } from './climatecontrol-rt-transceiver.js';
+import { mapChannel as climatecontrolRtTransceiver, OPTIONS as climatecontrolRtTransceiverOptions } from './climatecontrol-rt-transceiver.js';
 import { mapChannel as dimmer } from './dimmer.js';
-import { mapChannel as heatingClimatecontrolTransceiver } from './heating-climatecontrol-transceiver.js';
+import { mapChannel as heatingClimatecontrolTransceiver, OPTIONS as heatingClimatecontrolTransceiverOptions } from './heating-climatecontrol-transceiver.js';
 import { mapChannel as key } from './key.js';
 import { mapChannel as keyTransceiver } from './key-transceiver.js';
 import { mapChannel as keymatic } from './keymatic.js';
@@ -20,7 +20,7 @@ import { mapChannel as motionDetector } from './motion-detector.js';
 import { mapChannel as rotaryHandleSensor } from './rotary-handle-sensor.js';
 import { mapChannel as shutterContact } from './shutter-contact.js';
 import { mapChannel as smokeDetector } from './smoke-detector.js';
-import { mapChannel as switchMapper } from './switch.js';
+import { mapChannel as switchMapper, OPTIONS as switchOptions } from './switch.js';
 import { mapChannel as temperatureHumidityTransmitter } from './temperature-humidity-transmitter.js';
 import { mapChannel as thermalcontrolTransmit } from './thermalcontrol-transmit.js';
 import { mapChannel as weather } from './weather.js';
@@ -61,14 +61,13 @@ export function channelTypeToKey(channelType: string): string {
 }
 
 /**
- * Declares the user-configurable options for each channel mapper.
- * Only mappers with at least one configurable option need an entry here;
- * all others default to an empty array via `getChannelMapperOptions`.
+ * Aggregated option descriptors per channel type key, sourced from each mapper file.
+ * Only mappers that export `OPTIONS` need an entry here.
  */
 export const CHANNEL_MAPPER_OPTIONS: Readonly<Record<string, readonly MapperOptionDescriptor[]>> = {
-  'switch': [{ key: 'switchMatterType', type: 'enum', values: ['light', 'outlet', 'switch', 'fan'] }],
-  'heating-climatecontrol-transceiver': [{ key: 'exposeHumidity', type: 'boolean' }],
-  'climatecontrol-rt-transceiver': [{ key: 'exposeHumidity', type: 'boolean' }],
+  'switch': switchOptions,
+  'heating-climatecontrol-transceiver': heatingClimatecontrolTransceiverOptions,
+  'climatecontrol-rt-transceiver': climatecontrolRtTransceiverOptions,
 };
 
 /**

@@ -7,7 +7,13 @@
 import { humiditySensor, MatterbridgeEndpoint, thermostatDevice } from 'matterbridge';
 
 import { buildDisplayName, buildEndpointId, buildModel, buildSerialNumber, finalizeEndpoint } from '../mapper-utils.js';
-import { ChannelMapper } from '../types.js';
+import { ChannelMapper, MapperOptionDescriptor } from '../types.js';
+
+/**
+ * User-configurable options declared by this mapper.
+ * `exposeHumidity` adds RelativeHumidityMeasurement to the thermostat endpoint.
+ */
+export const OPTIONS: readonly MapperOptionDescriptor[] = [{ key: 'exposeHumidity', type: 'boolean' }];
 
 /**
  * Map a Homematic HEATING_CLIMATECONTROL_TRANSCEIVER channel to a Matter thermostatDevice endpoint.

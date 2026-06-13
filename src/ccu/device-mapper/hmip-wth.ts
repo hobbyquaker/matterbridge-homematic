@@ -11,7 +11,13 @@
 import { humiditySensor, MatterbridgeEndpoint, thermostatDevice } from 'matterbridge';
 
 import { buildDisplayName, buildEndpointId, buildModel, buildSerialNumber, finalizeEndpoint } from '../mapper-utils.js';
-import { DeviceMapper } from '../types.js';
+import { DeviceMapper, MapperOptionDescriptor } from '../types.js';
+
+/**
+ * User-configurable options declared by this mapper (shared by all WTH / STHD / STH / BWTH variants).
+ * `exposeHumidity` adds RelativeHumidityMeasurement to the thermostat endpoint.
+ */
+export const OPTIONS: readonly MapperOptionDescriptor[] = [{ key: 'exposeHumidity', type: 'boolean' }];
 
 /**
  * Device mapper for HmIP-WTH, HmIP-WTH-2, HmIP-WTH-B, HmIP-STHD, HmIP-STH, and related variants.
