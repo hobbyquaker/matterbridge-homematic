@@ -74,6 +74,13 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
   private discoveredChannels: CcuChannelInfo[] = [];
 
+  /**
+   * Raw CCU channels grouped by device address, populated during {@link discoverDevices}.
+   * Retained between discoveries so that {@link tryReRegisterDeviceMapperChannel} can re-run a
+   * device mapper without triggering a full CCU rediscovery.
+   */
+  private rawChannelsByDevice = new Map<string, CcuChannelInfo[]>();
+
   private deviceAddressToDevice = new Map<string, MatterbridgeEndpoint>();
 
   /** Maps full channel address (e.g. 'DEVICE:3') to its Matter endpoint for SWITCH/DIMMER channels. */
@@ -433,6 +440,102 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   }
 
   /**
+   * Attempt a live unregister → re-create → re-register cycle for all endpoints of a device-mapper
+   * device. Unregisters every endpoint currently wired for the device, re-runs the device mapper
+   * with the current (updated) options, then registers and wires the resulting endpoints.
+   *
+   * Always returns `true` so the caller does not prompt the user to restart the plugin.
+   *
+   * @param {CcuChannelInfo} channel Any channel belonging to the device to re-register.
+   * @returns {Promise<boolean>} Always `true` (live re-registration was attempted).
+   */
+  private async tryReRegisterDeviceMapperChannel(channel: CcuChannelInfo): Promise<boolean> {
+    const deviceAddress = channel.deviceAddress;
+    const deviceType = channel.deviceType;
+    if (!deviceType) return false;
+
+    const mapper = getDeviceMapper(deviceType);
+    if (!mapper) return false;
+
+    // Raw channels stored during discoverDevices are needed to re-run the device mapper.
+    const rawDeviceChannels = this.rawChannelsByDevice.get(deviceAddress);
+    if (!rawDeviceChannels || rawDeviceChannels.length === 0) return false;
+
+    // Collect all currently-wired endpoints for this device so they can be unregistered.
+    const resolvedDeviceChannels = this.discoveredChannels.filter((c) => c.deviceAddress === deviceAddress);
+    const oldEndpoints = new Set<MatterbridgeEndpoint>();
+    for (const ch of resolvedDeviceChannels) {
+      const ep = this.channelAddressToDevice.get(ch.address);
+      if (ep) oldEndpoints.add(ep);
+      const rotaryEp = this.rotaryHandleChannels.get(ch.address);
+      if (rotaryEp) oldEndpoints.add(rotaryEp);
+      const humidEp = this.wthHumidityChannels.get(ch.address);
+      if (humidEp) oldEndpoints.add(humidEp);
+    }
+    const mainEp = this.deviceAddressToDevice.get(deviceAddress);
+    if (mainEp) oldEndpoints.add(mainEp);
+
+    for (const ep of oldEndpoints) {
+      try {
+        await this.unregisterDevice(ep);
+      } catch (err) {
+        this.log.warn(`Device mapper live re-reg: unregister failed for ${deviceAddress}: ${String(err)}`);
+      }
+    }
+
+    // Clear all existing wiring for this device.
+    for (const ch of resolvedDeviceChannels) {
+      this.channelAddressToDevice.delete(ch.address);
+      this.rotaryHandleChannels.delete(ch.address);
+      this.wthHumidityChannels.delete(ch.address);
+      this.energieMeterChannels.delete(ch.address);
+    }
+    this.deviceAddressToDevice.delete(deviceAddress);
+
+    // Derive mapping options from merged overrides across all resolved channels of this device.
+    const primaryChannel = resolvedDeviceChannels.find((c) => isSupportedChannelType(c.type));
+    const mergedDeviceOverride = resolvedDeviceChannels
+      .map((c) => this.getChannelOverride(c.address))
+      .filter((o): o is CcuChannelOverride => o !== undefined)
+      .reduce<Partial<CcuChannelOverride>>((acc, o) => ({ ...acc, ...o }), {});
+    const mappingOptions = {
+      switchMatterType:
+        (mergedDeviceOverride.switchMatterType as CcuChannelOverride['switchMatterType']) ?? (primaryChannel ? inferSwitchMatterTypeFromName(primaryChannel.name) : undefined),
+      batteryPowered: this.deviceBatteryHints.get(deviceAddress) ?? primaryChannel?.batteryPowered ?? false,
+      exposeHumidity: mergedDeviceOverride.exposeHumidity,
+      exposeBrightness: mergedDeviceOverride.exposeBrightness,
+    };
+
+    // Re-run the device mapper with the updated options and register the new endpoints.
+    const results = mapper(rawDeviceChannels, this.matterbridge.aggregatorVendorId, mappingOptions);
+    let anyRegistered = false;
+
+    for (const { endpoint, channels: mappedChannels } of results) {
+      const primaryMappedAddress = mappedChannels[0]?.address;
+      const resolvedChannel = (primaryMappedAddress ? resolvedDeviceChannels.find((c) => c.address === primaryMappedAddress) : undefined) ?? primaryChannel;
+      if (!resolvedChannel) continue;
+
+      const displayName = this.getChannelDisplayName(resolvedChannel);
+      const override = this.getChannelOverride(resolvedChannel.address);
+      if (!this.isChannelEnabled(resolvedChannel, override, displayName)) continue;
+
+      try {
+        await this.registerDevice(endpoint);
+        anyRegistered = true;
+        this.deviceAddressToDevice.set(deviceAddress, endpoint);
+        for (const ch of mappedChannels) {
+          this.wireChannelEndpoint(endpoint, ch);
+        }
+      } catch (err) {
+        this.log.warn(`Device mapper live re-reg: registerDevice failed for ${deviceAddress}: ${String(err)}`);
+      }
+    }
+
+    this.log.info(`Device mapper live re-registration: device=${deviceAddress} deviceType=${deviceType} mapper=${this.getDeviceMapperKey(deviceType)} registered=${anyRegistered}`);
+    return true;
+  }
+
+  /**
    * Attempt a live unregister → re-create → re-register cycle for a single channel-mapper channel.
    * Returns `true` when re-registration succeeded, `false` when a plugin restart is required
    * (e.g. the channel is handled by a device mapper, or `registerDevice` throws).
@@ -441,8 +544,10 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    * @returns {Promise<boolean>} Whether live re-registration succeeded.
    */
   private async tryReRegisterChannel(channel: CcuChannelInfo): Promise<boolean> {
-    // Device-mapper channels require a full restart for safe re-registration.
-    if (channel.deviceType && getDeviceMapper(channel.deviceType)) return false;
+    // Device-mapper channels: live re-register all endpoints for the device.
+    if (channel.deviceType && getDeviceMapper(channel.deviceType)) {
+      return this.tryReRegisterDeviceMapperChannel(channel);
+    }
     if (!isSupportedChannelType(channel.type)) return false;
 
     // Unregister the existing endpoint if present.
@@ -580,6 +685,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         rawChannelsByDevice.set(ch.deviceAddress, [ch]);
       }
     }
+    // Persist raw channels so tryReRegisterDeviceMapperChannel can re-run device mappers later.
+    this.rawChannelsByDevice = rawChannelsByDevice;
 
     // Device mapper pre-pass: handle devices with registered device mappers before the channel loop.
     // Device mappers take full priority over channel mappers — all channels of a mapped device are

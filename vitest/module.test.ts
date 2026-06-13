@@ -1239,4 +1239,37 @@ describe('TemplatePlatform private method coverage', () => {
     expect(typeof result.error).toBe('string');
     expect(result.error).toMatch(/not found/i);
   });
+
+  test('onFetch PUT override for device-mapper channel performs live re-registration without restart', async () => {
+    // Simulate a VG-1 CLIMATECONTROL_RT_TRANSCEIVER channel (device-mapped).
+    const thermostatCh: CcuChannelInfo = {
+      address: 'DMREG001:1',
+      deviceAddress: 'DMREG001',
+      channelIndex: 1,
+      type: 'CLIMATECONTROL_RT_TRANSCEIVER',
+      deviceType: 'HM-CC-VG-1',
+      interfaceName: 'VirtualDevices',
+      batteryPowered: false,
+    };
+    const contactCh: CcuChannelInfo = {
+      address: 'DMREG001:2',
+      deviceAddress: 'DMREG001',
+      channelIndex: 2,
+      type: 'SHUTTER_CONTACT',
+      deviceType: 'HM-CC-VG-1',
+      interfaceName: 'VirtualDevices',
+      batteryPowered: false,
+    };
+    (inst as any).discoveredChannels = [thermostatCh, contactCh];
+    (inst as any).rawChannelsByDevice = new Map([['DMREG001', [thermostatCh, contactCh]]]);
+
+    const result = (await inst.onFetch('PUT', 'channel-override', {}, { address: 'DMREG001:1', exposeHumidity: true })) as {
+      ok: boolean;
+      restartRequired: boolean;
+    };
+
+    expect(result.ok).toBe(true);
+    // Live re-registration: no restart should be required for device-mapper channels.
+    expect(result.restartRequired).toBe(false);
+  });
 });
