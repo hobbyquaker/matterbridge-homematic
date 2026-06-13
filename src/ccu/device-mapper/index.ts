@@ -12,7 +12,7 @@
  */
 
 import { DeviceMapper, MapperOptionDescriptor } from '../types.js';
-import { mapDevice as hmCcVg1 } from './hm-cc-vg-1.js';
+import { mapDevice as hmCcVg1, OPTIONS as hmCcVg1Options } from './hm-cc-vg-1.js';
 import { mapDevice as hmipDrsi4 } from './hmip-drsi4.js';
 import { mapDevice as hmipWth, OPTIONS as hmipWthOptions } from './hmip-wth.js';
 
@@ -62,6 +62,8 @@ export function deviceTypeToKey(deviceType: string): string {
  * All device type keys sharing the same mapper function reference the same OPTIONS object.
  */
 export const DEVICE_MAPPER_OPTIONS: Readonly<Record<string, readonly MapperOptionDescriptor[]>> = {
+  // HM-CC-VG-1 — virtual group thermostat; aggregates ACTUAL_HUMIDITY from grouped wall thermostats.
+  'hm-cc-vg-1': hmCcVg1Options,
   // HmIP-WTH / STHD / STH / BWTH family — options defined in hmip-wth.ts.
   'hmip-wth': hmipWthOptions,
   'hmip-wth-1': hmipWthOptions,

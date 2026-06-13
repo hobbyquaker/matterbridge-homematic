@@ -25,11 +25,18 @@
  * @file device-mapper/hm-cc-vg-1.ts
  */
 
-import { MatterbridgeEndpoint, thermostatDevice } from 'matterbridge';
+import { humiditySensor, MatterbridgeEndpoint, thermostatDevice } from 'matterbridge';
 
 import { mapChannel as mapShutterContactChannel } from '../channel-mapper/shutter-contact.js';
 import { buildDisplayName, buildEndpointId, buildModel, buildSerialNumber, finalizeEndpoint } from '../mapper-utils.js';
-import { DeviceMapper, MappedDeviceEndpoint } from '../types.js';
+import { DeviceMapper, MappedDeviceEndpoint, MapperOptionDescriptor } from '../types.js';
+
+/**
+ * User-configurable options declared by this mapper.
+ * `exposeHumidity` adds RelativeHumidityMeasurement to the thermostat endpoint
+ * (the HM-CC-VG-1 aggregates humidity from the wall thermostats in the group).
+ */
+export const OPTIONS: readonly MapperOptionDescriptor[] = [{ key: 'exposeHumidity', type: 'boolean' }];
 
 /**
  * Device mapper for HM-CC-VG-1 virtual group thermostats.
@@ -51,7 +58,7 @@ export const mapDevice: DeviceMapper = (channels, vendorId, options) => {
   const results: MappedDeviceEndpoint[] = [];
 
   // ── Thermostat endpoint ──────────────────────────────────────────────────────────────────────
-  const ep = new MatterbridgeEndpoint(thermostatDevice, { id: buildEndpointId(thermostatChannel) })
+  const ep = new MatterbridgeEndpoint(options.exposeHumidity === true ? [thermostatDevice, humiditySensor] : thermostatDevice, { id: buildEndpointId(thermostatChannel) })
     .createDefaultBridgedDeviceBasicInformationClusterServer(
       buildDisplayName(thermostatChannel),
       buildSerialNumber(thermostatChannel, 'CLIMATECONTROL_RT_TRANSCEIVER'),
@@ -60,6 +67,10 @@ export const mapDevice: DeviceMapper = (channels, vendorId, options) => {
       buildModel(thermostatChannel),
     )
     .createDefaultHeatingThermostatClusterServer(23, 21);
+
+  if (options.exposeHumidity === true) {
+    ep.createDefaultRelativeHumidityMeasurementClusterServer();
+  }
 
   results.push({
     endpoint: finalizeEndpoint(ep, { ...options, batteryPowered: thermostatChannel.batteryPowered }),
