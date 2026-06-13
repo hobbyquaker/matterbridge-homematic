@@ -9,6 +9,7 @@ dist/
 jest/
 node_modules/
 temp/
+apps/frontend/build/
 
 # Ignore specific files
 **/*.html
