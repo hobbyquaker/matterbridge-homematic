@@ -704,9 +704,14 @@ describe('channel mapper clusters: CLIMATECONTROL_RT_TRANSCEIVER', () => {
     expect(ep.hasClusterServer('Thermostat')).toBe(true);
   });
 
-  test('should NOT have RelativeHumidityMeasurement cluster', () => {
+  test('should NOT have RelativeHumidityMeasurement cluster by default', () => {
     const ep = createEndpointForChannel(makeChannel({ type: 'CLIMATECONTROL_RT_TRANSCEIVER' }), VENDOR_ID);
     expect(ep.hasClusterServer('RelativeHumidityMeasurement')).toBe(false);
+  });
+
+  test('should have RelativeHumidityMeasurement cluster when exposeHumidity=true', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'CLIMATECONTROL_RT_TRANSCEIVER' }), VENDOR_ID, { exposeHumidity: true });
+    expect(ep.hasClusterServer('RelativeHumidityMeasurement')).toBe(true);
   });
 
   test('should have PowerSource cluster', () => {
@@ -799,6 +804,16 @@ describe('channel mapper clusters: HEATING_CLIMATECONTROL_TRANSCEIVER', () => {
   test('should have Thermostat cluster', () => {
     const ep = createEndpointForChannel(makeChannel({ type: 'HEATING_CLIMATECONTROL_TRANSCEIVER' }), VENDOR_ID);
     expect(ep.hasClusterServer('Thermostat')).toBe(true);
+  });
+
+  test('should NOT have RelativeHumidityMeasurement cluster by default', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'HEATING_CLIMATECONTROL_TRANSCEIVER' }), VENDOR_ID);
+    expect(ep.hasClusterServer('RelativeHumidityMeasurement')).toBe(false);
+  });
+
+  test('should have RelativeHumidityMeasurement cluster when exposeHumidity=true', () => {
+    const ep = createEndpointForChannel(makeChannel({ type: 'HEATING_CLIMATECONTROL_TRANSCEIVER' }), VENDOR_ID, { exposeHumidity: true });
+    expect(ep.hasClusterServer('RelativeHumidityMeasurement')).toBe(true);
   });
 });
 

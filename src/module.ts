@@ -332,7 +332,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         override: override ?? null,
         capabilities: {
           switchMatterType: channel.type === 'SWITCH',
-          exposeHumidity: channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' && hasDeviceMapper,
+          exposeHumidity: channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' || channel.type === 'CLIMATECONTROL_RT_TRANSCEIVER',
         },
       };
     });
@@ -706,6 +706,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const endpoint = createEndpointForChannel(channel as Parameters<typeof createEndpointForChannel>[0], this.matterbridge.aggregatorVendorId, {
         switchMatterType: override?.switchMatterType ?? inferSwitchMatterTypeFromName(channel.name),
         batteryPowered: this.deviceBatteryHints.get(channel.deviceAddress) ?? channel.batteryPowered,
+        exposeHumidity: override?.exposeHumidity,
       });
 
       if (configUrl) endpoint.configUrl = configUrl;
@@ -953,6 +954,11 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     if (channel.type === 'CLIMATECONTROL_RT_TRANSCEIVER' && this.ccuConnection) {
       const ccuConn = this.ccuConnection;
       this.channelAddressToDevice.set(channel.address, endpoint);
+      // Track combined thermostat+humidity endpoint for ACTUAL_HUMIDITY RPC event routing.
+      if (endpoint.hasClusterServer('RelativeHumidityMeasurement')) {
+        this.wthHumidityChannels.set(channel.address, endpoint);
+        this.log.info(`Registered combined thermostat+humidity endpoint for ${channel.address} (${channel.deviceType ?? 'unknown'})`);
+      }
       // Subscribe to setpoint — write Homematic MANU_MODE on change (manual mode + setpoint).
       try {
         void endpoint.subscribeAttribute('Thermostat', 'occupiedHeatingSetpoint', (value: number) => {
@@ -1656,7 +1662,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    */
   private async handleRpcEventTemperatureHumidity(event: { iface?: string; idInit?: string; channel?: unknown; datapoint?: string; value?: unknown }): Promise<void> {
     const datapoint = typeof event.datapoint === 'string' ? event.datapoint.trim().toUpperCase() : '';
-    if (datapoint !== 'ACTUAL_TEMPERATURE' && datapoint !== 'TEMPERATURE' && datapoint !== 'HUMIDITY' && datapoint !== 'BRIGHTNESS') return;
+    if (datapoint !== 'ACTUAL_TEMPERATURE' && datapoint !== 'TEMPERATURE' && datapoint !== 'HUMIDITY' && datapoint !== 'ACTUAL_HUMIDITY' && datapoint !== 'BRIGHTNESS') return;
 
     const channelAddress = typeof event.channel === 'string' ? event.channel : undefined;
     if (!channelAddress) return;
@@ -2655,7 +2661,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    */
   private getChannelConfigUrl(channel: Pick<CcuChannelInfo, 'type' | 'deviceType'>, selectSerial: string): string | undefined {
     if (channel.type === 'SWITCH') return `/plugins/matterbridge-homematic/#${selectSerial}`;
-    if (channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' && channel.deviceType && getDeviceMapper(channel.deviceType)) {
+    if (channel.type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' || channel.type === 'CLIMATECONTROL_RT_TRANSCEIVER') {
       return `/plugins/matterbridge-homematic/#${selectSerial}`;
     }
     return undefined;
