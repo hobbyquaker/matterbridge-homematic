@@ -843,15 +843,21 @@ describe('channel mapper clusters: HEATING_CLIMATECONTROL_TRANSCEIVER', () => {
 });
 
 describe('channel mapper clusters: SWITCH with power meter', () => {
-  test('should have ElectricalPowerMeasurement cluster when powerMeterChannelAddress is set', () => {
+  test('should NOT have ElectricalPowerMeasurement cluster by default even when powerMeterChannelAddress is set', () => {
     const ch = makeChannel({ type: 'SWITCH', powerMeterChannelAddress: 'OEQ001:4' });
     const ep = createEndpointForChannel(ch, VENDOR_ID);
+    expect(ep.hasClusterServer('ElectricalPowerMeasurement')).toBe(false);
+  });
+
+  test('should have ElectricalPowerMeasurement cluster when powerMeterChannelAddress is set and exposePowerMeter=true', () => {
+    const ch = makeChannel({ type: 'SWITCH', powerMeterChannelAddress: 'OEQ001:4' });
+    const ep = createEndpointForChannel(ch, VENDOR_ID, { exposePowerMeter: true });
     expect(ep.hasClusterServer('ElectricalPowerMeasurement')).toBe(true);
   });
 
   test('should NOT have ElectricalPowerMeasurement cluster when powerMeterChannelAddress is absent', () => {
     const ch = makeChannel({ type: 'SWITCH' });
-    const ep = createEndpointForChannel(ch, VENDOR_ID);
+    const ep = createEndpointForChannel(ch, VENDOR_ID, { exposePowerMeter: true });
     expect(ep.hasClusterServer('ElectricalPowerMeasurement')).toBe(false);
   });
 });

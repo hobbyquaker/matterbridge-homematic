@@ -343,6 +343,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
           switchMatterType: opts.some((o) => o.key === 'switchMatterType'),
           exposeHumidity: opts.some((o) => o.key === 'exposeHumidity'),
           exposeBrightness: opts.some((o) => o.key === 'exposeBrightness'),
+          exposePowerMeter: opts.some((o) => o.key === 'exposePowerMeter'),
         },
       };
     });
@@ -382,6 +383,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         }
         if (desc.key === 'exposeHumidity') newFields.exposeHumidity = v as boolean | undefined;
         if (desc.key === 'exposeBrightness') newFields.exposeBrightness = v as boolean | undefined;
+        if (desc.key === 'exposePowerMeter') newFields.exposePowerMeter = v as boolean | undefined;
       }
     }
 
@@ -504,6 +506,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       batteryPowered: this.deviceBatteryHints.get(deviceAddress) ?? primaryChannel?.batteryPowered ?? false,
       exposeHumidity: mergedDeviceOverride.exposeHumidity,
       exposeBrightness: mergedDeviceOverride.exposeBrightness,
+      exposePowerMeter: mergedDeviceOverride.exposePowerMeter,
     };
 
     // Re-run the device mapper with the updated options and register the new endpoints.
@@ -595,6 +598,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         batteryPowered: this.deviceBatteryHints.get(channel.deviceAddress) ?? channel.batteryPowered,
         exposeHumidity: override?.exposeHumidity,
         exposeBrightness: override?.exposeBrightness,
+        exposePowerMeter: override?.exposePowerMeter,
       });
       await this.registerDevice(endpoint);
       this.deviceAddressToDevice.set(channel.deviceAddress, endpoint);
@@ -727,6 +731,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         batteryPowered: this.deviceBatteryHints.get(deviceAddress) ?? primaryChannel?.batteryPowered ?? false,
         exposeHumidity: mergedDeviceOverride.exposeHumidity,
         exposeBrightness: mergedDeviceOverride.exposeBrightness,
+        exposePowerMeter: mergedDeviceOverride.exposePowerMeter,
       };
 
       // Pre-check: if every resolved supported channel for this device is disabled, skip the mapper
@@ -840,6 +845,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         batteryPowered: this.deviceBatteryHints.get(channel.deviceAddress) ?? channel.batteryPowered,
         exposeHumidity: override?.exposeHumidity,
         exposeBrightness: override?.exposeBrightness,
+        exposePowerMeter: override?.exposePowerMeter,
       });
 
       if (configUrl) endpoint.configUrl = configUrl;
@@ -924,7 +930,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
       // If a power meter channel was merged onto this SWITCH endpoint, register its address
       // in the appropriate event map so incoming RPC events update the merged endpoint.
-      if (channel.powerMeterChannelAddress) {
+      if (channel.powerMeterChannelAddress && endpoint.hasClusterServer('ElectricalPowerMeasurement')) {
         if (channel.powerMeterIsHmIP) {
           // ENERGIE_METER_TRANSMITTER: CURRENT reported in mA, handled by handleRpcEventEnergieMeter.
           this.energieMeterChannels.set(channel.powerMeterChannelAddress, endpoint);
@@ -2797,30 +2803,36 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    * user-configurable option (surfaced through the Matterbridge UI gear icon), or `undefined`
    * otherwise. Derived from mapper option descriptors — no hardcoded channel type checks needed.
    *
-   * @param {Pick<CcuChannelInfo, 'type' | 'deviceType'>} channel Channel info.
+   * @param {Pick<CcuChannelInfo, 'type' | 'deviceType' | 'powerMeterChannelAddress'>} channel Channel info.
    * @param {string} selectSerial Canonical select serial for the channel.
    * @returns {string | undefined} The config URL, or `undefined` when the channel has no options.
    */
-  private getChannelConfigUrl(channel: Pick<CcuChannelInfo, 'type' | 'deviceType'>, selectSerial: string): string | undefined {
+  private getChannelConfigUrl(channel: Pick<CcuChannelInfo, 'type' | 'deviceType' | 'powerMeterChannelAddress'>, selectSerial: string): string | undefined {
     return this.getChannelOptions(channel).length > 0 ? `/plugins/matterbridge-homematic/#${selectSerial}` : undefined;
   }
 
   /**
    * Return the configurable option descriptors for a channel, delegating to the device mapper
    * registry when the channel’s device type has a registered device mapper, and falling back to
-   * the channel mapper registry otherwise.
+   * the channel mapper registry otherwise. Dynamically adds the `exposePowerMeter` option when
+   * the channel has a co-located power meter channel.
    *
-   * @param {Pick<CcuChannelInfo, 'type' | 'deviceType'>} channel Channel info.
+   * @param {Pick<CcuChannelInfo, 'type' | 'deviceType' | 'powerMeterChannelAddress'>} channel Channel info.
    * @returns {readonly MapperOptionDescriptor[]} Option descriptors (empty array when no options).
    */
-  private getChannelOptions(channel: Pick<CcuChannelInfo, 'type' | 'deviceType'>): readonly MapperOptionDescriptor[] {
+  private getChannelOptions(channel: Pick<CcuChannelInfo, 'type' | 'deviceType' | 'powerMeterChannelAddress'>): readonly MapperOptionDescriptor[] {
+    let opts: readonly MapperOptionDescriptor[];
     if (channel.deviceType && getDeviceMapper(channel.deviceType)) {
-      return getDeviceMapperOptions(channel.deviceType).filter((desc) => !desc.channelTypes || desc.channelTypes.includes(channel.type));
+      opts = getDeviceMapperOptions(channel.deviceType).filter((desc) => !desc.channelTypes || desc.channelTypes.includes(channel.type));
+    } else if (isSupportedChannelType(channel.type)) {
+      opts = getChannelMapperOptions(channel.type);
+    } else {
+      return [];
     }
-    if (isSupportedChannelType(channel.type)) {
-      return getChannelMapperOptions(channel.type);
+    if (channel.powerMeterChannelAddress) {
+      return [...opts, { key: 'exposePowerMeter', type: 'boolean' }];
     }
-    return [];
+    return opts;
   }
 
   /**

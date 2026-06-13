@@ -182,6 +182,11 @@
             "title": "Expose Humidity",
             "description": "When false, disables the humidity endpoint on WTH/STHD thermostats. Only applies to devices with a HEATING_CLIMATECONTROL_TRANSCEIVER channel.",
             "type": "boolean"
+          },
+          "exposePowerMeter": {
+            "title": "Expose Power Meter",
+            "description": "When true, adds the ElectricalPowerMeasurement cluster to SWITCH endpoints with a co-located power meter channel (e.g. HmIP-PSM, HM-ES-PMSw1-Pl). Defaults to false.",
+            "type": "boolean"
           }
         },
         "required": ["address"]

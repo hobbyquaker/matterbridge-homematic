@@ -193,6 +193,12 @@ export interface CcuChannelOverride {
    * Defaults to `false` (brightness not exposed).
    */
   exposeBrightness?: boolean;
+  /**
+   * When `true`, adds the `ElectricalPowerMeasurement` cluster to SWITCH endpoints
+   * that have a co-located power meter channel (e.g. HmIP-PSM, HM-ES-PMSw1-Pl).
+   * Defaults to `false` (power meter not exposed).
+   */
+  exposePowerMeter?: boolean;
 }
 
 /** Cache for discovered channels and ReGa names to avoid repeated RPC/ReGa calls. */
@@ -209,7 +215,7 @@ export interface CcuDiscoveryCache {
  */
 export interface MapperOptionDescriptor {
   /** The override field this option maps to in {@link CcuChannelOverride}. */
-  key: 'switchMatterType' | 'exposeHumidity' | 'exposeBrightness';
+  key: 'switchMatterType' | 'exposeHumidity' | 'exposeBrightness' | 'exposePowerMeter';
   /** Value type: `'enum'` requires a `values` list; `'boolean'` accepts true/false/undefined. */
   type: 'boolean' | 'enum';
   /** Allowed string values (required when `type` is `'enum'`). */
@@ -239,6 +245,12 @@ export interface ChannelMappingOptions {
    * Defaults to `false`.
    */
   exposeBrightness?: boolean;
+  /**
+   * When `true`, adds the `ElectricalPowerMeasurement` cluster to SWITCH endpoints
+   * with a co-located power meter channel.
+   * Defaults to `false`.
+   */
+  exposePowerMeter?: boolean;
 }
 
 /**

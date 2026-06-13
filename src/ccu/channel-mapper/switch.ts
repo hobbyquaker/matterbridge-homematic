@@ -47,7 +47,7 @@ export const mapChannel: ChannelMapper = (channel, vendorId, options) => {
       break;
   }
 
-  if (channel.powerMeterChannelAddress) {
+  if (channel.powerMeterChannelAddress && options.exposePowerMeter === true) {
     // A co-located power meter channel is merged onto this endpoint.
     ep.createDefaultElectricalPowerMeasurementClusterServer();
   }
