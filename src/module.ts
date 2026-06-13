@@ -257,37 +257,47 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
   /**
    * Handle HTTP requests from the plugin's frontend SPA served at `/plugins/matterbridge-homematic/`.
-   * Routes are dispatched from the path segments after `/api/`.
+   * Routes are dispatched from the path segment after `/api/`.
+   *
+   * Matterbridge's Express router uses a single-segment `:path` parameter, so all routes must be
+   * flat (no slashes). The channel address is passed in the request body instead of the URL.
    *
    * Supported routes:
-   * - `GET  channels`                     → list all discovered channels with current state and overrides
-   * - `PUT  channels/:address/override`   → write or update a per-channel override
-   * - `DELETE channels/:address/override` → remove the override for a channel
+   * - `GET  channels`        → list all discovered channels with current state and overrides
+   * - `PUT  channel-override` → write or update a per-channel override (`address` required in body)
+   * - `POST channel-reset`   → remove the override for a channel (`address` required in body)
    *
    * @param {string} method HTTP method string.
-   * @param {string} [path] Path after `/api/` (e.g. `'channels'`, `'channels/OEQ%3A1/override'`).
+   * @param {string} [path] Path segment after `/api/` (e.g. `'channels'`, `'channel-override'`).
    * @param {Record<string, unknown>} [_query] Query string parameters (unused).
    * @param {unknown} [body] Request body (JSON-parsed by Matterbridge ≥ 3.9.0).
    * @returns {Promise<unknown>} Response value serialised as JSON.
    */
   override async onFetch(method: string, path?: string, _query?: Record<string, unknown>, body?: unknown): Promise<unknown> {
-    const segments = (path ?? '').split('/').filter(Boolean);
-    const resource = segments[0] ?? '';
+    const resource = path ?? '';
 
     // GET /channels
-    if (method === 'GET' && resource === 'channels' && segments.length === 1) {
+    if (method === 'GET' && resource === 'channels') {
       return this.handleFetchGetChannels();
     }
 
-    // PUT /channels/:address/override
-    if (method === 'PUT' && resource === 'channels' && segments[2] === 'override' && segments.length === 3) {
-      const address = decodeURIComponent(segments[1]);
+    // PUT /channel-override  (address in body)
+    if (method === 'PUT' && resource === 'channel-override') {
+      if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+        return { error: 'Request body must be a JSON object' };
+      }
+      const address = (body as Record<string, unknown>).address;
+      if (typeof address !== 'string' || !address) return { error: 'address is required' };
       return this.handleFetchPutOverride(address, body);
     }
 
-    // DELETE /channels/:address/override
-    if (method === 'DELETE' && resource === 'channels' && segments[2] === 'override' && segments.length === 3) {
-      const address = decodeURIComponent(segments[1]);
+    // POST /channel-reset  (address in body)
+    if (method === 'POST' && resource === 'channel-reset') {
+      if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+        return { error: 'Request body must be a JSON object' };
+      }
+      const address = (body as Record<string, unknown>).address;
+      if (typeof address !== 'string' || !address) return { error: 'address is required' };
       return this.handleFetchDeleteOverride(address);
     }
 

@@ -1212,7 +1212,7 @@ describe('TemplatePlatform private method coverage', () => {
       batteryPowered: false,
     };
     (inst as any).discoveredChannels = [ch];
-    const result = (await inst.onFetch('PUT', 'channels/FETCH002%3A1/override', {}, 'not-an-object')) as { error: string };
+    const result = (await inst.onFetch('PUT', 'channel-override', {}, 'not-an-object')) as { error: string };
     expect(typeof result.error).toBe('string');
     (inst as any).discoveredChannels = [];
   });
@@ -1227,15 +1227,15 @@ describe('TemplatePlatform private method coverage', () => {
       batteryPowered: false,
     };
     (inst as any).discoveredChannels = [ch];
-    const result = (await inst.onFetch('PUT', 'channels/FETCH003%3A1/override', {}, { switchMatterType: 'invalid' })) as { error: string };
+    const result = (await inst.onFetch('PUT', 'channel-override', {}, { address: 'FETCH003:1', switchMatterType: 'invalid' })) as { error: string };
     expect(typeof result.error).toBe('string');
     expect(result.error).toMatch(/switchMatterType/);
     (inst as any).discoveredChannels = [];
   });
 
-  test('onFetch DELETE override for unknown address returns error', async () => {
+  test('onFetch POST channel-reset for unknown address returns error', async () => {
     (inst as any).discoveredChannels = [];
-    const result = (await inst.onFetch('DELETE', 'channels/UNKNOWN%3A9/override', {}, undefined)) as { error: string };
+    const result = (await inst.onFetch('POST', 'channel-reset', {}, { address: 'UNKNOWN:9' })) as { error: string };
     expect(typeof result.error).toBe('string');
     expect(result.error).toMatch(/not found/i);
   });

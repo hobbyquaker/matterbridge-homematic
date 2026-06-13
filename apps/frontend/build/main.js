@@ -103,10 +103,10 @@
     setStatus('Saving...', '');
 
     try {
-      var res = await fetch(API_BASE + '/channels/' + encodeURIComponent(channel.address) + '/override', {
+      var res = await fetch(API_BASE + '/channel-override', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(Object.assign({ address: channel.address }, body)),
       });
       var result = await res.json();
       if (result.error) { setStatus('Error: ' + result.error, 'error'); saveBtn.disabled = false; return; }
@@ -129,8 +129,10 @@
     setStatus('Resetting...', '');
 
     try {
-      var res = await fetch(API_BASE + '/channels/' + encodeURIComponent(channel.address) + '/override', {
-        method: 'DELETE',
+      var res = await fetch(API_BASE + '/channel-reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: channel.address }),
       });
       var result = await res.json();
       if (result.error) { setStatus('Error: ' + result.error, 'error'); resetBtn.disabled = false; return; }
