@@ -203,10 +203,12 @@ An alternative is to make `false` the default (always auto-disable new channels 
 
 #### ARCH-0 — Declare mapper options as registry metadata
 
+**Done:** [`3e9a578`](https://github.com/hobbyquaker/matterbridge-homematic/commit/3e9a578)
+
 **Effort: Medium**  
 **Status: Not started**
 
-Per-channel/per-device configuration *values* are stored in `channelOverrides` in the plugin config (`CcuChannelOverride`: `enabled`, `switchMatterType`, `exposeHumidity`) — that storage is fine and should stay. The problem is where the *definitions* of available options live: they are hardcoded and duplicated across `module.ts`:
+Per-channel/per-device configuration _values_ are stored in `channelOverrides` in the plugin config (`CcuChannelOverride`: `enabled`, `switchMatterType`, `exposeHumidity`) — that storage is fine and should stay. The problem is where the _definitions_ of available options live: they are hardcoded and duplicated across `module.ts`:
 
 1. `handleFetchGetChannels` → the `capabilities` object (`switchMatterType: type === 'SWITCH'`, `exposeHumidity: type === 'HEATING_CLIMATECONTROL_TRANSCEIVER' && hasDeviceMapper`)
 2. `handleFetchPutOverride` → per-field validation (enum values, boolean checks)
@@ -216,7 +218,7 @@ Per-channel/per-device configuration *values* are stored in `channelOverrides` i
 
 Adding one new configurable option means touching 4–5 scattered places, and the conditions drift apart (this is how the gear-icon/capabilities inconsistency for SWITCH_VIRTUAL_RECEIVER channels happened). The mappers consume options but never declare which ones they support.
 
-**Plan:** colocate option *declarations* with the mappers, registry-style — the same reasoning that justified the mapper registries themselves:
+**Plan:** colocate option _declarations_ with the mappers, registry-style — the same reasoning that justified the mapper registries themselves:
 
 ```ts
 // channel-mapper/switch.ts
