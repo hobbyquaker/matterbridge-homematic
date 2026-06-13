@@ -16,7 +16,7 @@ import { mapChannel as heatingClimatecontrolTransceiver, OPTIONS as heatingClima
 import { mapChannel as key } from './key.js';
 import { mapChannel as keyTransceiver } from './key-transceiver.js';
 import { mapChannel as keymatic } from './keymatic.js';
-import { mapChannel as motionDetector } from './motion-detector.js';
+import { mapChannel as motionDetector, OPTIONS as motionDetectorOptions } from './motion-detector.js';
 import { mapChannel as rotaryHandleSensor } from './rotary-handle-sensor.js';
 import { mapChannel as shutterContact } from './shutter-contact.js';
 import { mapChannel as smokeDetector } from './smoke-detector.js';
@@ -65,6 +65,7 @@ export function channelTypeToKey(channelType: string): string {
  * Only mappers that export `OPTIONS` need an entry here.
  */
 export const CHANNEL_MAPPER_OPTIONS: Readonly<Record<string, readonly MapperOptionDescriptor[]>> = {
+  'motion-detector': motionDetectorOptions,
   'switch': switchOptions,
   'heating-climatecontrol-transceiver': heatingClimatecontrolTransceiverOptions,
   'climatecontrol-rt-transceiver': climatecontrolRtTransceiverOptions,

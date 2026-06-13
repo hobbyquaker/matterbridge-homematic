@@ -186,6 +186,12 @@ export interface CcuChannelOverride {
    * Defaults to `true` (humidity exposed).
    */
   exposeHumidity?: boolean;
+  /**
+   * When `true`, adds a `lightSensor` device type and `IlluminanceMeasurement` cluster to the
+   * occupancy sensor endpoint (MOTION_DETECTOR channels that report ILLUMINATION or BRIGHTNESS).
+   * Defaults to `false` (brightness not exposed).
+   */
+  exposeBrightness?: boolean;
 }
 
 /** Cache for discovered channels and ReGa names to avoid repeated RPC/ReGa calls. */
@@ -202,7 +208,7 @@ export interface CcuDiscoveryCache {
  */
 export interface MapperOptionDescriptor {
   /** The override field this option maps to in {@link CcuChannelOverride}. */
-  key: 'switchMatterType' | 'exposeHumidity';
+  key: 'switchMatterType' | 'exposeHumidity' | 'exposeBrightness';
   /** Value type: `'enum'` requires a `values` list; `'boolean'` accepts true/false/undefined. */
   type: 'boolean' | 'enum';
   /** Allowed string values (required when `type` is `'enum'`). */
@@ -221,6 +227,12 @@ export interface ChannelMappingOptions {
    * Defaults to `true`.
    */
   exposeHumidity?: boolean;
+  /**
+   * When `true`, adds `IlluminanceMeasurement` to a MOTION_DETECTOR endpoint.
+   * Only meaningful for mappers that expose ILLUMINATION or BRIGHTNESS.
+   * Defaults to `false`.
+   */
+  exposeBrightness?: boolean;
 }
 
 /**

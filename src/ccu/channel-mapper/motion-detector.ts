@@ -7,10 +7,19 @@
 import { lightSensor, MatterbridgeEndpoint, occupancySensor } from 'matterbridge';
 
 import { buildDisplayName, buildEndpointId, buildModel, buildSerialNumber, finalizeEndpoint } from '../mapper-utils.js';
-import { ChannelMapper } from '../types.js';
+import { ChannelMapper, MapperOptionDescriptor } from '../types.js';
 
 /**
- * Map a Homematic MOTION_DETECTOR channel to a combined Matter occupancySensor + lightSensor endpoint.
+ * User-configurable options declared by this mapper.
+ * `exposeBrightness` adds a `lightSensor` device type and `IlluminanceMeasurement` cluster
+ * to the endpoint (supported by most MOTION_DETECTOR devices via ILLUMINATION or BRIGHTNESS).
+ */
+export const OPTIONS: readonly MapperOptionDescriptor[] = [{ key: 'exposeBrightness', type: 'boolean' }];
+
+/**
+ * Map a Homematic MOTION_DETECTOR channel to a Matter occupancySensor endpoint.
+ * When `options.exposeBrightness` is `true`, the `lightSensor` device type and
+ * `IlluminanceMeasurement` cluster are also added.
  *
  * @type {ChannelMapper}
  */
@@ -20,13 +29,15 @@ export const mapChannel: ChannelMapper = (channel, vendorId, options) => {
   const serialNumber = buildSerialNumber(channel, 'MOTION_DETECTOR');
   const model = buildModel(channel);
 
-  return finalizeEndpoint(
-    new MatterbridgeEndpoint([occupancySensor, lightSensor], { id })
-      .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
-      // Default: unoccupied. Updated from RPC events.
-      .createDefaultOccupancySensingClusterServer(false)
-      // Default: null illuminance. Updated from ILLUMINATION RPC events.
-      .createDefaultIlluminanceMeasurementClusterServer(),
-    { ...options, batteryPowered: channel.batteryPowered },
-  );
+  const ep =
+    options.exposeBrightness === true
+      ? new MatterbridgeEndpoint([occupancySensor, lightSensor], { id })
+          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
+          .createDefaultOccupancySensingClusterServer(false)
+          .createDefaultIlluminanceMeasurementClusterServer()
+      : new MatterbridgeEndpoint(occupancySensor, { id })
+          .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
+          .createDefaultOccupancySensingClusterServer(false);
+
+  return finalizeEndpoint(ep, { ...options, batteryPowered: channel.batteryPowered });
 };

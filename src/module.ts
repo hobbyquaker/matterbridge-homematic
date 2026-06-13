@@ -373,6 +373,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
           return { error: `${desc.key} must be a boolean` };
         }
         if (desc.key === 'exposeHumidity') newFields.exposeHumidity = v as boolean | undefined;
+        if (desc.key === 'exposeBrightness') newFields.exposeBrightness = v as boolean | undefined;
       }
     }
 
