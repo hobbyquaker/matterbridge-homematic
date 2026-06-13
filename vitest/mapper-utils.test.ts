@@ -42,6 +42,8 @@ describe('channelTypeLabel', () => {
     ['HEATING_CLIMATECONTROL_TRANSCEIVER', 'HEATING'],
     ['KEY_TRANSCEIVER', 'KEY'],
     ['MOTION_DETECTOR', 'MOTION'],
+    ['ROTARY_HANDLE_SENSOR', 'ROTARY'],
+    ['ROTARY_HANDLE_TRANSCEIVER', 'ROTARY'],
     ['SHUTTER_CONTACT', 'CONTACT'],
     ['SMOKE_DETECTOR', 'SMOKE'],
     ['THERMALCONTROL_TRANSMIT', 'THERMALCONTROL'],
@@ -49,7 +51,7 @@ describe('channelTypeLabel', () => {
     expect(channelTypeLabel(type as SupportedChannelType)).toBe(expected);
   });
 
-  test.each([['SWITCH'], ['BLIND'], ['DIMMER'], ['WEATHER'], ['KEYMATIC'], ['ALARMSTATE'], ['KEY'], ['ROTARY_HANDLE_SENSOR'], ['TEMPERATURE_HUMIDITY_TRANSMITTER']])(
+  test.each([['SWITCH'], ['BLIND'], ['DIMMER'], ['WEATHER'], ['KEYMATIC'], ['ALARMSTATE'], ['KEY'], ['TEMPERATURE_HUMIDITY_TRANSMITTER']])(
     'should return type unchanged for %s (no abbreviation defined)',
     (type) => {
       expect(channelTypeLabel(type as SupportedChannelType)).toBe(type);
