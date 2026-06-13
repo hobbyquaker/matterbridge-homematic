@@ -213,6 +213,11 @@ export interface MapperOptionDescriptor {
   type: 'boolean' | 'enum';
   /** Allowed string values (required when `type` is `'enum'`). */
   values?: readonly string[];
+  /**
+   * When set, this option is only offered on channels whose type is included in this list.
+   * Omit to offer the option on all channels of the device.
+   */
+  channelTypes?: readonly string[];
 }
 
 /** Options forwarded to channel and device mappers. */

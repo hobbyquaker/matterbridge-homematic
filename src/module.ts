@@ -2684,7 +2684,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    */
   private getChannelOptions(channel: Pick<CcuChannelInfo, 'type' | 'deviceType'>): readonly MapperOptionDescriptor[] {
     if (channel.deviceType && getDeviceMapper(channel.deviceType)) {
-      return getDeviceMapperOptions(channel.deviceType);
+      return getDeviceMapperOptions(channel.deviceType).filter((desc) => !desc.channelTypes || desc.channelTypes.includes(channel.type));
     }
     if (isSupportedChannelType(channel.type)) {
       return getChannelMapperOptions(channel.type);

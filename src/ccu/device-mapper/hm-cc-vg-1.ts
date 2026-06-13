@@ -36,7 +36,7 @@ import { DeviceMapper, MappedDeviceEndpoint, MapperOptionDescriptor } from '../t
  * `exposeHumidity` adds RelativeHumidityMeasurement to the thermostat endpoint
  * (the HM-CC-VG-1 aggregates humidity from the wall thermostats in the group).
  */
-export const OPTIONS: readonly MapperOptionDescriptor[] = [{ key: 'exposeHumidity', type: 'boolean' }];
+export const OPTIONS: readonly MapperOptionDescriptor[] = [{ key: 'exposeHumidity', type: 'boolean', channelTypes: ['CLIMATECONTROL_RT_TRANSCEIVER'] }];
 
 /**
  * Device mapper for HM-CC-VG-1 virtual group thermostats.
