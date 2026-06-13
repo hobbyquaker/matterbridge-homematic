@@ -477,6 +477,8 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       const endpoint = createEndpointForChannel(channel as Parameters<typeof createEndpointForChannel>[0], this.matterbridge.aggregatorVendorId, {
         switchMatterType: override?.switchMatterType ?? inferSwitchMatterTypeFromName(channel.name),
         batteryPowered: this.deviceBatteryHints.get(channel.deviceAddress) ?? channel.batteryPowered,
+        exposeHumidity: override?.exposeHumidity,
+        exposeBrightness: override?.exposeBrightness,
       });
       await this.registerDevice(endpoint);
       this.deviceAddressToDevice.set(channel.deviceAddress, endpoint);
@@ -601,6 +603,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         switchMatterType: deviceOverride?.switchMatterType ?? (primaryChannel ? inferSwitchMatterTypeFromName(primaryChannel.name) : undefined),
         batteryPowered: this.deviceBatteryHints.get(deviceAddress) ?? primaryChannel?.batteryPowered ?? false,
         exposeHumidity: deviceOverride?.exposeHumidity,
+        exposeBrightness: deviceOverride?.exposeBrightness,
       };
 
       // Pre-check: if every resolved supported channel for this device is disabled, skip the mapper
@@ -713,6 +716,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         switchMatterType: override?.switchMatterType ?? inferSwitchMatterTypeFromName(channel.name),
         batteryPowered: this.deviceBatteryHints.get(channel.deviceAddress) ?? channel.batteryPowered,
         exposeHumidity: override?.exposeHumidity,
+        exposeBrightness: override?.exposeBrightness,
       });
 
       if (configUrl) endpoint.configUrl = configUrl;
