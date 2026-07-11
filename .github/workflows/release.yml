@@ -106,10 +106,16 @@ jobs:
             $PRERELEASE_FLAG
 
   publish:
-    name: Publish to npm
+    name: Trigger npm publish
     needs: create-release
+    runs-on: ubuntu-latest
     permissions:
-      contents: read
-      id-token: write # needed for npm trusted publishing (OIDC) in the called workflow
-      actions: read
-    uses: ./.github/workflows/publish.yml
+      actions: write
+    steps:
+      # Dispatch publish.yml instead of calling it as a reusable workflow: npm
+      # trusted publishing (OIDC) validates the top-level workflow_ref claim,
+      # which must match the workflow registered on npmjs.com (publish.yml).
+      - name: Dispatch publish workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run publish.yml -R "${{ github.repository }}" --ref main -f channel=release
