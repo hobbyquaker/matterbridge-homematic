@@ -32,7 +32,12 @@
 
   // Load channel from API and render
   async function init() {
-    var rawHash = decodeURIComponent(location.hash.slice(1));
+    // TECHNICAL DEBT: Matterbridge >= 3.9.2 force-appends a trailing slash to the
+    // device configUrl before loading it in the plugin-frontend iframe (handleConfigUrl
+    // base-path normalization for HA Ingress), which corrupts our hash fragment:
+    // "#iface:typeLabel:address" arrives as "#iface:typeLabel:address/". Strip trailing
+    // slashes as a workaround. Remove once fixed upstream: Luligu/matterbridge#NNN
+    var rawHash = decodeURIComponent(location.hash.slice(1)).replace(/\/+$/, '');
     if (!rawHash) {
       titleEl.textContent = 'No channel selected';
       setStatus('Open this page from the gear icon next to a device.', '');
