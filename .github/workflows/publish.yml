@@ -22,7 +22,9 @@ permissions:
 jobs:
   publish-release:
     name: Publish release to npm
-    if: github.event_name == 'release' || github.event_name == 'workflow_call'
+    # In a reusable workflow github.event_name is the CALLER's event, so the
+    # workflow_call from release.yml (tag push) arrives here as 'push'.
+    if: github.event_name == 'release' || github.event_name == 'push'
     runs-on: ubuntu-latest
     # env:
     #   PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
@@ -93,7 +95,7 @@ jobs:
 
   publish-dev:
     name: Publish daily dev to npm and trigger matterbridge docker build dev
-    if: github.event_name != 'release'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
       PAT_TOKEN: ${{ secrets.PAT_TOKEN }}

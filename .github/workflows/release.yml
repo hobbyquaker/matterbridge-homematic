@@ -108,4 +108,8 @@ jobs:
   publish:
     name: Publish to npm
     needs: create-release
+    permissions:
+      contents: read
+      id-token: write # needed for npm trusted publishing (OIDC) in the called workflow
+      actions: read
     uses: ./.github/workflows/publish.yml
