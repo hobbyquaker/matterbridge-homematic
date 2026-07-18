@@ -25,7 +25,7 @@
  * @file device-mapper/hm-cc-vg-1.ts
  */
 
-import { humiditySensor, MatterbridgeEndpoint, thermostatDevice } from 'matterbridge';
+import { humiditySensor, MatterbridgeEndpoint, thermostat } from 'matterbridge';
 
 import { mapChannel as mapShutterContactChannel } from '../channel-mapper/shutter-contact.js';
 import { buildDisplayName, buildEndpointId, buildModel, buildSerialNumber, finalizeEndpoint } from '../mapper-utils.js';
@@ -42,7 +42,7 @@ export const OPTIONS: readonly MapperOptionDescriptor[] = [{ key: 'exposeHumidit
  * Device mapper for HM-CC-VG-1 virtual group thermostats.
  *
  * Returns up to two endpoints:
- * - A `thermostatDevice` endpoint wired to the `CLIMATECONTROL_RT_TRANSCEIVER` channel.
+ * - A `thermostat` endpoint wired to the `CLIMATECONTROL_RT_TRANSCEIVER` channel.
  * - A `contactSensor` endpoint wired to the `SHUTTER_CONTACT` channel (if present).
  *
  * Returns `[]` when no `CLIMATECONTROL_RT_TRANSCEIVER` channel is found (device suppressed).
@@ -58,7 +58,7 @@ export const mapDevice: DeviceMapper = (channels, vendorId, options) => {
   const results: MappedDeviceEndpoint[] = [];
 
   // ── Thermostat endpoint ──────────────────────────────────────────────────────────────────────
-  const ep = new MatterbridgeEndpoint(options.exposeHumidity === true ? [thermostatDevice, humiditySensor] : thermostatDevice, { id: buildEndpointId(thermostatChannel) })
+  const ep = new MatterbridgeEndpoint(options.exposeHumidity === true ? [thermostat, humiditySensor] : thermostat, { id: buildEndpointId(thermostatChannel) })
     .createDefaultBridgedDeviceBasicInformationClusterServer(
       buildDisplayName(thermostatChannel),
       buildSerialNumber(thermostatChannel, 'CLIMATECONTROL_RT_TRANSCEIVER'),

@@ -3,15 +3,15 @@
  *
  * The HEATING_CLIMATECONTROL_TRANSCEIVER channel on these devices carries both temperature /
  * setpoint data and a HUMIDITY datapoint. This device mapper combines both into a single Matter
- * thermostatDevice endpoint, optionally adding the RelativeHumidityMeasurement cluster.
+ * thermostat endpoint, optionally adding the RelativeHumidityMeasurement cluster.
  *
- * Declaring `thermostatDevice` before `humiditySensor` in the device type array ensures the
+ * Declaring `thermostat` before `humiditySensor` in the device type array ensures the
  * device is always displayed as a thermostat in Matter controllers such as Apple Home.
  *
  * @file device-mapper/hmip-wth.ts
  */
 
-import { humiditySensor, MatterbridgeEndpoint, thermostatDevice } from 'matterbridge';
+import { humiditySensor, MatterbridgeEndpoint, thermostat } from 'matterbridge';
 
 import { buildDisplayName, buildEndpointId, buildModel, buildSerialNumber, finalizeEndpoint } from '../mapper-utils.js';
 import { DeviceMapper, MapperOptionDescriptor } from '../types.js';
@@ -24,9 +24,9 @@ export const OPTIONS: readonly MapperOptionDescriptor[] = [{ key: 'exposeHumidit
 
 /**
  * Device mapper for HmIP-WTH, HmIP-WTH-2, HmIP-WTH-B, HmIP-STHD, HmIP-STH, and related variants.
- * Returns a single thermostatDevice endpoint. When `options.exposeHumidity` is not explicitly
+ * Returns a single thermostat endpoint. When `options.exposeHumidity` is not explicitly
  * `false`, both the `humiditySensor` device type and the RelativeHumidityMeasurement cluster are
- * added. Declaring `thermostatDevice` first ensures Matter controllers (e.g. Apple Home) always
+ * added. Declaring `thermostat` first ensures Matter controllers (e.g. Apple Home) always
  * render the accessory as a thermostat rather than a humidity sensor.
  *
  * @type {DeviceMapper}
@@ -42,7 +42,7 @@ export const mapDevice: DeviceMapper = (channels, vendorId, options) => {
 
   const exposeHumidity = options.exposeHumidity !== false;
 
-  const ep = new MatterbridgeEndpoint(exposeHumidity ? [thermostatDevice, humiditySensor] : thermostatDevice, { id })
+  const ep = new MatterbridgeEndpoint(exposeHumidity ? [thermostat, humiditySensor] : thermostat, { id })
     .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
     .createDefaultHeatingThermostatClusterServer(23, 21);
 

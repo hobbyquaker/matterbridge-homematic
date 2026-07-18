@@ -1,11 +1,11 @@
 /**
- * Channel mapper for Homematic SWITCH channels → Matter onOffLight / onOffOutlet / onOffSwitch.
+ * Channel mapper for Homematic SWITCH channels → Matter onOffLight / onOffPlugInUnit / onOffLightSwitch.
  * The Matter device type is selected via `options.switchMatterType`; defaults to `'light'`.
  *
  * @file channel-mapper/switch.ts
  */
 
-import { fanDevice, MatterbridgeEndpoint, onOffLight, onOffOutlet, onOffSwitch } from 'matterbridge';
+import { fan, MatterbridgeEndpoint, onOffLight, onOffLightSwitch, onOffPlugInUnit } from 'matterbridge';
 
 import { buildDisplayName, buildEndpointId, buildModel, buildSerialNumber, finalizeEndpoint } from '../mapper-utils.js';
 import { ChannelMapper, MapperOptionDescriptor } from '../types.js';
@@ -31,13 +31,13 @@ export const mapChannel: ChannelMapper = (channel, vendorId, options) => {
   let ep: MatterbridgeEndpoint;
   switch (options.switchMatterType ?? 'light') {
     case 'outlet':
-      ep = new MatterbridgeEndpoint(onOffOutlet, { id }).createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model);
+      ep = new MatterbridgeEndpoint(onOffPlugInUnit, { id }).createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model);
       break;
     case 'switch':
-      ep = new MatterbridgeEndpoint(onOffSwitch, { id }).createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model);
+      ep = new MatterbridgeEndpoint(onOffLightSwitch, { id }).createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model);
       break;
     case 'fan':
-      ep = new MatterbridgeEndpoint(fanDevice, { id })
+      ep = new MatterbridgeEndpoint(fan, { id })
         .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
         .createOnOffFanControlClusterServer();
       break;

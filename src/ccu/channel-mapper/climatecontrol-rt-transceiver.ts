@@ -1,5 +1,5 @@
 /**
- * Channel mapper for Homematic CLIMATECONTROL_RT_TRANSCEIVER channels → Matter thermostatDevice.
+ * Channel mapper for Homematic CLIMATECONTROL_RT_TRANSCEIVER channels → Matter thermostat.
  *
  * Used by HM-CC-RT-DN (BidCos-RF radiator thermostat) and HM-CC-VG-1 (virtual group thermostat)
  * when processed via the channel mapper loop (i.e. when no device mapper owns the device).
@@ -17,7 +17,7 @@
  * @file channel-mapper/climatecontrol-rt-transceiver.ts
  */
 
-import { humiditySensor, MatterbridgeEndpoint, thermostatDevice } from 'matterbridge';
+import { humiditySensor, MatterbridgeEndpoint, thermostat } from 'matterbridge';
 
 import { buildDisplayName, buildEndpointId, buildModel, buildSerialNumber, finalizeEndpoint } from '../mapper-utils.js';
 import { ChannelMapper, MapperOptionDescriptor } from '../types.js';
@@ -29,7 +29,7 @@ import { ChannelMapper, MapperOptionDescriptor } from '../types.js';
 export const OPTIONS: readonly MapperOptionDescriptor[] = [{ key: 'exposeHumidity', type: 'boolean' }];
 
 /**
- * Map a Homematic CLIMATECONTROL_RT_TRANSCEIVER channel to a Matter thermostatDevice endpoint.
+ * Map a Homematic CLIMATECONTROL_RT_TRANSCEIVER channel to a Matter thermostat endpoint.
  * When `options.exposeHumidity` is `true`, the humiditySensor device type and
  * RelativeHumidityMeasurement cluster are added (for devices that report an ACTUAL_HUMIDITY datapoint).
  *
@@ -41,7 +41,7 @@ export const mapChannel: ChannelMapper = (channel, vendorId, options) => {
   const serialNumber = buildSerialNumber(channel, 'CLIMATECONTROL_RT_TRANSCEIVER');
   const model = buildModel(channel);
 
-  const ep = new MatterbridgeEndpoint(options.exposeHumidity === true ? [thermostatDevice, humiditySensor] : thermostatDevice, { id })
+  const ep = new MatterbridgeEndpoint(options.exposeHumidity === true ? [thermostat, humiditySensor] : thermostat, { id })
     .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
     .createDefaultHeatingThermostatClusterServer(23, 21);
 

@@ -533,7 +533,7 @@ RedMatic prior art: `hm-lc-rgbw-wm.js` (and `hb-uni-rgb-led-ctrl.js` which is an
 #### HM-9 — Garage door with combined contact sensor(s)
 
 **Effort: Medium–High**  
-**Status: Partially blocked** — Matter 1.5 has no native garage door device type; workaround via `doorLockDevice` is viable now and can be upgraded later when Matter adds a dedicated type.
+**Status: Partially blocked** — Matter 1.5 has no native garage door device type; workaround via `doorLock` is viable now and can be upgraded later when Matter adds a dedicated type.
 
 A complete garage door integration that combines the actuator channel (trigger/motor) with one or two contact sensor channels that prove the actual open/closed state. This supersedes and replaces the simpler HM-4 and HM-7 entries once implemented.
 
@@ -561,7 +561,7 @@ The device mapper must account for two common motor wiring patterns:
 
 **Matter mapping (workaround, Matter ≤ 1.5):**
 
-Use `doorLockDevice` as the interim device type:
+Use `doorLock` as the interim device type:
 
 - `LockState.LOCKED` = door fully closed (confirmed by close contact)
 - `LockState.UNLOCKED` = door fully open (confirmed by open contact)
@@ -588,7 +588,7 @@ HmIP-SWDO (motorized window/door opener) uses a boolean `STATE` on its channel (
 
 RedMatic prior art: `hmip-swdo.js` — defaults to ContactSensor, can be configured as GarageDoorOpener, Door, or Window.
 
-**In Matter:** No native garage door device type. Options: `doorLockDevice` (binary lock/unlock semantic), or `coverDevice` (0%/100% only). Neither is perfect. Low priority until there is user demand.
+**In Matter:** No native garage door device type. Options: `doorLock` (binary lock/unlock semantic), or `windowCovering` (0%/100% only). Neither is perfect. Low priority until there is user demand.
 
 ---
 
@@ -596,7 +596,7 @@ RedMatic prior art: `hmip-swdo.js` — defaults to ContactSensor, can be configu
 
 **Effort: Medium**
 
-Motorized garage door or gate. Accesses `DOOR_STATE` and `DOOR_COMMAND` datapoints on channel 1. The actual Homematic channel type for this channel is unknown — needs checking in paramsets.json or on real hardware. In Matter, closest mapping is `coverDevice` (open=100%, closed=0%) with toggle control.
+Motorized garage door or gate. Accesses `DOOR_STATE` and `DOOR_COMMAND` datapoints on channel 1. The actual Homematic channel type for this channel is unknown — needs checking in paramsets.json or on real hardware. In Matter, closest mapping is `windowCovering` (open=100%, closed=0%) with toggle control.
 
 RedMatic prior art: `hmip-mod-ho.js` and `hmip-mod-tm.js` (alias for MOD-HO).
 
@@ -624,9 +624,9 @@ The CCU supports both user-defined programs and ReGa system variables. Expose se
 
 **Matter mapping:**
 
-- Each program → one `onOffSwitch` endpoint (or `genericSwitch` for momentary semantics)
+- Each program → one `onOffLightSwitch` endpoint (or `genericSwitch` for momentary semantics)
 - Program endpoint behavior: turning ON executes the program; the attribute auto-resets to OFF after execution
-- Each boolean variable → one stateful boolean Matter device, most likely `onOffSwitch` / `onOffLight`-style semantics or another simple boolean endpoint depending on controller compatibility
+- Each boolean variable → one stateful boolean Matter device, most likely `onOffLightSwitch` / `onOffLight`-style semantics or another simple boolean endpoint depending on controller compatibility
 - Variable endpoint behavior: Matter writes should update the ReGa variable, and ReGa state changes should sync back into Matter via polling or pseudo-push refresh
 
 **Implementation notes:**
@@ -657,7 +657,7 @@ The CCU supports both user-defined programs and ReGa system variables. Expose se
 **Effort: Medium** (channel type research + LOCK cluster wiring)  
 **Status: Device available** (released April 2026)
 
-The second-generation smart door lock replaces the original HmIP-DLD. It adds vibration and position sensors, auto-relock, whisper mode, and tamper detection, and is designed to integrate with the new alarm system. This is a natural Matter `doorLockDevice` mapping.
+The second-generation smart door lock replaces the original HmIP-DLD. It adds vibration and position sensors, auto-relock, whisper mode, and tamper detection, and is designed to integrate with the new alarm system. This is a natural Matter `doorLock` mapping.
 
 The original HmIP-DLD likely uses `KEYMATIC` or a similar lock channel type (there is already a `keymatic.ts` channel mapper in the registry). The DLD-pro may reuse the same channel type or introduce a new one — needs verification on real hardware.
 
@@ -677,7 +677,7 @@ The original HmIP-DLD likely uses `KEYMATIC` or a similar lock channel type (the
 
 #### HM-9 and HM-12 relationship
 
-HM-12 (Door Lock Drive pro) and HM-9 (Garage door) both use `doorLockDevice` as their Matter device type but represent semantically different things. Implement them independently. HM-9 uses `doorLockDevice` as a workaround for the missing garage door type; HM-12 uses it as the canonical mapping for an actual door lock.
+HM-12 (Door Lock Drive pro) and HM-9 (Garage door) both use `doorLock` as their Matter device type but represent semantically different things. Implement them independently. HM-9 uses `doorLock` as a workaround for the missing garage door type; HM-12 uses it as the canonical mapping for an actual door lock.
 
 ---
 

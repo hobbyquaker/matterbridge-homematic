@@ -172,7 +172,7 @@ Declare only the channels that actually need wiring. You do not need to list eve
 
 ```ts
 // src/ccu/device-mapper/hmip-wth.ts
-import { humiditySensor, MatterbridgeEndpoint, thermostatDevice } from 'matterbridge';
+import { humiditySensor, MatterbridgeEndpoint, thermostat } from 'matterbridge';
 import { buildDisplayName, buildEndpointId, buildModel, buildSerialNumber, finalizeEndpoint } from '../mapper-utils.js';
 import { DeviceMapper } from '../types.js';
 
@@ -183,7 +183,7 @@ export const mapDevice: DeviceMapper = (channels, vendorId, options) => {
   return [
     {
       endpoint: finalizeEndpoint(
-        new MatterbridgeEndpoint([thermostatDevice, humiditySensor], { id: buildEndpointId(heatingChannel) })
+        new MatterbridgeEndpoint([thermostat, humiditySensor], { id: buildEndpointId(heatingChannel) })
           .createDefaultBridgedDeviceBasicInformationClusterServer(
             buildDisplayName(heatingChannel),
             buildSerialNumber(heatingChannel, 'HEATING_CLIMATECONTROL_TRANSCEIVER'),

@@ -1,10 +1,10 @@
 /**
- * Channel mapper for Homematic HEATING_CLIMATECONTROL_TRANSCEIVER channels → Matter thermostatDevice.
+ * Channel mapper for Homematic HEATING_CLIMATECONTROL_TRANSCEIVER channels → Matter thermostat.
  *
  * @file channel-mapper/heating-climatecontrol-transceiver.ts
  */
 
-import { humiditySensor, MatterbridgeEndpoint, thermostatDevice } from 'matterbridge';
+import { humiditySensor, MatterbridgeEndpoint, thermostat } from 'matterbridge';
 
 import { buildDisplayName, buildEndpointId, buildModel, buildSerialNumber, finalizeEndpoint } from '../mapper-utils.js';
 import { ChannelMapper, MapperOptionDescriptor } from '../types.js';
@@ -16,7 +16,7 @@ import { ChannelMapper, MapperOptionDescriptor } from '../types.js';
 export const OPTIONS: readonly MapperOptionDescriptor[] = [{ key: 'exposeHumidity', type: 'boolean' }];
 
 /**
- * Map a Homematic HEATING_CLIMATECONTROL_TRANSCEIVER channel to a Matter thermostatDevice endpoint.
+ * Map a Homematic HEATING_CLIMATECONTROL_TRANSCEIVER channel to a Matter thermostat endpoint.
  * When `options.exposeHumidity` is `true`, the humiditySensor device type and
  * RelativeHumidityMeasurement cluster are added (for devices that report a HUMIDITY datapoint).
  *
@@ -28,7 +28,7 @@ export const mapChannel: ChannelMapper = (channel, vendorId, options) => {
   const serialNumber = buildSerialNumber(channel, 'HEATING_CLIMATECONTROL_TRANSCEIVER');
   const model = buildModel(channel);
 
-  const ep = new MatterbridgeEndpoint(options.exposeHumidity === true ? [thermostatDevice, humiditySensor] : thermostatDevice, { id })
+  const ep = new MatterbridgeEndpoint(options.exposeHumidity === true ? [thermostat, humiditySensor] : thermostat, { id })
     .createDefaultBridgedDeviceBasicInformationClusterServer(displayName, serialNumber, vendorId, 'Homematic', model)
     .createDefaultHeatingThermostatClusterServer(23, 21);
 

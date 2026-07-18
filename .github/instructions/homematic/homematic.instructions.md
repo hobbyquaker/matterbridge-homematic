@@ -53,20 +53,20 @@ Defined in `SUPPORTED_CHANNEL_TYPES` in `src/ccu/device-mapper.ts`:
 | Homematic channel type               | Matter device type(s)                                  | Key datapoints                                |
 | ------------------------------------ | ------------------------------------------------------ | --------------------------------------------- |
 | `ALARMSTATE`                         | `waterLeakDetector`                                    | `STATE` → BooleanState                        |
-| `BLIND`                              | `coverDevice` (lift only)                              | `LEVEL` → CurrentPositionLiftPercent          |
-| `BLIND` with tilt                    | `coverDevice` (lift + tilt)                            | `LEVEL` + `LEVEL_2`                           |
+| `BLIND`                              | `windowCovering` (lift only)                           | `LEVEL` → CurrentPositionLiftPercent          |
+| `BLIND` with tilt                    | `windowCovering` (lift + tilt)                         | `LEVEL` + `LEVEL_2`                           |
 | `DIMMER`                             | `dimmableLight`                                        | `LEVEL` → CurrentLevel                        |
-| `HEATING_CLIMATECONTROL_TRANSCEIVER` | `thermostatDevice`                                     | `ACTUAL_TEMPERATURE`, `SET_POINT_TEMPERATURE` |
+| `HEATING_CLIMATECONTROL_TRANSCEIVER` | `thermostat`                                           | `ACTUAL_TEMPERATURE`, `SET_POINT_TEMPERATURE` |
 | `KEY`                                | `genericSwitch` (momentary)                            | `PRESS_SHORT`, `PRESS_LONG`                   |
-| `KEYMATIC`                           | `doorLockDevice`                                       | `STATE` → LockState                           |
+| `KEYMATIC`                           | `doorLock`                                             | `STATE` → LockState                           |
 | `KEY_TRANSCEIVER`                    | `genericSwitch` (momentary)                            | `PRESS_SHORT`, `PRESS_LONG`                   |
 | `MOTION_DETECTOR`                    | `occupancySensor` + `lightSensor`                      | `MOTION` + `ILLUMINATION`                     |
 | `ROTARY_HANDLE_SENSOR`               | `contactSensor`                                        | `STATE` (0=closed, 1=tilted, 2=open)          |
 | `SHUTTER_CONTACT`                    | `contactSensor`                                        | `STATE` → BooleanState                        |
 | `SMOKE_DETECTOR`                     | `smokeCoAlarm`                                         | `SMOKE_DETECTOR_ALARM_STATUS`                 |
-| `SWITCH`                             | `onOffLight` / `onOffOutlet` / `onOffSwitch`           | `STATE` → OnOff                               |
+| `SWITCH`                             | `onOffLight` / `onOffPlugInUnit` / `onOffLightSwitch`  | `STATE` → OnOff                               |
 | `TEMPERATURE_HUMIDITY_TRANSMITTER`   | `temperatureSensor` + `humiditySensor`                 | `TEMPERATURE`, `HUMIDITY`                     |
-| `THERMALCONTROL_TRANSMIT`            | `thermostatDevice`                                     | `ACTUAL_TEMPERATURE`, `SET_POINT_TEMPERATURE` |
+| `THERMALCONTROL_TRANSMIT`            | `thermostat`                                           | `ACTUAL_TEMPERATURE`, `SET_POINT_TEMPERATURE` |
 | `WEATHER`                            | `temperatureSensor` + `humiditySensor` + `lightSensor` | `TEMPERATURE`, `HUMIDITY`, `BRIGHTNESS`       |
 
 ### SWITCH → Matter type selection
@@ -74,8 +74,8 @@ Defined in `SUPPORTED_CHANNEL_TYPES` in `src/ccu/device-mapper.ts`:
 `SWITCH` channels are configurable via `switchMatterType` in the per-channel user override (`CcuChannelOverride`):
 
 - `'light'` (default) → `onOffLight`
-- `'outlet'` → `onOffOutlet`
-- `'switch'` → `onOffSwitch`
+- `'outlet'` → `onOffPlugInUnit`
+- `'switch'` → `onOffLightSwitch`
 
 ### SWITCH + power meter merging
 
