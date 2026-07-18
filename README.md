@@ -7,11 +7,8 @@ A [Matterbridge](https://github.com/Luligu/matterbridge) plugin for Homematic
 
 This plugin bridges your Homematic CCU's devices to the Matter ecosystem
 
-> **Work in progress** — The plugin is functional but still under active development. Many Homematic device types already work out of the box; others are planned for upcoming releases. See [ROADMAP.md](ROADMAP.md) for what is coming next.
-
 ## Table of Contents
 
-- [Supported Device Types](#supported-device-types)
 - [Installation](#installation)
 - [Configuration](#configuration)
   - [RPC Server Configuration](#rpc-server-configuration)
@@ -29,12 +26,6 @@ This plugin bridges your Homematic CCU's devices to the Matter ecosystem
 - [License](#license)
 - [References](#references)
 - [Support](#support)
-
-## Supported Device Types
-
-For a full alphabetical list of known devices with support status and Apple Home compatibility, see [device-support.md](device-support.md). For planned features and future device mapper work, see [ROADMAP.md](ROADMAP.md).
-
-Battery (`LOW_BAT` / `LOWBAT` / `OPERATING_VOLTAGE`) and availability (`UNREACH`) are handled for all device types on channel `:0`.
 
 ## Installation
 
