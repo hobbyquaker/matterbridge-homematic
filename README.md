@@ -154,24 +154,24 @@ flowchart TB
 
     subgraph MB["Matterbridge"]
         AGG["Bridge aggregator"]
-    end
 
-    subgraph PLUGIN["matterbridge-homematic"]
-        subgraph PLATFORM["Platform layer · module.ts"]
-            REG["Discovery &<br/>endpoint registration"]
-            SYNC["Bidirectional state sync<br/>Matter commands ⇄ RPC events"]
-        end
+        subgraph PLUGIN["matterbridge-homematic"]
+            subgraph PLATFORM["Platform layer · module.ts"]
+                REG["Discovery &<br/>endpoint registration"]
+                SYNC["Bidirectional state sync<br/>Matter commands ⇄ RPC events"]
+            end
 
-        subgraph MAPPING["Mapping layer"]
-            DMR["Device mappers · src/ccu/device-mapper<br/>multi-channel device → 1..n endpoints<br/>HmIP-DRSI4 · HmIP-WTH · HM-CC-VG-1 · ..."]
-            CMR["Channel mappers · src/ccu/channel-mapper<br/>1 channel → 1 endpoint<br/>SWITCH · DIMMER · BLIND · ..."]
-        end
+            subgraph MAPPING["Mapping layer"]
+                DMR["Device mappers · src/ccu/device-mapper<br/>multi-channel device → 1..n endpoints<br/>HmIP-DRSI4 · HmIP-WTH · HM-CC-VG-1 · ..."]
+                CMR["Channel mappers · src/ccu/channel-mapper<br/>1 channel → 1 endpoint<br/>SWITCH · DIMMER · BLIND · ..."]
+            end
 
-        subgraph CONN["CCU connection layer · connection-layer.ts"]
-            RPC["RPC clients (outbound)<br/>listDevices · setValue · putParamset"]
-            CBS["RPC callback servers (inbound)<br/>XML-RPC :2049 · BinRPC :2048"]
-            CACHE["Discovery cache"]
-            REGAC["ReGa client<br/>name sync · initial values"]
+            subgraph CONN["CCU connection layer · connection-layer.ts"]
+                RPC["RPC clients (outbound)<br/>listDevices · setValue · putParamset"]
+                CBS["RPC callback servers (inbound)<br/>XML-RPC :2049 · BinRPC :2048"]
+                CACHE["Discovery cache"]
+                REGAC["ReGa client<br/>name sync · initial values"]
+            end
         end
     end
 
