@@ -69,6 +69,45 @@ Because the restart is Matterbridge-managed, the UX improvement here comes from 
 
 ---
 
+#### FIX-0 — Dimmer flashes to old level when a brightness is set while the light is off
+
+**Effort: Low–Medium**  
+**Status: Analyzed, ready to implement**
+
+**Symptom:** With a Homematic dimmer turned off, asking Siri/Alexa for "set to 20%" makes the lamp flash to its previous brightness (often 100%) before dimming down to 20%.
+
+**Root cause analysis:**
+
+Homematic dimmers have no separate on/off datapoint — only `LEVEL` (0.0–1.0). The plugin emulates Matter OnOff by writing the special value `1.005` ("restore last active level") for on and `0.0` for off.
+
+A Matter `dimmableLight` carries both an `OnOff` and a `LevelControl` cluster. When a controller sets a brightness while the light is off, it issues `MoveToLevelWithOnOff` (some ecosystems, notably HomeKit bridges, additionally send an explicit `On` command). matter.js applies this as **two attribute changes**: `OnOff.onOff false→true` and `LevelControl.currentLevel → target`.
+
+The DIMMER wiring in `module.ts` uses two independent `subscribeAttribute` callbacks (`LevelControl.currentLevel` and `OnOff.onOff`, around lines 944–990). Both fire for a single user intent, producing **two CCU radio writes**:
+
+1. `onOff=true` → `LEVEL 1.005` → lamp ramps to its last active level (the flash)
+2. `currentLevel=51` → `LEVEL 0.2` → lamp dims to the requested 20%
+
+**Ordering hazard (worse than the flash):** attribute-change callbacks have no ordering guarantee relative to each other. If the level write goes out first and the `1.005` write second, the lamp ends up at its _old_ level instead of the requested one — a wrong final state, not just a cosmetic flash.
+
+**Fix options:**
+
+1. **Command handlers instead of attribute subscriptions (preferred).** Register `addCommandHandler('on' | 'off' | 'moveToLevel' | 'moveToLevelWithOnOff')` on the dimmer endpoint. `moveToLevelWithOnOff` carries the full intent atomically (target level + implicit on), so the plugin sends exactly **one** `LEVEL` write. A bare `on` maps to `1.005`, `off` to `0.0`, `moveToLevel` to the target level.
+   - Matterbridge's behaviors update the cluster attributes themselves after executing a command, so the existing `subscribeAttribute` wiring for DIMMER must be **removed** (otherwise every command produces duplicate writes).
+   - Inbound CCU events use `updateAttribute`, which does _not_ invoke command handlers — the `rpcEchoSuppress` bookkeeping for DIMMER channels (`address` and `address + ':onoff'` keys in `applyDimmerLevel`) becomes unnecessary and can be dropped.
+2. **Short deferral of the bare `on` command (needed in addition to option 1).** Ecosystems that send `On` + `MoveToLevelWithOnOff` as two separate commands would still flash. Defer the `1.005` write by a small window (~150–300 ms); if a level command for the same channel arrives within the window, cancel the deferred `1.005` and send only the target `LEVEL`. RedMatic-HomeKit's dimmer handling uses the same defer-and-drop pattern for the On/Brightness characteristic pair. A plain "turn on" is delayed by the window length, which is imperceptible next to radio latency.
+3. **Minimal-change alternative: per-channel write coalescer on top of the existing subscriptions.** Collect all outgoing intents (onOff + level) for the same channel address within a short window and emit a single final `LEVEL` write (a level intent always wins over `1.005`). Fits the current architecture without touching command handling, but adds latency to _every_ on/off, keeps the fragile echo-suppress interplay, and still leaves the callback-ordering ambiguity as the input signal.
+
+**Recommendation:** implement options 1 + 2 together. This turns "set to 20% while off" into a single `LEVEL 0.2` radio write, eliminates the flash and the wrong-final-level hazard, and simplifies the echo-suppression logic.
+
+**Implementation notes:**
+
+- Scope: only the DIMMER wiring in `module.ts`. The `WORKING`-based suppression of inbound `LEVEL` events (`handleRpcEventDimmerWorking`, `dimmerLastLevel`, `dimmerAwaitingFinalLevel`) is unaffected and stays.
+- SWITCH channels are not affected (single boolean `STATE`, no LevelControl). BLIND endpoints have no OnOff cluster and are not affected.
+- Verify which commands each ecosystem actually sends (Alexa, Google, Apple Home) against a debug log before finalizing the deferral window.
+- Tests: cover `moveToLevelWithOnOff` from off (single write, no `1.005`), bare `on` (deferred `1.005` sent after window), `on` followed quickly by `moveToLevel` (only the level write), and `off` (immediate `LEVEL 0.0`).
+
+---
+
 #### RN-0 — ReGa rename handling
 
 **Effort: Low**  
