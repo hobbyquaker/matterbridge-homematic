@@ -149,6 +149,14 @@ Configuration changes that affect only channel-mapper channels (e.g. SWITCH, BLI
 ### Architecture Overview
 
 ```mermaid
+%%{init: {"theme": "base", "themeVariables": {
+  "primaryColor": "#ffffff",
+  "primaryTextColor": "#222222",
+  "primaryBorderColor": "#666666",
+  "lineColor": "#444444",
+  "textColor": "#222222",
+  "edgeLabelBackground": "#f5f5f5"
+}}}%%
 flowchart TB
     CTRL["Matter controllers<br/>Apple Home · Alexa · Google Home · ..."]
 
@@ -182,7 +190,7 @@ flowchart TB
 
     CTRL <-->|"Matter"| AGG
     AGG ~~~ SYNC
-    AGG <-->|"bridged endpoints"| REG
+    AGG <-->|"bridged endpoints"| PLATFORM
     SYNC -->|"setValue / putParamset"| RPC
     SYNC ~~~ CBS
     CBS -->|"state events"| SYNC
@@ -200,12 +208,12 @@ flowchart TB
     REG <-->|"channel & device names<br/>(re-synced after CCU renames)"| REGAC
     REGAC ~~~ IFACES
 
-    style MB fill:#f5f5f5,stroke:#999999,color:#333333
-    style PLUGIN fill:#e6e6e6,stroke:#888888,color:#333333
-    style PLATFORM fill:#d4d4d4,stroke:#777777,color:#333333
-    style MAPPING fill:#d4d4d4,stroke:#777777,color:#333333
-    style CONN fill:#d4d4d4,stroke:#777777,color:#333333
-    style CCU fill:#f5f5f5,stroke:#999999,color:#333333
+    style MB fill:#ececec,stroke:#888888,color:#222222
+    style PLUGIN fill:#dcdcdc,stroke:#777777,color:#222222
+    style PLATFORM fill:#c9c9c9,stroke:#666666,color:#222222
+    style MAPPING fill:#c9c9c9,stroke:#666666,color:#222222
+    style CONN fill:#c9c9c9,stroke:#666666,color:#222222
+    style CCU fill:#ececec,stroke:#888888,color:#222222
 ```
 
 **Name syncing:** channel and device names are fetched from the CCU's ReGaHSS logic layer and used as the display names of the Matter endpoints. When a device is renamed on the CCU, the plugin picks up the new name on the next sync; the enable/disable selection remains stable because it is keyed by interface, channel type, and serial — not by name.
