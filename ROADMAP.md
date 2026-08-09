@@ -640,6 +640,21 @@ Channel mappers map one channel to one endpoint; device mappers map all channels
 
 Obstruction/timeout: when the travel timer expires without the expected contact confirming, surface a fault — Closure `MainState.Error`, WindowCovering `operationalStatus` reset + `safetyStatus`, or doorLock `NOT_FULLY_LOCKED`.
 
+**Controller support reality check (researched mid-2026) — will it look like RedMatic's garage door in Apple Home?**
+
+Not initially. RedMatic-HomeKit talks HAP (Apple's native HomeKit protocol), which has always had a dedicated `GarageDoorOpener` service — that is where the garage tile, icon, "Siri, öffne das Garagentor" grammar, and the CarPlay proximity suggestion come from. Matterbridge talks Matter, so only what controllers implement from the Matter spec is available:
+
+- Matter 1.5 (November 2025) introduced the **Closures** device category, which explicitly covers garage doors, gates, shades, and awnings — so the spec gap is closed, and it even carries semantic tags for the closure kind.
+- As of mid-2026, **no major controller has shipped Closure support**: Apple Home (iOS 26.x) got design/pairing improvements only, and Closures remain on community wish lists for the next release; Alexa and Google have announced Matter 1.5 intentions but shipped nothing. A `closure` endpoint currently appears as an unsupported accessory in Home.app.
+- The fallbacks render as what they are: `windowCovering` → blinds/shades tile (functionally good: open/close/percentage/moving states, but blinds icon and blinds voice grammar), `doorLock` → lock tile (locked/unlocked semantics, no motion states).
+
+Consequences for this item:
+
+1. Default `matterType` at launch: `windowCovering` or `doorLock` (pick after a hands-on comparison in Home.app/Alexa) — not `closure`.
+2. The per-device `matterType` config exists precisely so users can flip a single value to `closure` the day their controller ships Closure support, without touching the Homematic-side wiring; whether the controller then shows a real garage icon depends on how it maps the Closure semantic tags.
+3. For users who insist on the genuine garage tile in Home.app before then, the documented interim is to keep that one device on RedMatic-HomeKit/Homebridge (HAP) in parallel — both can run alongside Matterbridge.
+4. Re-check controller support at implementation time and again before choosing the documented default; this section reflects mid-2026.
+
 **Implementation plan (ordered):**
 
 1. Port the RedMatic state machine as a plain, framework-free class (`GarageDoorStateMachine`: inputs contact events + Matter commands + timers, outputs pulse requests + door state) — unit-testable with fake timers, no Matter/CCU dependencies.
@@ -650,7 +665,7 @@ Obstruction/timeout: when the travel timer expires without the expected contact 
 
 **Open questions:**
 
-- Which Matter type should be the default? Needs a controller-support check for Closure at implementation time (Apple Home, Alexa, Google as of the implementation date).
+- Which fallback (`windowCovering` vs `doorLock`) should be the documented default? Decide with a hands-on comparison in Home.app/Alexa at implementation time; `closure` is ruled out as default until controllers ship Matter 1.5 Closure support (see reality check above).
 - Should a virtual device's member channels be auto-disabled in the select list (with `setSelectDevice` still registered so users can re-enable), or left visible by default?
 - Does the two-channel actuator mode need dedicated stop support (some motors use a third stop input)? RedMatic does not model a stop input — keep parity first.
 - ReGa-name integration: virtual devices are user-named in config; they should be excluded from ReGa name sync.
