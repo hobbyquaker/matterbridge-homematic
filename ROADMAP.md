@@ -575,51 +575,85 @@ The DIMMER wiring in `module.ts` used two independent `subscribeAttribute` callb
 
 ### Priority: Medium
 
-#### HM-9 — Garage door with combined contact sensor(s)
+#### HM-9 — Garage door virtual device (pulse actuator + contact sensors)
 
-**Effort: Medium–High**  
-**Status: Partially blocked** — Matter 1.5 has no native garage door device type; workaround via `doorLock` is viable now and can be upgraded later when Matter adds a dedicated type.
+**Effort: High** (new virtual-device concept + state machine + config UI)  
+**Status: Researched, concept defined** — RedMatic-HomeKit prior art analyzed in depth (see below); the composition concept and Matter mapping options are settled, implementation not started.
 
-A complete garage door integration that combines the actuator channel (trigger/motor) with one or two contact sensor channels that prove the actual open/closed state. This supersedes and replaces the simpler HM-4 and HM-7 entries once implemented.
+A complete garage door integration combines channels from **multiple physical devices**: a switch actuator that pulses the motor (typical Homematic garage wiring: each pulse cycles open → stop → close → stop → ...) and one or two door/window contacts that prove the real open/closed state. This supersedes HM-4 and HM-7 once implemented (they can remain as lightweight fallbacks for setups without contact sensors).
 
-**Typical hardware setup:**
+**Prior art: RedMatic-HomeKit `redmatic-homekit-homematic-garage`**
 
-- Actuator: a SWITCH or SHUTTER_CONTACT channel that toggles the door (HmIP-SWDO, HmIP-MOD-HO/TM, or any relay output wired to the door motor)
-- Contact sensor(s): one or two SHUTTER_CONTACT channels reporting verified open / closed state (e.g. HmIP-SCI or HmIP-SWDO-I mounted at top and bottom of the door travel)
+RedMatic solves this as a dedicated, fully config-driven Node-RED node (not derived from device discovery). Its config surface and logic are the blueprint:
 
-**Garage door control patterns:**
+| Concern            | RedMatic solution                                                                                                                                                                                                                                             |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Actuator wiring    | Two modes: one channel pulses for both directions (toggle motor), or two separate channels for open/close                                                                                                                                                     |
+| Pulse generation   | If the actuator's VALUES paramset has `ON_TIME`: single `putParamset {STATE: true, ON_TIME}` (device auto-off, radio-failure safe). Otherwise software pulse: `STATE=true`, wait `onTime` (default 0.4 s), `STATE=false`                                      |
+| Direction reversal | If a command arrives while moving in the opposite direction: pulse once (= stop), wait `revertTime` (default 0.5 s), pulse again (= move opposite). Skipped in two-channel mode                                                                               |
+| Contact sensors    | Three modes: one contact detects _closed_, one detects _open_, or two contacts detect both ends. Polarity configurable per contact (`true = closed` vs `true = not closed`). Subscribes to `STATE\|MOTION\|SENSOR` datapoints so SHUTTER_CONTACT and SCI work |
+| State machine      | HomeKit door states open/closed/opening/closing/stopped derived from contacts + travel timers (`duration` open / `durationClose`, default 15 s each). With dual contacts, a contact _leaving_ its end position infers externally triggered movement           |
+| Obstruction        | If the travel timer expires and the expected end contact has not confirmed, `ObstructionDetected` is raised                                                                                                                                                   |
 
-The device mapper must account for two common motor wiring patterns:
+**The architecture gap — why neither mapper tier fits:**
 
-1. **Dedicated open/close outputs** — separate relay channels for OPEN and CLOSE commands; straightforward mapping to `currentPosition`/`targetPosition`
-2. **Up-stop-down (toggle) pattern** — a single relay channel that cycles through open → stop → close → stop on each press. The controller must track current door state via the contact sensors and issue the correct number of pulses to reach the target state without overshooting
+Channel mappers map one channel to one endpoint; device mappers map all channels of _one physical device_. A garage door composes channels across _several_ physical devices, and no discovery heuristic can know which contact belongs to which actuator — the composition must come from user configuration.
 
-**Config options to expose in `matterbridge-homematic.schema.json`:**
+**Concept proposal: config-defined virtual devices (third mapper tier)**
 
-| Option                | Type      | Purpose                                                                      |
-| --------------------- | --------- | ---------------------------------------------------------------------------- |
-| `openContactAddress`  | `string`  | Channel address of the "fully open" contact sensor                           |
-| `closeContactAddress` | `string`  | Channel address of the "fully closed" contact sensor                         |
-| `openingTimeMs`       | `number`  | Estimated full travel time open→close (ms); used for timeout detection       |
-| `closingTimeMs`       | `number`  | Estimated full travel time close→open (ms); used for timeout detection       |
-| `togglePattern`       | `boolean` | Set `true` for up-stop-down motors; `false` for dedicated open/close outputs |
+1. New plugin-config array `virtualDevices`, each entry with a `type` discriminator and type-specific member-channel references:
 
-**Matter mapping (workaround, Matter ≤ 1.5):**
+   ```json
+   {
+     "virtualDevices": [
+       {
+         "type": "garageDoor",
+         "name": "Garage",
+         "actuatorChannel": "REQ1234567:1",
+         "actuatorChannelClose": "",
+         "onTime": 0.4,
+         "revertTime": 0.5,
+         "closedContactChannel": "OEQ7654321:1",
+         "closedContactInverted": false,
+         "openContactChannel": "",
+         "openContactInverted": false,
+         "openDuration": 15,
+         "closeDuration": 15,
+         "matterType": "closure"
+       }
+     ]
+   }
+   ```
 
-Use `doorLock` as the interim device type:
+2. New registry `src/ccu/virtual-device/` keyed by the `type` discriminator (starting with `garage-door.ts`), mirroring the channel/device mapper registries. A virtual-device factory receives its config entry plus resolved channel infos and returns endpoint(s) plus a state-machine instance.
+3. **Event routing:** `module.ts` routes RPC events for member-channel addresses to the virtual device's state machine _in addition to_ the regular per-channel endpoints. A `virtualDeviceMemberChannels` map (address → state machine) alongside `channelAddressToDevice` keeps this non-invasive.
+4. **Member-channel visibility:** by default, member channels keep their normal endpoints (the actuator stays a light/outlet, contacts stay contact sensors) and users can disable them individually via the existing device list. A later `hideMemberChannels` option can auto-blacklist them.
+5. **Config UI:** extend the existing channel-configuration UI (UI-0 infrastructure) with a "Virtual devices" section — dropdowns populated from discovered channels (filtered by plausible types: SWITCH/SWITCH_VIRTUAL_RECEIVER for the actuator, SHUTTER_CONTACT/family for contacts), plus the numeric/polarity fields. First iteration can be config-JSON-only; the UI follows.
 
-- `LockState.LOCKED` = door fully closed (confirmed by close contact)
-- `LockState.UNLOCKED` = door fully open (confirmed by open contact)
-- `LockState.NOT_FULLY_LOCKED` = door in motion or in an intermediate position
+**Matter mapping — three candidates, configurable per virtual device:**
 
-Timeout detection: if neither contact fires within `openingTimeMs` / `closingTimeMs` after a command, set `LockState.NOT_FULLY_LOCKED` and raise a fault attribute so the controller knows the door is stuck.
+| `matterType`     | Mapping                                                                                                                                                                                                                                                            | Trade-off                                                                                         |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `closure`        | Matter 1.5 Closure device type — matterbridge ships a `Closure` class (`matterbridge/devices`) with `ClosureControl.moveTo`/`stop` command handlers, MainState Moving/Stopped/Error and FullyOpened/FullyClosed positioning — semantically exact for a garage door | Controller support still rolling out; verify Apple Home/Alexa/Google before making it the default |
+| `windowCovering` | Lift 0% = open / 100% = closed, moving states map naturally to opening/closing                                                                                                                                                                                     | Universally supported; shows as a "covering", voice grammar is off ("open the blinds")            |
+| `doorLock`       | LOCKED = closed confirmed, UNLOCKED = open, NOT_FULLY_LOCKED = moving/intermediate                                                                                                                                                                                 | Universally supported; UX is a lock, not a door; no moving states                                 |
 
-**Future upgrade path:** When Matter introduces a native garage door device type, the Matter mapping layer can be swapped out without changing the Homematic-side logic.
+Obstruction/timeout: when the travel timer expires without the expected contact confirming, surface a fault — Closure `MainState.Error`, WindowCovering `operationalStatus` reset + `safetyStatus`, or doorLock `NOT_FULLY_LOCKED`.
 
-**Relationship to other items:**
+**Implementation plan (ordered):**
 
-- Replaces HM-4 (HmIP-SWDO simple mode) and HM-7 (HmIP-MOD-HO raw channel) once implemented
-- HM-4 / HM-7 can remain as lightweight fallbacks for setups without contact sensors
+1. Port the RedMatic state machine as a plain, framework-free class (`GarageDoorStateMachine`: inputs contact events + Matter commands + timers, outputs pulse requests + door state) — unit-testable with fake timers, no Matter/CCU dependencies.
+2. `virtualDevices` schema + config parsing with validation (member addresses must exist among discovered channels; warn and skip otherwise).
+3. Virtual-device registry + `garage-door.ts` factory creating the endpoint per configured `matterType`.
+4. Wiring in `module.ts`: member-channel event routing, pulse writes via `setChannelDatapointValue`/`putChannelParamsetValues` (reuse the `ON_TIME` capability check via the paramset cache, PERF-0), command handlers for the chosen Matter type.
+5. Config UI section (after the JSON-only version works end to end).
+
+**Open questions:**
+
+- Which Matter type should be the default? Needs a controller-support check for Closure at implementation time (Apple Home, Alexa, Google as of the implementation date).
+- Should a virtual device's member channels be auto-disabled in the select list (with `setSelectDevice` still registered so users can re-enable), or left visible by default?
+- Does the two-channel actuator mode need dedicated stop support (some motors use a third stop input)? RedMatic does not model a stop input — keep parity first.
+- ReGa-name integration: virtual devices are user-named in config; they should be excluded from ReGa name sync.
 
 ---
 
@@ -722,7 +756,7 @@ The original HmIP-DLD likely uses `KEYMATIC` or a similar lock channel type (the
 
 #### HM-9 and HM-12 relationship
 
-HM-12 (Door Lock Drive pro) and HM-9 (Garage door) both use `doorLock` as their Matter device type but represent semantically different things. Implement them independently. HM-9 uses `doorLock` as a workaround for the missing garage door type; HM-12 uses it as the canonical mapping for an actual door lock.
+HM-12 (Door Lock Drive pro) and HM-9 (Garage door) may both end up on `doorLock` but represent semantically different things. Implement them independently. HM-9 prefers the Matter 1.5 `Closure` device type and offers `doorLock` only as a compatibility fallback; HM-12 uses `doorLock` as the canonical mapping for an actual door lock.
 
 ---
 
