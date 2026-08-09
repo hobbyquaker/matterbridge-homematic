@@ -15,7 +15,7 @@ This plugin bridges your Homematic CCU's devices to the Matter ecosystem
   - [Channel Configuration UI](#channel-configuration-ui)
 - [Troubleshooting](#troubleshooting)
 - [Architecture](#architecture)
-  - [Three-Layer Design](#three-layer-design)
+  - [Architecture Overview](#architecture-overview)
   - [Discovery Caching](#discovery-caching)
   - [Channel Mappers and Device Mappers](#channel-mappers-and-device-mappers)
 - [Development](#development)
@@ -55,15 +55,15 @@ The communication with the Homematic CCU involves **two independent communicatio
    - CUxD: binary RPC port 8701
 
 2. **CCU → Plugin** (Inbound): CCU connects to plugin's callback listeners via RPC
-   - XML-RPC callback listener: `rpcXmlPort` (default: 8701)
-   - Binary RPC callback listener: `rpcBinPort` (default: 8700)
+   - XML-RPC callback listener: `rpcXmlPort` (default: 2049)
+   - Binary RPC callback listener: `rpcBinPort` (default: 2048)
 
 #### Port Configuration
 
-- **`rpcXmlPort`** - Port for XML-RPC callbacks (default: 8701)
-- **`rpcBinPort`** - Port for Binary RPC callbacks (default: 8700)
+- **`rpcXmlPort`** - Port for XML-RPC callbacks (default: 2049)
+- **`rpcBinPort`** - Port for Binary RPC callbacks (default: 2048)
 - **`rpcServerHost`** - Interface to bind callback servers to (default: `0.0.0.0`)
-- **`rpcInitAddress`** - IP/hostname the CCU uses to reach the plugin (auto-detected or manually set)
+- **`rpcInitAddress`** - IP/hostname (without port) the CCU uses to reach the plugin; the callback ports above are appended automatically (auto-detected or manually set)
 
 #### NAT and Docker Configuration
 
@@ -72,14 +72,14 @@ If Matterbridge runs behind NAT, in Docker, or in a virtualized environment:
 1. **Expose the RPC ports** in your Docker configuration:
 
    ```bash
-   docker run -p 8700:8700 -p 8701:8701 ...
+   docker run -p 2048:2048 -p 2049:2049 ...
    ```
 
 2. **Set the Init Address** to the external IP/hostname where CCU can reach the plugin:
 
    ```json
    {
-     "rpcInitAddress": "192.168.1.200:8701"
+     "rpcInitAddress": "192.168.1.200"
    }
    ```
 
@@ -91,8 +91,8 @@ If connecting multiple CCU instances, you must assign different RPC ports for ea
 
 ```json
 {
-  "rpcXmlPort": 8701,
-  "rpcBinPort": 8700
+  "rpcXmlPort": 2049,
+  "rpcBinPort": 2048
 }
 ```
 
@@ -100,8 +100,8 @@ For the second CCU:
 
 ```json
 {
-  "rpcXmlPort": 8711,
-  "rpcBinPort": 8710
+  "rpcXmlPort": 2059,
+  "rpcBinPort": 2058
 }
 ```
 
@@ -146,31 +146,57 @@ Configuration changes that affect only channel-mapper channels (e.g. SWITCH, BLI
 
 ## Architecture
 
-### Three-Layer Design
+### Architecture Overview
 
-```text
-┌─────────────────────────────────────┐
-│    Matterbridge Platform Layer      │
-│  (Device Registration & Lifecycle)  │
-└──────────────┬──────────────────────┘
-               │
-┌──────────────▼──────────────────────┐
-│   CCU Connection Layer              │
-│  (RPC/ReGa Communication)           │
-│  - Device Discovery (Caching)       │
-│  - RPC Callback Servers             │
-│  - Event Handling                   │
-└──────────────┬──────────────────────┘
-               │
-┌──────────────▼──────────────────────┐
-│   CCU Interface Layer               │
-│  - XML-RPC (HTTP-based)             │
-│  - Binary RPC (efficient)           │
-│  - ReGaHSS (scripting)              │
-└─────────────────────────────────────┘
-         │
-         └──► Homematic CCU
+```mermaid
+flowchart TB
+    CTRL["Matter controllers<br/>Apple Home · Alexa · Google Home · ..."]
+
+    subgraph MB["Matterbridge"]
+        AGG["Bridge aggregator"]
+    end
+
+    subgraph PLUGIN["matterbridge-homematic"]
+        subgraph PLATFORM["Platform layer · module.ts"]
+            REG["Discovery &<br/>endpoint registration"]
+            SYNC["Bidirectional state sync<br/>Matter commands ⇄ RPC events"]
+        end
+
+        subgraph MAPPING["Mapping layer"]
+            DMR["Device mappers · src/ccu/device-mapper<br/>multi-channel device → 1..n endpoints<br/>HmIP-DRSI4 · HmIP-WTH · HM-CC-VG-1 · ..."]
+            CMR["Channel mappers · src/ccu/channel-mapper<br/>1 channel → 1 endpoint<br/>SWITCH · DIMMER · BLIND · ..."]
+        end
+
+        subgraph CONN["CCU connection layer · connection-layer.ts"]
+            RPC["RPC clients (outbound)<br/>listDevices · setValue · putParamset"]
+            CBS["RPC callback servers (inbound)<br/>XML-RPC :2049 · BinRPC :2048"]
+            CACHE["Discovery cache"]
+            REGAC["ReGa client<br/>name sync · initial values"]
+        end
+    end
+
+    subgraph CCU["Homematic CCU"]
+        IFACES["RPC interfaces<br/>BidCos-RF :2001 · HmIP-RF :2010 · BidCos-Wired :2000<br/>VirtualDevices :9292 · CUxD :8701"]
+        REGAHSS["ReGaHSS logic layer :8181"]
+    end
+
+    CTRL <-->|"Matter"| AGG
+    AGG <-->|"bridged endpoints"| PLATFORM
+    REG -->|"channels of a device"| DMR
+    DMR -.->|"unclaimed device types<br/>fall back per channel"| CMR
+    DMR -->|"Matter endpoints"| REG
+    CMR -->|"Matter endpoints"| REG
+    REGAC -->|"channel & device names<br/>(re-synced after CCU renames)"| REG
+    SYNC -->|"setValue / putParamset"| RPC
+    CBS -->|"state events"| SYNC
+    RPC -->|"discovery results"| CACHE
+    CACHE -->|"cached channels<br/>on startup"| REG
+    RPC <-->|"XML-RPC / BinRPC"| IFACES
+    IFACES -->|"event callbacks<br/>(init subscription)"| CBS
+    REGAC <-->|"Homematic script"| REGAHSS
 ```
+
+**Name syncing:** channel and device names are fetched from the CCU's ReGaHSS logic layer and used as the display names of the Matter endpoints. When a device is renamed on the CCU, the plugin picks up the new name on the next sync; the enable/disable selection remains stable because it is keyed by interface, channel type, and serial — not by name.
 
 ### Discovery Caching
 
