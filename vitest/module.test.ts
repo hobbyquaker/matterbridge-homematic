@@ -1337,3 +1337,133 @@ describe('TemplatePlatform private method coverage', () => {
     expect(humidityEp?.hasClusterServer('RelativeHumidityMeasurement')).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// DIMMER Matter command → CCU LEVEL wiring (FIX-0)
+// ---------------------------------------------------------------------------
+
+describe('DIMMER command handler wiring', () => {
+  let inst: TemplatePlatform;
+  let setChannelDatapointValue: ReturnType<typeof vi.fn>;
+  let handlers: Map<string, (data: { request?: unknown; attributes?: unknown }) => void>;
+
+  const dimmerChannel: CcuChannelInfo = {
+    address: 'DIM100:1',
+    deviceAddress: 'DIM100',
+    channelIndex: 1,
+    type: 'DIMMER',
+    deviceType: 'HmIP-PDT',
+    interfaceName: 'HmIP-RF',
+    name: 'Test Dimmer',
+    batteryPowered: false,
+  };
+
+  /**
+   * Invoke a captured command handler by name, failing the test when it was not registered.
+   *
+   * @param {string} command Command handler name (e.g. 'on', 'moveToLevelWithOnOff').
+   * @param {{ request?: unknown; attributes?: unknown }} data Handler payload.
+   * @param {unknown} [data.request] Command request payload (e.g. { level }).
+   * @param {unknown} [data.attributes] Cluster attribute state at command time.
+   */
+  const invoke = (command: string, data: { request?: unknown; attributes?: unknown }): void => {
+    const handler = handlers.get(command);
+    expect(handler).toBeDefined();
+    handler?.(data);
+  };
+
+  /** Build a mock DIMMER endpoint that records registered command handlers. */
+  const makeDimmerEndpoint = () =>
+    ({
+      deviceName: 'MockDimmer',
+      id: 'mock-dimmer',
+      number: 1,
+      hasClusterServer: (name: string) => ['LevelControl', 'OnOff'].includes(name),
+      addCommandHandler: vi.fn((command: string, handler: (data: { request?: unknown; attributes?: unknown }) => void) => {
+        handlers.set(command, handler);
+      }),
+      subscribeAttribute: vi.fn(async () => {}),
+      getAttribute: vi.fn(async () => null),
+      updateAttribute: vi.fn(async () => {}),
+    }) as unknown as MatterbridgeEndpoint;
+
+  beforeAll(() => {
+    vi.spyOn(AnsiLogger.prototype, 'log').mockImplementation(() => {});
+  });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    handlers = new Map();
+    inst = new TemplatePlatform(mockMatterbridge, mockLog, mockConfig);
+    setChannelDatapointValue = vi.fn(async () => {});
+    (inst as any).ccuConnection = { setChannelDatapointValue, stop: vi.fn(async () => {}) };
+    (inst as any).wireChannelEndpoint(makeDimmerEndpoint(), dimmerChannel);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  afterAll(() => {
+    vi.restoreAllMocks();
+  });
+
+  test('should register command handlers instead of attribute subscriptions', () => {
+    expect([...handlers.keys()].sort()).toEqual(['moveToLevel', 'moveToLevelWithOnOff', 'off', 'on', 'toggle']);
+  });
+
+  test('should send a single LEVEL write when moveToLevelWithOnOff arrives while off', () => {
+    invoke('moveToLevelWithOnOff', { request: { level: 51 } });
+    expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
+    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '0.2');
+    // No deferred restore-last-level write may follow.
+    vi.advanceTimersByTime(1000);
+    expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
+  });
+
+  test('should send LEVEL 1.005 after the defer window when a bare on command arrives', () => {
+    invoke('on', { request: {} });
+    expect(setChannelDatapointValue).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(250);
+    expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
+    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '1.005');
+  });
+
+  test('should drop the deferred on when a level command follows within the window', () => {
+    invoke('on', { request: {} });
+    vi.advanceTimersByTime(100);
+    invoke('moveToLevelWithOnOff', { request: { level: 51 } });
+    vi.advanceTimersByTime(1000);
+    expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
+    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '0.2');
+  });
+
+  test('should send LEVEL 0 immediately for off and cancel a pending deferred on', () => {
+    invoke('on', { request: {} });
+    invoke('off', { request: {} });
+    expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
+    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '0');
+    vi.advanceTimersByTime(1000);
+    expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
+  });
+
+  test('should defer toggle from off and send LEVEL 0 for toggle from on', () => {
+    invoke('toggle', { attributes: { onOff: false } });
+    expect(setChannelDatapointValue).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(250);
+    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '1.005');
+
+    invoke('toggle', { attributes: { onOff: true } });
+    expect(setChannelDatapointValue).toHaveBeenCalledTimes(2);
+    expect(setChannelDatapointValue).toHaveBeenLastCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '0');
+  });
+
+  test('should clear pending deferred on writes on shutdown', async () => {
+    invoke('on', { request: {} });
+    expect(((inst as any).dimmerPendingOn as Map<string, unknown>).size).toBe(1);
+    await inst.onShutdown('Jest');
+    expect(((inst as any).dimmerPendingOn as Map<string, unknown>).size).toBe(0);
+    vi.advanceTimersByTime(1000);
+    expect(setChannelDatapointValue).not.toHaveBeenCalled();
+  });
+});

@@ -148,6 +148,17 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    */
   private readonly dimmerAwaitingFinalLevel = new Set<string>();
 
+  /**
+   * Pending deferred Matter On commands per DIMMER channel address.
+   * A bare On is held for a short window because some controllers send On and MoveToLevel as
+   * separate commands when setting a brightness while the light is off. The level command cancels
+   * the deferred On so the lamp receives a single LEVEL write instead of flashing to its old level.
+   */
+  private readonly dimmerPendingOn = new Map<string, NodeJS.Timeout>();
+
+  /** Defer window in ms before a bare Matter On command on a DIMMER channel sends LEVEL 1.005. */
+  private readonly dimmerOnDeferMs = 250;
+
   private readonly deviceBatteryHints = new Map<string, boolean>();
 
   private readonly deviceBatteryLowState = new Map<string, boolean>();
@@ -621,6 +632,10 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       this.ccuConnection = undefined;
     }
 
+    // Cancel deferred dimmer On writes so no LEVEL command fires after shutdown.
+    for (const timer of this.dimmerPendingOn.values()) clearTimeout(timer);
+    this.dimmerPendingOn.clear();
+
     this.log.info(`onShutdown called with reason: ${reason ?? 'none'}`);
     if (this.config.unregisterOnShutdown) await this.unregisterAllDevices();
   }
@@ -941,52 +956,68 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       }
     }
 
-    // Wire LevelControl attribute for DIMMER channels.
-    // Matter currentLevel is 0-254; Homematic LEVEL is 0.0-1.0.
+    // Wire Matter commands for DIMMER channels.
+    // Homematic dimmers have no on/off datapoint — only LEVEL (0.0-1.0), so Matter OnOff is
+    // emulated via LEVEL writes (1.005 restores the last active level, 0.0 switches off).
+    // Command handlers are used instead of attribute subscriptions so a single user intent like
+    // "set to 20% while off" (moveToLevelWithOnOff) results in exactly one LEVEL write. A bare On
+    // is deferred briefly and dropped when a level command follows, otherwise the lamp would flash
+    // to its old level before dimming to the target.
     if (channel.type === 'DIMMER' && this.ccuConnection) {
       const ccuConn = this.ccuConnection;
+      const iface = channel.interfaceName;
+      const address = channel.address;
       // Track channel address for precise inbound event matching.
-      this.channelAddressToDevice.set(channel.address, endpoint);
-      try {
-        void endpoint.subscribeAttribute('LevelControl', 'currentLevel', (value: number | null) => {
-          const iface = channel.interfaceName;
-          const address = channel.address;
-          const level = value != null ? Math.round((value / 254) * 100) / 100 : 0;
-          // Suppress setValue when this change was triggered by an incoming RPC event.
-          const suppress = this.rpcEchoSuppress.get(address);
-          if (suppress !== undefined && suppress === level) {
-            this.rpcEchoSuppress.delete(address);
-            return;
-          }
-          this.log.debug(`Matter currentLevel -> Homematic setValue: iface=${iface} channel=${address} level=${level}`);
-          ccuConn.setChannelDatapointValue(iface, address, 'LEVEL', String(level)).catch((err: unknown) => {
-            this.log.warn(`Failed to set Homematic LEVEL for ${address}: ${String(err)}`);
-          });
+      this.channelAddressToDevice.set(address, endpoint);
+
+      const sendLevel = (level: number, source: string): void => {
+        this.log.debug(`Matter ${source} -> Homematic LEVEL: iface=${iface} channel=${address} level=${level}`);
+        ccuConn.setChannelDatapointValue(iface, address, 'LEVEL', String(level)).catch((err: unknown) => {
+          this.log.warn(`Failed to set Homematic LEVEL for ${address}: ${String(err)}`);
         });
-      } catch (err) {
-        this.log.warn(`Failed to subscribe LevelControl for ${channel.address}: ${String(err)}`);
-      }
-      // Wire OnOff for DIMMER: on -> LEVEL 1.005 (restore last level), off -> LEVEL 0.0.
-      try {
-        void endpoint.subscribeAttribute('OnOff', 'onOff', (value: boolean) => {
-          const iface = channel.interfaceName;
-          const address = channel.address;
-          // Suppress setValue when this change was triggered by an incoming RPC event.
-          const suppress = this.rpcEchoSuppress.get(address + ':onoff');
-          if (suppress !== undefined && suppress === value) {
-            this.rpcEchoSuppress.delete(address + ':onoff');
-            return;
-          }
+      };
+      const cancelDeferredOn = (): void => {
+        const pending = this.dimmerPendingOn.get(address);
+        if (pending !== undefined) {
+          clearTimeout(pending);
+          this.dimmerPendingOn.delete(address);
+        }
+      };
+      const deferOn = (source: string): void => {
+        cancelDeferredOn();
+        const timer = setTimeout(() => {
+          this.dimmerPendingOn.delete(address);
           // 1.005 is the Homematic special LEVEL value that restores the last active level.
-          const level = value ? 1.005 : 0;
-          this.log.debug(`Matter OnOff -> Homematic LEVEL: iface=${iface} channel=${address} onOff=${value} level=${level}`);
-          ccuConn.setChannelDatapointValue(iface, address, 'LEVEL', String(level)).catch((err: unknown) => {
-            this.log.warn(`Failed to set Homematic LEVEL for ${address}: ${String(err)}`);
-          });
-        });
-      } catch (err) {
-        this.log.warn(`Failed to subscribe OnOff (dimmer) for ${channel.address}: ${String(err)}`);
-      }
+          sendLevel(1.005, source);
+        }, this.dimmerOnDeferMs);
+        this.dimmerPendingOn.set(address, timer);
+      };
+
+      endpoint.addCommandHandler('on', () => {
+        deferOn('on');
+      });
+      endpoint.addCommandHandler('off', () => {
+        cancelDeferredOn();
+        sendLevel(0, 'off');
+      });
+      endpoint.addCommandHandler('toggle', ({ attributes }) => {
+        // The handler runs before the behavior toggles the attribute, so onOff still holds the
+        // pre-command state.
+        if (attributes.onOff === true) {
+          cancelDeferredOn();
+          sendLevel(0, 'toggle');
+        } else {
+          deferOn('toggle');
+        }
+      });
+      endpoint.addCommandHandler('moveToLevel', ({ request }) => {
+        cancelDeferredOn();
+        sendLevel(Math.round((request.level / 254) * 100) / 100, 'moveToLevel');
+      });
+      endpoint.addCommandHandler('moveToLevelWithOnOff', ({ request }) => {
+        cancelDeferredOn();
+        sendLevel(Math.round((request.level / 254) * 100) / 100, 'moveToLevelWithOnOff');
+      });
     }
 
     // Track SHUTTER_CONTACT channel address for inbound STATE events.
@@ -1697,24 +1728,18 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   private async applyDimmerLevel(channelAddress: string, endpoint: MatterbridgeEndpoint, hmLevel: number): Promise<void> {
     const matterLevel = hmLevel > 0 ? Math.max(1, Math.round(hmLevel * 254)) : 0;
     const onOff = matterLevel > 0;
-    // The level value the subscribeAttribute callback will see (round-tripped back from matterLevel).
-    const suppressLevel = matterLevel > 0 ? Math.round((matterLevel / 254) * 100) / 100 : 0;
 
     try {
-      // Suppress the echo setValue that subscribeAttribute would send back.
-      this.rpcEchoSuppress.set(channelAddress, suppressLevel);
+      // updateAttribute does not invoke command handlers, so no echo suppression is needed here.
       await endpoint.updateAttribute('LevelControl', 'currentLevel', matterLevel > 0 ? matterLevel : 1);
       if (endpoint.hasClusterServer('OnOff')) {
         const currentOnOff = await endpoint.getAttribute('OnOff', 'onOff');
         if (currentOnOff !== onOff) {
-          this.rpcEchoSuppress.set(channelAddress + ':onoff', onOff);
           await endpoint.updateAttribute('OnOff', 'onOff', onOff);
         }
       }
       this.log.info(`${endpoint.deviceName} DIMMER LEVEL event: updated ${endpoint.id}.${String(endpoint.number ?? '?')} level to ${matterLevel} (onOff=${onOff})`);
     } catch (err) {
-      this.rpcEchoSuppress.delete(channelAddress);
-      this.rpcEchoSuppress.delete(channelAddress + ':onoff');
       this.log.warn(`Failed to update Matter LevelControl for ${channelAddress}: ${String(err)}`);
     }
   }
