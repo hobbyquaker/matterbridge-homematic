@@ -156,8 +156,15 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
    */
   private readonly dimmerPendingOn = new Map<string, NodeJS.Timeout>();
 
-  /** Defer window in ms before a bare Matter On command on a DIMMER channel sends LEVEL 1.005. */
-  private readonly dimmerOnDeferMs = 250;
+  /**
+   * Defer window in ms before a bare Matter On command on a DIMMER channel sends LEVEL 1.005.
+   * Voice assistant commands like "Alexa, light 20%" arrive as two separate directives (On, then
+   * the brightness) routed through the assistant's cloud pipeline, with gaps of several hundred
+   * milliseconds between them (386 ms measured with Alexa) — the window must outlast that gap so
+   * the brightness command can cancel the deferred restore-last-level write instead of the lamp
+   * flashing to its old level.
+   */
+  private readonly dimmerOnDeferMs = 500;
 
   /**
    * Matter currentLevel values expected to be echoed by the LevelControl behavior after an
@@ -1001,7 +1008,15 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
         this.dimmerPendingOn.set(address, timer);
       };
 
-      endpoint.addCommandHandler('on', () => {
+      endpoint.addCommandHandler('on', ({ attributes }) => {
+        // The handler runs before the behavior applies the command, so onOff still holds the
+        // pre-command state. Voice assistants (Alexa) send a bare On alongside every brightness
+        // directive regardless of the current state; when the light is already on, sending
+        // LEVEL 1.005 would jump it to its old level — ignore the redundant On instead.
+        if (attributes.onOff === true) {
+          this.log.debug(`Matter on -> ignored (already on): iface=${iface} channel=${address}`);
+          return;
+        }
         deferOn('on');
       });
       endpoint.addCommandHandler('off', () => {

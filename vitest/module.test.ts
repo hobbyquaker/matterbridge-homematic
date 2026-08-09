@@ -1427,15 +1427,22 @@ describe('DIMMER command handler wiring', () => {
   });
 
   test('should send LEVEL 1.005 after the defer window when a bare on command arrives', () => {
-    invoke('on', { request: {} });
+    invoke('on', { request: {}, attributes: { onOff: false } });
     expect(setChannelDatapointValue).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(250);
+    vi.advanceTimersByTime(1000);
     expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
     expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', { explicitDouble: 1.005 });
   });
 
+  test('should ignore a bare on command when the light is already on', () => {
+    invoke('on', { request: {}, attributes: { onOff: true } });
+    vi.advanceTimersByTime(2000);
+    expect(setChannelDatapointValue).not.toHaveBeenCalled();
+    expect(((inst as any).dimmerPendingOn as Map<string, unknown>).size).toBe(0);
+  });
+
   test('should drop the deferred on when a level command follows within the window', () => {
-    invoke('on', { request: {} });
+    invoke('on', { request: {}, attributes: { onOff: false } });
     vi.advanceTimersByTime(100);
     invoke('moveToLevelWithOnOff', { request: { level: 51 }, attributes: { currentLevel: 128 } });
     vi.advanceTimersByTime(1000);
@@ -1444,7 +1451,7 @@ describe('DIMMER command handler wiring', () => {
   });
 
   test('should send LEVEL 0 immediately for off and cancel a pending deferred on', () => {
-    invoke('on', { request: {} });
+    invoke('on', { request: {}, attributes: { onOff: false } });
     invoke('off', { request: {} });
     expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
     expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', { explicitDouble: 0 });
@@ -1455,7 +1462,7 @@ describe('DIMMER command handler wiring', () => {
   test('should defer toggle from off and send LEVEL 0 for toggle from on', () => {
     invoke('toggle', { attributes: { onOff: false } });
     expect(setChannelDatapointValue).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(250);
+    vi.advanceTimersByTime(1000);
     expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', { explicitDouble: 1.005 });
 
     invoke('toggle', { attributes: { onOff: true } });
@@ -1464,7 +1471,7 @@ describe('DIMMER command handler wiring', () => {
   });
 
   test('should clear pending deferred on writes on shutdown', async () => {
-    invoke('on', { request: {} });
+    invoke('on', { request: {}, attributes: { onOff: false } });
     expect(((inst as any).dimmerPendingOn as Map<string, unknown>).size).toBe(1);
     await inst.onShutdown('Jest');
     expect(((inst as any).dimmerPendingOn as Map<string, unknown>).size).toBe(0);
@@ -1508,7 +1515,7 @@ describe('DIMMER command handler wiring', () => {
   });
 
   test('should cancel a pending deferred on when a fallback level change arrives', () => {
-    invoke('on', { request: {} });
+    invoke('on', { request: {}, attributes: { onOff: false } });
     expect(setChannelDatapointValue).not.toHaveBeenCalled();
     levelListener?.(127, 1, { offline: false });
     expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
