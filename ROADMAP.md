@@ -530,10 +530,12 @@ RedMatic prior art: `hm-lc-rgbw-wm.js` (and `hb-uni-rgb-led-ctrl.js` which is an
 
 #### FIX-0 — Dimmer flashes to old level when a brightness is set while the light is off
 
-**Done:** [`147fd6e`](https://github.com/hobbyquaker/matterbridge-homematic/commit/147fd6e)
+**Done:** [`147fd6e`](https://github.com/hobbyquaker/matterbridge-homematic/commit/147fd6e), [`9e2681e`](https://github.com/hobbyquaker/matterbridge-homematic/commit/9e2681e)
 
 **Effort: Low–Medium**  
 **Status: DONE** — implemented as options 1 + 2: command handlers (`on`, `off`, `toggle`, `moveToLevel`, `moveToLevelWithOnOff`) replace the attribute subscriptions, with a 250 ms deferred bare-On that a following level command cancels.
+
+**Follow-up (relative dim):** Matterbridge only intercepts `moveToLevel`/`moveToLevelWithOnOff`, so `move`/`step` (and scene recalls) never reach a command handler. With unmanaged transitions matter.js applies them as a single immediate `currentLevel` change; a fallback `currentLevel` subscription forwards those changes to the CCU. Plugin-driven `updateAttribute` calls are filtered via the offline actor context (`context.offline === true`), and echoes of the intercepted commands are consumed through an expected-level map so no duplicate LEVEL writes occur. `stop`/`stopWithOnOff` need no wiring: without managed transitions there is never a running transition to stop, so they produce no attribute change.
 
 **Symptom:** With a Homematic dimmer turned off, asking Siri/Alexa for "set to 20%" makes the lamp flash to its previous brightness (often 100%) before dimming down to 20%.
 
