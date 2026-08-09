@@ -22,7 +22,7 @@ import path from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vitest';
 
-import { CcuConnectionLayer } from '../src/ccu/connection-layer.js';
+import { CcuConnectionLayer, explicitDouble } from '../src/ccu/connection-layer.js';
 import type { CcuConnectionConfig, CcuLogger } from '../src/ccu/types.js';
 
 // ---------------------------------------------------------------------------
@@ -234,6 +234,26 @@ describe('CcuConnectionLayer with hm-simulator', () => {
   test('should write a paramset via putChannelParamsetValues without throwing', async () => {
     // putParamset on a SWITCH_VIRTUAL_RECEIVER channel with a known VALUES key.
     await expect(layer.putChannelParamsetValues('HmIP-RF', '000213C990986A:3', { STATE: false })).resolves.not.toThrow();
+  });
+
+  test('should encode explicitDouble values as RPC doubles accepted for FLOAT datapoints', async () => {
+    // SET_POINT_TEMPERATURE on the HmIP-WTH HEATING_CLIMATECONTROL_TRANSCEIVER channel is a FLOAT
+    // datapoint. The simulator rejects non-number values with a type mismatch and only stores the
+    // value and multicasts an event when it arrives as a real number, so receiving the event with
+    // the numeric value proves the explicitDouble wrapper serialized to an XML-RPC double end to end.
+    const received = new Promise<unknown>((resolve) => {
+      const listener = (event: { channel?: unknown; datapoint?: string; value?: unknown }): void => {
+        if (event.channel === '000313C990686F:1' && event.datapoint === 'SET_POINT_TEMPERATURE') {
+          layer.off('rpcEvent', listener);
+          resolve(event.value);
+        }
+      };
+      layer.on('rpcEvent', listener);
+    });
+
+    await layer.setChannelDatapointValue('HmIP-RF', '000313C990686F:1', 'SET_POINT_TEMPERATURE', explicitDouble(21.5));
+
+    await expect(received).resolves.toBe(21.5);
   });
 
   // ---------------------------------------------------------------------------

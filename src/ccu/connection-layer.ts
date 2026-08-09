@@ -35,6 +35,29 @@ const binrpc = require('binrpc') as RpcClientFactory;
 
 type RpcInterfaceName = Exclude<CcuInterfaceName, 'ReGaHSS'>;
 
+/**
+ * Marker object understood by the homematic-xmlrpc and binrpc serializers that forces a numeric
+ * value to be encoded as an RPC double instead of an integer or string.
+ */
+export interface ExplicitDouble {
+  /** The numeric value to encode as double. */
+  explicitDouble: number;
+}
+
+/**
+ * Wrap a number so the RPC serializers encode it as a double.
+ *
+ * Required for FLOAT datapoints (e.g. LEVEL, SET_POINT_TEMPERATURE): the HmIP RPC server rejects
+ * strings and integer-encoded numbers for FLOAT values with "Invalid parameter or value", and a
+ * plain JS integer like 0 or 21 would otherwise be serialized as an RPC integer.
+ *
+ * @param {number} value Numeric value to encode as double.
+ * @returns {ExplicitDouble} Marker object passed through to the RPC serializer.
+ */
+export function explicitDouble(value: number): ExplicitDouble {
+  return { explicitDouble: value };
+}
+
 interface RpcDeviceDescription {
   ADDRESS: string;
   TYPE: string;
@@ -125,18 +148,19 @@ export class CcuConnectionLayer extends EventEmitter {
    * @param {RpcInterfaceName} iface Interface name (e.g. 'BidCos-RF', 'HmIP-RF').
    * @param {string} channelAddress Full channel address (e.g. 'OEQ0854602:1').
    * @param {string} datapoint Datapoint name (e.g. 'STATE').
-   * @param {boolean|number|string} value Value to set (boolean, number, or string).
+   * @param {boolean|number|string|ExplicitDouble} value Value to set. FLOAT datapoints must be wrapped with {@link explicitDouble}.
    * @param {number} [timeoutMs] Optional timeout in milliseconds for the RPC call.
    */
   public async setChannelDatapointValue(
     iface: RpcInterfaceName,
     channelAddress: string,
     datapoint: string,
-    value: boolean | number | string,
+    value: boolean | number | string | ExplicitDouble,
     timeoutMs = this.getRequestTimeoutMs(),
   ): Promise<void> {
     await this.callRpc(iface, 'setValue', [channelAddress, datapoint, value], timeoutMs);
-    this.log.debug(`setChannelDatapointValue -> iface=${iface} channel=${channelAddress} datapoint=${datapoint} value=${value}`);
+    const logValue = typeof value === 'object' ? value.explicitDouble : value;
+    this.log.debug(`setChannelDatapointValue -> iface=${iface} channel=${channelAddress} datapoint=${datapoint} value=${logValue}`);
   }
 
   /**

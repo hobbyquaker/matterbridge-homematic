@@ -1420,7 +1420,7 @@ describe('DIMMER command handler wiring', () => {
   test('should send a single LEVEL write when moveToLevelWithOnOff arrives while off', () => {
     invoke('moveToLevelWithOnOff', { request: { level: 51 }, attributes: { currentLevel: 128 } });
     expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
-    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '0.2');
+    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', { explicitDouble: 0.2 });
     // No deferred restore-last-level write may follow.
     vi.advanceTimersByTime(1000);
     expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
@@ -1431,7 +1431,7 @@ describe('DIMMER command handler wiring', () => {
     expect(setChannelDatapointValue).not.toHaveBeenCalled();
     vi.advanceTimersByTime(250);
     expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
-    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '1.005');
+    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', { explicitDouble: 1.005 });
   });
 
   test('should drop the deferred on when a level command follows within the window', () => {
@@ -1440,14 +1440,14 @@ describe('DIMMER command handler wiring', () => {
     invoke('moveToLevelWithOnOff', { request: { level: 51 }, attributes: { currentLevel: 128 } });
     vi.advanceTimersByTime(1000);
     expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
-    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '0.2');
+    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', { explicitDouble: 0.2 });
   });
 
   test('should send LEVEL 0 immediately for off and cancel a pending deferred on', () => {
     invoke('on', { request: {} });
     invoke('off', { request: {} });
     expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
-    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '0');
+    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', { explicitDouble: 0 });
     vi.advanceTimersByTime(1000);
     expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
   });
@@ -1456,11 +1456,11 @@ describe('DIMMER command handler wiring', () => {
     invoke('toggle', { attributes: { onOff: false } });
     expect(setChannelDatapointValue).not.toHaveBeenCalled();
     vi.advanceTimersByTime(250);
-    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '1.005');
+    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', { explicitDouble: 1.005 });
 
     invoke('toggle', { attributes: { onOff: true } });
     expect(setChannelDatapointValue).toHaveBeenCalledTimes(2);
-    expect(setChannelDatapointValue).toHaveBeenLastCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '0');
+    expect(setChannelDatapointValue).toHaveBeenLastCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', { explicitDouble: 0 });
   });
 
   test('should clear pending deferred on writes on shutdown', async () => {
@@ -1475,7 +1475,7 @@ describe('DIMMER command handler wiring', () => {
   test('should forward unintercepted remote currentLevel changes (move/step) to the CCU', () => {
     levelListener?.(127, 51, { offline: false });
     expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
-    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '0.5');
+    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', { explicitDouble: 0.5 });
   });
 
   test('should ignore offline currentLevel changes from inbound RPC updates', () => {
@@ -1486,20 +1486,20 @@ describe('DIMMER command handler wiring', () => {
   test('should consume the expected currentLevel echo of an intercepted moveToLevel command', () => {
     invoke('moveToLevel', { request: { level: 51 }, attributes: { currentLevel: 128 } });
     expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
-    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '0.2');
+    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', { explicitDouble: 0.2 });
     // The behavior applies the command and the attribute change event fires — no duplicate write.
     levelListener?.(51, 128, { offline: false });
     expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
     // A later genuine change to another level is forwarded again.
     levelListener?.(127, 51, { offline: false });
     expect(setChannelDatapointValue).toHaveBeenCalledTimes(2);
-    expect(setChannelDatapointValue).toHaveBeenLastCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '0.5');
+    expect(setChannelDatapointValue).toHaveBeenLastCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', { explicitDouble: 0.5 });
   });
 
   test('should not record an echo expectation when moveToLevel targets the current level', () => {
     invoke('moveToLevelWithOnOff', { request: { level: 51 }, attributes: { currentLevel: 51 } });
     expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
-    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '0.2');
+    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', { explicitDouble: 0.2 });
     // No attribute change event will fire, so no expectation may linger that could swallow
     // a later genuine change to the same level.
     expect(((inst as any).dimmerExpectedEcho as Map<string, number>).size).toBe(0);
@@ -1512,7 +1512,7 @@ describe('DIMMER command handler wiring', () => {
     expect(setChannelDatapointValue).not.toHaveBeenCalled();
     levelListener?.(127, 1, { offline: false });
     expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
-    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '0.5');
+    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', { explicitDouble: 0.5 });
     vi.advanceTimersByTime(1000);
     // The deferred LEVEL 1.005 write was dropped.
     expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);

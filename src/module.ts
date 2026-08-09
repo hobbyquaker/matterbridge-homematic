@@ -27,7 +27,7 @@ import { MatterbridgeDynamicPlatform, MatterbridgeEndpoint, PlatformConfig, Plat
 import { AnsiLogger, LogLevel } from 'matterbridge/logger';
 
 import { parseCcuConnectionConfig } from './ccu/config.js';
-import { CcuConnectionLayer } from './ccu/connection-layer.js';
+import { CcuConnectionLayer, explicitDouble } from './ccu/connection-layer.js';
 import {
   channelTypeLabel,
   createEndpointForChannel,
@@ -980,7 +980,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
       const sendLevel = (level: number, source: string): void => {
         this.log.debug(`Matter ${source} -> Homematic LEVEL: iface=${iface} channel=${address} level=${level}`);
-        ccuConn.setChannelDatapointValue(iface, address, 'LEVEL', String(level)).catch((err: unknown) => {
+        ccuConn.setChannelDatapointValue(iface, address, 'LEVEL', explicitDouble(level)).catch((err: unknown) => {
           this.log.warn(`Failed to set Homematic LEVEL for ${address}: ${String(err)}`);
         });
       };
@@ -1119,7 +1119,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
             this.thermostatLastSetpoint.set(address, setpointDegC);
           }
           this.log.debug(`Matter Thermostat setpoint -> Homematic: channel=${address} setpoint=${setpointDegC}`);
-          ccuConn.setChannelDatapointValue(channel.interfaceName, address, 'SET_POINT_TEMPERATURE', setpointDegC).catch((err: unknown) => {
+          ccuConn.setChannelDatapointValue(channel.interfaceName, address, 'SET_POINT_TEMPERATURE', explicitDouble(setpointDegC)).catch((err: unknown) => {
             this.log.warn(`Failed to set Homematic SET_POINT_TEMPERATURE for ${address}: ${String(err)}`);
           });
         });
@@ -1141,14 +1141,14 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
           if (value === 0) {
             // systemMode=Off: switch to manual mode with frost-protection temperature.
             this.log.debug(`Matter Thermostat systemMode=Off -> Homematic: channel=${address} CONTROL_MODE=1 SET_POINT_TEMPERATURE=4.5`);
-            ccuConn.putChannelParamsetValues(channel.interfaceName, address, { CONTROL_MODE: 1, SET_POINT_TEMPERATURE: 4.5 }).catch((err: unknown) => {
+            ccuConn.putChannelParamsetValues(channel.interfaceName, address, { CONTROL_MODE: 1, SET_POINT_TEMPERATURE: explicitDouble(4.5) }).catch((err: unknown) => {
               this.log.warn(`Failed to set frost protection for ${address}: ${String(err)}`);
             });
           } else if (value === 4) {
             // systemMode=Heat: switch to manual mode and restore the last non-frost setpoint.
             const setpointDegC = this.thermostatLastSetpoint.get(address) ?? 21;
             this.log.debug(`Matter Thermostat systemMode=Heat -> Homematic: channel=${address} CONTROL_MODE=1 SET_POINT_TEMPERATURE=${setpointDegC}`);
-            ccuConn.putChannelParamsetValues(channel.interfaceName, address, { CONTROL_MODE: 1, SET_POINT_TEMPERATURE: setpointDegC }).catch((err: unknown) => {
+            ccuConn.putChannelParamsetValues(channel.interfaceName, address, { CONTROL_MODE: 1, SET_POINT_TEMPERATURE: explicitDouble(setpointDegC) }).catch((err: unknown) => {
               this.log.warn(`Failed to set Homematic SET_POINT_TEMPERATURE on heat mode for ${address}: ${String(err)}`);
             });
           }
@@ -1187,7 +1187,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
             this.thermostatLastSetpoint.set(address, setpointDegC);
           }
           this.log.debug(`Matter Thermostat setpoint -> Homematic MANU_MODE: channel=${address} setpoint=${setpointDegC}`);
-          ccuConn.setChannelDatapointValue(channel.interfaceName, address, 'MANU_MODE', setpointDegC).catch((err: unknown) => {
+          ccuConn.setChannelDatapointValue(channel.interfaceName, address, 'MANU_MODE', explicitDouble(setpointDegC)).catch((err: unknown) => {
             this.log.warn(`Failed to set Homematic MANU_MODE for ${address}: ${String(err)}`);
           });
         });
@@ -1207,14 +1207,14 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
           if (value === 0) {
             // systemMode=Off: manual mode with frost-protection temperature.
             this.log.debug(`Matter Thermostat systemMode=Off -> Homematic MANU_MODE=4.5: channel=${address}`);
-            ccuConn.setChannelDatapointValue(channel.interfaceName, address, 'MANU_MODE', 4.5).catch((err: unknown) => {
+            ccuConn.setChannelDatapointValue(channel.interfaceName, address, 'MANU_MODE', explicitDouble(4.5)).catch((err: unknown) => {
               this.log.warn(`Failed to set frost protection MANU_MODE for ${address}: ${String(err)}`);
             });
           } else if (value === 4) {
             // systemMode=Heat: restore last non-frost setpoint via MANU_MODE.
             const setpointDegC = this.thermostatLastSetpoint.get(address) ?? 21;
             this.log.debug(`Matter Thermostat systemMode=Heat -> Homematic MANU_MODE=${setpointDegC}: channel=${address}`);
-            ccuConn.setChannelDatapointValue(channel.interfaceName, address, 'MANU_MODE', setpointDegC).catch((err: unknown) => {
+            ccuConn.setChannelDatapointValue(channel.interfaceName, address, 'MANU_MODE', explicitDouble(setpointDegC)).catch((err: unknown) => {
               this.log.warn(`Failed to set Homematic MANU_MODE on heat mode for ${address}: ${String(err)}`);
             });
           }
@@ -1295,11 +1295,11 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
           this.log.debug(`Matter WindowCovering target -> Homematic LEVEL: iface=${iface} channel=${address} target=${value?.toString() ?? 'null'} hmLevel=${hmLevel}`);
           if (isTiltSupported) {
             const tilt = this.blindLastTilt.get(address) ?? 0.5;
-            ccuConn.putChannelParamsetValues(iface, address, { LEVEL: hmLevel, LEVEL_2: tilt }).catch((err: unknown) => {
+            ccuConn.putChannelParamsetValues(iface, address, { LEVEL: explicitDouble(hmLevel), LEVEL_2: explicitDouble(tilt) }).catch((err: unknown) => {
               this.log.warn(`Failed to putParamset LEVEL for ${address}: ${String(err)}`);
             });
           } else {
-            ccuConn.setChannelDatapointValue(iface, address, 'LEVEL', String(hmLevel)).catch((err: unknown) => {
+            ccuConn.setChannelDatapointValue(iface, address, 'LEVEL', explicitDouble(hmLevel)).catch((err: unknown) => {
               this.log.warn(`Failed to set Homematic LEVEL for ${address}: ${String(err)}`);
             });
           }
@@ -1321,7 +1321,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
             }
             this.log.debug(`Matter WindowCovering tilt -> Homematic LEVEL_2: iface=${iface} channel=${address} tilt=${value?.toString() ?? 'null'} hmTilt=${hmTilt}`);
             const lastLevel = this.dimmerLastLevel.get(address)?.level ?? 0;
-            ccuConn.putChannelParamsetValues(iface, address, { LEVEL: lastLevel, LEVEL_2: hmTilt }).catch((err: unknown) => {
+            ccuConn.putChannelParamsetValues(iface, address, { LEVEL: explicitDouble(lastLevel), LEVEL_2: explicitDouble(hmTilt) }).catch((err: unknown) => {
               this.log.warn(`Failed to putParamset LEVEL_2 for ${address}: ${String(err)}`);
             });
           });
