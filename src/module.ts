@@ -159,6 +159,14 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
   /** Defer window in ms before a bare Matter On command on a DIMMER channel sends LEVEL 1.005. */
   private readonly dimmerOnDeferMs = 250;
 
+  /**
+   * Matter currentLevel values expected to be echoed by the LevelControl behavior after an
+   * intercepted moveToLevel/moveToLevelWithOnOff command, per DIMMER channel address.
+   * The fallback currentLevel subscription consumes a matching change instead of sending a
+   * duplicate CCU LEVEL write.
+   */
+  private readonly dimmerExpectedEcho = new Map<string, number>();
+
   private readonly deviceBatteryHints = new Map<string, boolean>();
 
   private readonly deviceBatteryLowState = new Map<string, boolean>();
@@ -1010,14 +1018,41 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
           deferOn('toggle');
         }
       });
-      endpoint.addCommandHandler('moveToLevel', ({ request }) => {
+      endpoint.addCommandHandler('moveToLevel', ({ request, attributes }) => {
         cancelDeferredOn();
+        // Record the expected currentLevel echo so the fallback subscription below does not send
+        // a duplicate write. When the attribute already holds the target, no change event fires.
+        if (attributes.currentLevel !== request.level) this.dimmerExpectedEcho.set(address, request.level);
         sendLevel(Math.round((request.level / 254) * 100) / 100, 'moveToLevel');
       });
-      endpoint.addCommandHandler('moveToLevelWithOnOff', ({ request }) => {
+      endpoint.addCommandHandler('moveToLevelWithOnOff', ({ request, attributes }) => {
         cancelDeferredOn();
+        if (attributes.currentLevel !== request.level) this.dimmerExpectedEcho.set(address, request.level);
         sendLevel(Math.round((request.level / 254) * 100) / 100, 'moveToLevelWithOnOff');
       });
+
+      // Fallback for LevelControl commands Matterbridge does not intercept (move/step and their
+      // WithOnOff variants, scene recalls): with unmanaged transitions matter.js applies them as a
+      // single immediate currentLevel change, which this subscription forwards to the CCU.
+      // Plugin-driven updates (updateAttribute from inbound RPC events) run in an offline actor
+      // context and are filtered out; echoes of the intercepted commands above are consumed via
+      // dimmerExpectedEcho. stop/stopWithOnOff need no wiring: without managed transitions there is
+      // never a running transition to stop, so they produce no attribute change.
+      try {
+        void endpoint.subscribeAttribute('LevelControl', 'currentLevel', (newValue: number | null, _oldValue: number | null, context?: { offline?: boolean }) => {
+          if (context?.offline === true) return;
+          if (typeof newValue !== 'number') return;
+          if (this.dimmerExpectedEcho.get(address) === newValue) {
+            this.dimmerExpectedEcho.delete(address);
+            return;
+          }
+          this.dimmerExpectedEcho.delete(address);
+          cancelDeferredOn();
+          sendLevel(Math.round((newValue / 254) * 100) / 100, 'currentLevel');
+        });
+      } catch (err) {
+        this.log.warn(`Failed to subscribe LevelControl fallback for ${channel.address}: ${String(err)}`);
+      }
     }
 
     // Track SHUTTER_CONTACT channel address for inbound STATE events.

@@ -1346,6 +1346,7 @@ describe('DIMMER command handler wiring', () => {
   let inst: TemplatePlatform;
   let setChannelDatapointValue: ReturnType<typeof vi.fn>;
   let handlers: Map<string, (data: { request?: unknown; attributes?: unknown }) => void>;
+  let levelListener: ((newValue: unknown, oldValue: unknown, context?: { offline?: boolean }) => void) | undefined;
 
   const dimmerChannel: CcuChannelInfo = {
     address: 'DIM100:1',
@@ -1372,7 +1373,7 @@ describe('DIMMER command handler wiring', () => {
     handler?.(data);
   };
 
-  /** Build a mock DIMMER endpoint that records registered command handlers. */
+  /** Build a mock DIMMER endpoint that records registered command handlers and the currentLevel fallback listener. */
   const makeDimmerEndpoint = () =>
     ({
       deviceName: 'MockDimmer',
@@ -1382,7 +1383,9 @@ describe('DIMMER command handler wiring', () => {
       addCommandHandler: vi.fn((command: string, handler: (data: { request?: unknown; attributes?: unknown }) => void) => {
         handlers.set(command, handler);
       }),
-      subscribeAttribute: vi.fn(async () => {}),
+      subscribeAttribute: vi.fn((cluster: string, attribute: string, listener: (newValue: unknown, oldValue: unknown, context?: { offline?: boolean }) => void) => {
+        if (cluster === 'LevelControl' && attribute === 'currentLevel') levelListener = listener;
+      }),
       getAttribute: vi.fn(async () => null),
       updateAttribute: vi.fn(async () => {}),
     }) as unknown as MatterbridgeEndpoint;
@@ -1394,6 +1397,7 @@ describe('DIMMER command handler wiring', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     handlers = new Map();
+    levelListener = undefined;
     inst = new TemplatePlatform(mockMatterbridge, mockLog, mockConfig);
     setChannelDatapointValue = vi.fn(async () => {});
     (inst as any).ccuConnection = { setChannelDatapointValue, stop: vi.fn(async () => {}) };
@@ -1408,12 +1412,13 @@ describe('DIMMER command handler wiring', () => {
     vi.restoreAllMocks();
   });
 
-  test('should register command handlers instead of attribute subscriptions', () => {
+  test('should register command handlers and the currentLevel fallback subscription', () => {
     expect([...handlers.keys()].sort()).toEqual(['moveToLevel', 'moveToLevelWithOnOff', 'off', 'on', 'toggle']);
+    expect(levelListener).toBeDefined();
   });
 
   test('should send a single LEVEL write when moveToLevelWithOnOff arrives while off', () => {
-    invoke('moveToLevelWithOnOff', { request: { level: 51 } });
+    invoke('moveToLevelWithOnOff', { request: { level: 51 }, attributes: { currentLevel: 128 } });
     expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
     expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '0.2');
     // No deferred restore-last-level write may follow.
@@ -1432,7 +1437,7 @@ describe('DIMMER command handler wiring', () => {
   test('should drop the deferred on when a level command follows within the window', () => {
     invoke('on', { request: {} });
     vi.advanceTimersByTime(100);
-    invoke('moveToLevelWithOnOff', { request: { level: 51 } });
+    invoke('moveToLevelWithOnOff', { request: { level: 51 }, attributes: { currentLevel: 128 } });
     vi.advanceTimersByTime(1000);
     expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
     expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '0.2');
@@ -1465,5 +1470,51 @@ describe('DIMMER command handler wiring', () => {
     expect(((inst as any).dimmerPendingOn as Map<string, unknown>).size).toBe(0);
     vi.advanceTimersByTime(1000);
     expect(setChannelDatapointValue).not.toHaveBeenCalled();
+  });
+
+  test('should forward unintercepted remote currentLevel changes (move/step) to the CCU', () => {
+    levelListener?.(127, 51, { offline: false });
+    expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
+    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '0.5');
+  });
+
+  test('should ignore offline currentLevel changes from inbound RPC updates', () => {
+    levelListener?.(127, 51, { offline: true });
+    expect(setChannelDatapointValue).not.toHaveBeenCalled();
+  });
+
+  test('should consume the expected currentLevel echo of an intercepted moveToLevel command', () => {
+    invoke('moveToLevel', { request: { level: 51 }, attributes: { currentLevel: 128 } });
+    expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
+    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '0.2');
+    // The behavior applies the command and the attribute change event fires — no duplicate write.
+    levelListener?.(51, 128, { offline: false });
+    expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
+    // A later genuine change to another level is forwarded again.
+    levelListener?.(127, 51, { offline: false });
+    expect(setChannelDatapointValue).toHaveBeenCalledTimes(2);
+    expect(setChannelDatapointValue).toHaveBeenLastCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '0.5');
+  });
+
+  test('should not record an echo expectation when moveToLevel targets the current level', () => {
+    invoke('moveToLevelWithOnOff', { request: { level: 51 }, attributes: { currentLevel: 51 } });
+    expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
+    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '0.2');
+    // No attribute change event will fire, so no expectation may linger that could swallow
+    // a later genuine change to the same level.
+    expect(((inst as any).dimmerExpectedEcho as Map<string, number>).size).toBe(0);
+    levelListener?.(51, 1, { offline: false });
+    expect(setChannelDatapointValue).toHaveBeenCalledTimes(2);
+  });
+
+  test('should cancel a pending deferred on when a fallback level change arrives', () => {
+    invoke('on', { request: {} });
+    expect(setChannelDatapointValue).not.toHaveBeenCalled();
+    levelListener?.(127, 1, { offline: false });
+    expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
+    expect(setChannelDatapointValue).toHaveBeenCalledWith('HmIP-RF', 'DIM100:1', 'LEVEL', '0.5');
+    vi.advanceTimersByTime(1000);
+    // The deferred LEVEL 1.005 write was dropped.
+    expect(setChannelDatapointValue).toHaveBeenCalledTimes(1);
   });
 });
