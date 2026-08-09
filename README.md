@@ -184,18 +184,28 @@ flowchart TB
     AGG ~~~ SYNC
     AGG <-->|"bridged endpoints"| REG
     SYNC -->|"setValue / putParamset"| RPC
-    RPC <-->|"XML-RPC / BinRPC"| IFACES
-    IFACES -->|"event callbacks<br/>(init subscription)"| CBS
+    SYNC ~~~ CBS
     CBS -->|"state events"| SYNC
     CBS ~~~ REGAC
+    CBS <-->|"init subscription /<br/>event callbacks"| IFACES
+    RPC <-->|"XML-RPC / BinRPC"| IFACES
     REGAC <-->|"Homematic script"| REGAHSS
     REG <-->|"channels in /<br/>Matter endpoints out"| DMR
     DMR -.->|"unclaimed device types<br/>fall back per channel"| CMR
     REG <-->|"channels in /<br/>Matter endpoints out"| CMR
     CMR ~~~ RPC
+    CMR ~~~ CBS
     RPC -->|"discovery results"| CACHE
     REG -->|"loads cached channels<br/>on startup"| CACHE
     REG <-->|"channel & device names<br/>(re-synced after CCU renames)"| REGAC
+    REGAC ~~~ IFACES
+
+    style MB fill:#f5f5f5,stroke:#999999,color:#333333
+    style PLUGIN fill:#e6e6e6,stroke:#888888,color:#333333
+    style PLATFORM fill:#d4d4d4,stroke:#777777,color:#333333
+    style MAPPING fill:#d4d4d4,stroke:#777777,color:#333333
+    style CONN fill:#d4d4d4,stroke:#777777,color:#333333
+    style CCU fill:#f5f5f5,stroke:#999999,color:#333333
 ```
 
 **Name syncing:** channel and device names are fetched from the CCU's ReGaHSS logic layer and used as the display names of the Matter endpoints. When a device is renamed on the CCU, the plugin picks up the new name on the next sync; the enable/disable selection remains stable because it is keyed by interface, channel type, and serial — not by name.
