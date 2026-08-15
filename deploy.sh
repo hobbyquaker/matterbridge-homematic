@@ -12,7 +12,7 @@ set -euo pipefail
 #   REMOTE_DIR   (default: /usr/local/lib/node_modules/matterbridge-homematic)
 #   REMOTE_TMP   (default: /tmp)
 
-REMOTE_HOST="${1:-matter@matterbridge-dev}"
+REMOTE_HOST="${1:-matter@matterbridge}"
 REMOTE_DIR="${REMOTE_DIR:-/usr/local/lib/node_modules/matterbridge-homematic}"
 REMOTE_TMP="${REMOTE_TMP:-/tmp}"
 
