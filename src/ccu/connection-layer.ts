@@ -340,7 +340,25 @@ export class CcuConnectionLayer extends EventEmitter {
     // Run ReGa name resolution and wait for newDevices payloads in parallel.
     const [nameMap] = await Promise.all([this.getRegaChannelNameMap(), this.waitForNewDevices(this.getRequestTimeoutMs())]);
 
+    // Group the previously cached channels by interface so channels of interfaces that
+    // delivered no device list this session can be preserved instead of silently dropped.
+    const cachedChannelsByIface = new Map<string, CcuChannelInfo[]>();
+    for (const channel of this.cache.channels) {
+      const list = cachedChannelsByIface.get(channel.interfaceName) ?? [];
+      list.push(channel);
+      cachedChannelsByIface.set(channel.interfaceName, list);
+    }
+
     const channelLists = [...this.clients.keys()].map((iface): CcuChannelInfo[] => {
+      // No newDevices push and no listDevices result this session — keep the cached channels.
+      if (!this.newDevicesReceivedByIface.has(iface)) {
+        const kept = cachedChannelsByIface.get(iface) ?? [];
+        if (kept.length > 0) {
+          this.log.info(`Discovery: keeping ${kept.length} cached channel(s) for iface=${iface} (no device list received this session)`);
+        }
+        return kept;
+      }
+
       const devices = (this.newDevicesPayloadByIface.get(iface) ?? []) as RpcDeviceDescription[];
       const deviceTypeByAddress = new Map<string, string>();
       const deviceFirmwareByAddress = new Map<string, string>();
@@ -383,7 +401,9 @@ export class CcuConnectionLayer extends EventEmitter {
     const channels = channelLists.flat();
 
     // Per-interface summary so missing interfaces (0 channels) are visible at a glance.
-    const perInterfaceSummary = [...this.clients.keys()].map((summaryIface, index) => `${summaryIface}=${channelLists[index].length}`).join(' ');
+    const perInterfaceSummary = [...this.clients.keys()]
+      .map((summaryIface, index) => `${summaryIface}=${channelLists[index].length}${this.newDevicesReceivedByIface.has(summaryIface) ? '' : '(cached)'}`)
+      .join(' ');
     this.log.info(`Discovery channels per interface: ${perInterfaceSummary || 'no interfaces'}`);
 
     // Update cache and persistence
@@ -590,6 +610,39 @@ export class CcuConnectionLayer extends EventEmitter {
   private processNewDevicesCallback(parameters: unknown[]): void {
     const iface = this.getIfaceFromInitId(parameters[0]);
     const payload = Array.isArray(parameters[1]) ? parameters[1] : [];
+    this.ingestDeviceList(iface, payload, 'newDevices');
+  }
+
+  /**
+   * Actively fetch the device list from an interface via a listDevices RPC call.
+   *
+   * Some interfaces — notably CUxD — never push a `newDevices` callback after init, so relying
+   * on the push alone loses their devices entirely (#5). The active call also lets discovery
+   * proceed without waiting for slow pushes.
+   *
+   * @param {RpcInterfaceName} iface Interface name.
+   * @returns {Promise<void>} Resolves when the device list has been ingested (or the call failed).
+   */
+  private async pullDeviceList(iface: RpcInterfaceName): Promise<void> {
+    try {
+      const result = await this.callRpc(iface, 'listDevices', []);
+      const payload = Array.isArray(result) ? result : [];
+      this.ingestDeviceList(iface, payload, 'listDevices');
+    } catch (err) {
+      this.log.warn(`RPC listDevices failed on ${iface}: ${String(err)}`);
+    }
+  }
+
+  /**
+   * Ingest a device list for an interface, arriving either as a pushed `newDevices` callback
+   * or as the result of an active `listDevices` RPC call. Collects device types, versions, and
+   * battery hints, stores the payload for {@link refreshChannelsCache}, and resolves waiters.
+   *
+   * @param {RpcInterfaceName | undefined} iface Interface the list belongs to.
+   * @param {unknown[]} payload Device description entries.
+   * @param {'newDevices' | 'listDevices'} source Delivery path, used for logging.
+   */
+  private ingestDeviceList(iface: RpcInterfaceName | undefined, payload: unknown[], source: 'newDevices' | 'listDevices'): void {
     const deviceTypeByAddress = new Map<string, string>();
 
     // Count root devices (no ':' in the address) and channels separately for diagnostics.
@@ -601,7 +654,9 @@ export class CcuConnectionLayer extends EventEmitter {
       if (addressValue.includes(':')) channelCount++;
       else rootDeviceCount++;
     }
-    this.log.info(`newDevices <- iface=${iface ?? 'unknown'} devices=${rootDeviceCount} channels=${channelCount} entries=${payload.length}`);
+    this.log.info(
+      `${source === 'newDevices' ? 'newDevices' : 'listDevices result'} <- iface=${iface ?? 'unknown'} devices=${rootDeviceCount} channels=${channelCount} entries=${payload.length}`,
+    );
 
     for (const entry of payload) {
       if (!entry || typeof entry !== 'object') continue;
@@ -665,9 +720,14 @@ export class CcuConnectionLayer extends EventEmitter {
       }
     }
 
-    // Signal waiters that are blocking on this interface's newDevices payload.
+    // Signal waiters that are blocking on this interface's device list.
     if (iface !== undefined) {
-      this.newDevicesPayloadByIface.set(iface, payload as RpcDeviceDescription[]);
+      // Never overwrite a non-empty device list with an empty one — push and pull run in
+      // parallel and either may legitimately arrive second with no entries.
+      const existing = this.newDevicesPayloadByIface.get(iface);
+      if (payload.length > 0 || existing === undefined || existing.length === 0) {
+        this.newDevicesPayloadByIface.set(iface, payload as RpcDeviceDescription[]);
+      }
       this.newDevicesReceivedByIface.add(iface);
     }
     if (this.allIfacesHaveReceivedNewDevices()) {
@@ -818,6 +878,8 @@ export class CcuConnectionLayer extends EventEmitter {
           await this.callRpc(iface, 'init', [callbackUrl, initId]);
           this.log.info(`RPC init done <- iface=${iface}`);
           this.lastRpcEventTime.set(iface, Date.now());
+          // Actively fetch the device list — interfaces like CUxD never push newDevices (#5).
+          await this.pullDeviceList(iface);
           if (definition.pingPong) {
             this.startPingWatchdog(iface);
           }
@@ -888,6 +950,8 @@ export class CcuConnectionLayer extends EventEmitter {
         await this.callRpc(iface, 'init', [callbackUrl, initId]);
         this.log.info(`Ping re-init done <- iface=${iface}`);
         this.lastRpcEventTime.set(iface, Date.now());
+        // Re-fetch the device list — the interface may have restarted with changed devices.
+        await this.pullDeviceList(iface);
       } catch (error) {
         this.log.warn(`Ping re-init failed <- iface=${iface} error=${String(error)}`);
       }

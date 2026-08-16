@@ -212,9 +212,67 @@ describe('CcuConnectionLayer discovery diagnostics logging', () => {
       { ADDRESS: 'LEQ1234567', TYPE: 'HM-LC-Sw1-FM' },
       { ADDRESS: 'LEQ1234567:1', TYPE: 'SWITCH' },
     ]);
+    (layer as any).newDevicesReceivedByIface.add('BidCos-RF');
 
     await (layer as any).refreshChannelsCache();
 
-    expect(log.info).toHaveBeenCalledWith(expect.stringContaining('Discovery channels per interface: BidCos-RF=1 CUxD=0'));
+    expect(log.info).toHaveBeenCalledWith(expect.stringContaining('Discovery channels per interface: BidCos-RF=1 CUxD=0(cached)'));
+  });
+
+  test('should ingest a device list via the active listDevices pull', async () => {
+    const log = makeLogger();
+    const layer = new CcuConnectionLayer(makeConfig(), log);
+    (layer as any).clients.set('CUxD', {});
+    (layer as any).callRpc = vi.fn().mockResolvedValue([
+      { ADDRESS: 'CUX1234567', TYPE: 'HM-LC-Sw1-Pl' },
+      { ADDRESS: 'CUX1234567:1', TYPE: 'SWITCH' },
+    ]);
+
+    await (layer as any).pullDeviceList('CUxD');
+
+    expect((layer as any).callRpc).toHaveBeenCalledWith('CUxD', 'listDevices', []);
+    expect((layer as any).newDevicesPayloadByIface.get('CUxD')).toHaveLength(2);
+    expect((layer as any).newDevicesReceivedByIface.has('CUxD')).toBe(true);
+    expect(log.info).toHaveBeenCalledWith(expect.stringContaining('listDevices result <- iface=CUxD devices=1 channels=1 entries=2'));
+  });
+
+  test('should not overwrite a non-empty device list with an empty one', async () => {
+    const log = makeLogger();
+    const layer = new CcuConnectionLayer(makeConfig(), log);
+    (layer as any).initIdToInterface.set('mb_CUxD', 'CUxD');
+    (layer as any).handleRpcCallback('newDevices', ['mb_CUxD', [{ ADDRESS: 'CUX1234567', TYPE: 'HM-LC-Sw1-Pl' }]]);
+
+    (layer as any).callRpc = vi.fn().mockResolvedValue([]);
+    await (layer as any).pullDeviceList('CUxD');
+
+    expect((layer as any).newDevicesPayloadByIface.get('CUxD')).toHaveLength(1);
+  });
+
+  test('should keep cached channels for interfaces that delivered no device list this session', async () => {
+    const log = makeLogger();
+    const layer = new CcuConnectionLayer(makeConfig(), log);
+    (layer as any).clients.set('BidCos-RF', {});
+    (layer as any).clients.set('CUxD', {});
+    (layer as any).waitForNewDevices = vi.fn().mockResolvedValue(undefined);
+    (layer as any).getRegaChannelNameMap = vi.fn().mockResolvedValue(new Map());
+    (layer as any).saveCache = vi.fn().mockResolvedValue(undefined);
+    (layer as any).cache = {
+      channels: [makeChannel('CUxD', 'CUX1234567:1'), makeChannel('CUxD', 'CUX1234567:2'), makeChannel('BidCos-RF', 'LEQ1234567:1')],
+      nameMap: {},
+      timestamp: Date.now(),
+    };
+    // BidCos-RF delivered a fresh (single-channel) list this session; CUxD stayed silent.
+    (layer as any).newDevicesPayloadByIface.set('BidCos-RF', [
+      { ADDRESS: 'LEQ1234567', TYPE: 'HM-LC-Sw1-FM' },
+      { ADDRESS: 'LEQ1234567:1', TYPE: 'SWITCH' },
+    ]);
+    (layer as any).newDevicesReceivedByIface.add('BidCos-RF');
+
+    await (layer as any).refreshChannelsCache();
+
+    const cuxdChannels = (layer as any).cache.channels.filter((c: CcuChannelInfo) => c.interfaceName === 'CUxD');
+    expect(cuxdChannels).toHaveLength(2);
+    expect(log.info).toHaveBeenCalledWith(expect.stringContaining('keeping 2 cached channel(s) for iface=CUxD'));
+    expect(log.info).toHaveBeenCalledWith(expect.stringContaining('Discovery channels per interface: BidCos-RF=1 CUxD=2(cached)'));
   });
 });
