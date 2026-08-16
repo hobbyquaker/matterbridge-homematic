@@ -69,6 +69,26 @@ Because the restart is Matterbridge-managed, the UX improvement here comes from 
 
 ---
 
+#### FIX-1 — CUxD devices no longer discovered ([#5](https://github.com/hobbyquaker/matterbridge-homematic/issues/5))
+
+**Effort: Low–Medium** (depends on diagnosis)  
+**Status: Waiting for reporter feedback** — v1.0.3 shipped per-interface discovery diagnostics ([`8b55981`](https://github.com/hobbyquaker/matterbridge-homematic/commit/8b55981)); the reporter was asked for a fresh startup log. `init` succeeds on all four interfaces in the original log, so the failure is somewhere between `init` and the discovery cache.
+
+**Background:** discovery relies entirely on each interface _pushing_ a `newDevices` callback after `init` — the plugin never actively calls `listDevices` on the interfaces. `refreshChannelsCache` then rebuilds the **entire** cache from the current session's `newDevices` payloads only.
+
+**Next actions depending on the diagnostic log (v1.0.3 lines):**
+
+1. **`waitForNewDevices … no newDevices callback received from: CUxD` (or `newDevices <- iface=CUxD` missing entirely)** — CUxD never delivers. Two fixes, both worth doing:
+   - **Cache preservation (the likely regression):** when an interface did not deliver `newDevices` in the current session, keep its previously cached channels in `refreshChannelsCache` instead of silently dropping them. Today one silent session permanently erases the interface's devices — this matches "worked in an early version, gone since".
+   - **Active discovery:** additionally call `listDevices` via RPC on each interface (node-red-contrib-ccu pattern) instead of relying solely on the push, so a slow or push-less daemon still gets discovered.
+   - Also verify the CUxD init callback URL: with `rpcInitAddress` unset the URL is built from `rpcServerHost` (`xmlrpc_bin://0.0.0.0:2088` in the reporter's log). The BinRPC CUxD daemon may not connect back to `0.0.0.0` — consider resolving the actual local IP toward the CCU for the init URL (again the node-red-contrib-ccu pattern).
+2. **`newDevices <- iface=CUxD devices=N channels=M` with N/M > 0 but still no devices in Matterbridge** — delivery is fine, loss is downstream: check `Discovery channels per interface` (cache build), then the channel-type filter (`isSupportedChannelType` — CUxD channels report generic types like `SWITCH`/`DIMMER` but some CUxD devices use exotic type strings), then select-list gating (`isChannelEnabled`, UX-2 auto-blacklist with `newDevicesDefaultEnabled=false`).
+3. **`newDevices` arrives but only after the `waitForNewDevices` timeout** — late delivery: verify a late callback triggers another cache refresh + `channelsUpdated` so the devices appear without a restart; if not, wire that up.
+
+**Regardless of outcome:** add a system test with hm-simulator covering a configured interface that never delivers `newDevices` — cached channels for it must survive a refresh cycle.
+
+---
+
 #### RN-0 — ReGa rename handling
 
 **Effort: Low**  
