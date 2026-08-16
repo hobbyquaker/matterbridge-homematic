@@ -4,7 +4,7 @@
  * @file module.ts
  * @author hobbyquaker (https://github.com/hobbyquaker)
  * @created 2025-06-15
- * @version 1.0.3
+ * @version 1.0.4
  * @license Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
