@@ -382,6 +382,10 @@ export class CcuConnectionLayer extends EventEmitter {
 
     const channels = channelLists.flat();
 
+    // Per-interface summary so missing interfaces (0 channels) are visible at a glance.
+    const perInterfaceSummary = [...this.clients.keys()].map((summaryIface, index) => `${summaryIface}=${channelLists[index].length}`).join(' ');
+    this.log.info(`Discovery channels per interface: ${perInterfaceSummary || 'no interfaces'}`);
+
     // Update cache and persistence
     this.cache = {
       channels,
@@ -575,6 +579,8 @@ export class CcuConnectionLayer extends EventEmitter {
     }
 
     if (method === 'listDevices') {
+      const iface = this.getIfaceFromInitId(parameters[0]);
+      this.log.info(`listDevices callback <- iface=${iface ?? 'unknown'}: responding with empty list so the interface sends all devices via newDevices`);
       return [];
     }
 
@@ -586,7 +592,16 @@ export class CcuConnectionLayer extends EventEmitter {
     const payload = Array.isArray(parameters[1]) ? parameters[1] : [];
     const deviceTypeByAddress = new Map<string, string>();
 
-    this.log.debug(`newDevices callback <- iface=${iface ?? 'unknown'} entries=${payload.length}`);
+    // Count root devices (no ':' in the address) and channels separately for diagnostics.
+    let rootDeviceCount = 0;
+    let channelCount = 0;
+    for (const entry of payload) {
+      const addressValue = entry && typeof entry === 'object' ? (entry as Record<string, unknown>).ADDRESS : undefined;
+      if (typeof addressValue !== 'string') continue;
+      if (addressValue.includes(':')) channelCount++;
+      else rootDeviceCount++;
+    }
+    this.log.info(`newDevices <- iface=${iface ?? 'unknown'} devices=${rootDeviceCount} channels=${channelCount} entries=${payload.length}`);
 
     for (const entry of payload) {
       if (!entry || typeof entry !== 'object') continue;
@@ -682,7 +697,10 @@ export class CcuConnectionLayer extends EventEmitter {
         done = true;
         const idx = this.pendingNewDevicesWaiters.indexOf(waiter);
         if (idx !== -1) this.pendingNewDevicesWaiters.splice(idx, 1);
-        this.log.debug(`waitForNewDevices: timed out after ${timeoutMs} ms — proceeding without complete newDevices data`);
+        const missing = [...this.clients.keys()].filter((missingIface) => !this.newDevicesReceivedByIface.has(missingIface));
+        this.log.warn(
+          `waitForNewDevices: timed out after ${timeoutMs} ms — no newDevices callback received from: ${missing.join(', ') || 'none'}. Channels from these interfaces come from the discovery cache only (empty on first start).`,
+        );
         resolve();
       }, timeoutMs);
       const waiter = (): void => {
