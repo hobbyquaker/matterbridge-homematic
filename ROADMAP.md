@@ -69,22 +69,6 @@ Because the restart is Matterbridge-managed, the UX improvement here comes from 
 
 ---
 
-#### FIX-1 — CUxD devices no longer discovered ([#5](https://github.com/hobbyquaker/matterbridge-homematic/issues/5))
-
-**Done:** [`73c9a77`](https://github.com/hobbyquaker/matterbridge-homematic/commit/73c9a77)
-
-**Effort: Low–Medium**  
-**Status: DONE** — the v1.0.3 diagnostic log from the reporter confirmed diagnosis 1: no `listDevices` handshake and no `newDevices` push from CUxD (and none from VirtualDevices either), `Discovery channels per interface: … VirtualDevices=0 CUxD=0`. Root cause was a regression in [`31fb2a2`](https://github.com/hobbyquaker/matterbridge-homematic/commit/31fb2a2), which removed the active `listDevices` RPC call and made discovery rely solely on pushed `newDevices` callbacks — CUxD never pushes them.
-
-**Fix (both parts implemented):**
-
-- **Active discovery:** after `init` (and after every ping re-init) the plugin now actively calls `listDevices` on each interface and ingests the result through the same path as pushed `newDevices` payloads. An empty result never overwrites a non-empty payload from the other path.
-- **Cache preservation:** `refreshChannelsCache` keeps the previously cached channels of any interface that delivered no device list in the current session instead of silently dropping them; the summary line marks these as `(cached)`.
-
-**Left open (only relevant if problems resurface):** the init callback URL is built from `rpcServerHost` when `rpcInitAddress` is unset (`xmlrpc_bin://0.0.0.0:2088` in the reporter's log). Events from a daemon that cannot connect back to `0.0.0.0` would still be missing even though discovery and control now work — if reported, resolve the actual local IP toward the CCU for the init URL (node-red-contrib-ccu pattern).
-
----
-
 #### RN-0 — ReGa rename handling
 
 **Effort: Low**  
@@ -586,6 +570,22 @@ The DIMMER wiring in `module.ts` used two independent `subscribeAttribute` callb
 - SWITCH channels are not affected (single boolean `STATE`, no LevelControl). BLIND endpoints have no OnOff cluster and are not affected.
 - Verify which commands each ecosystem actually sends (Alexa, Google, Apple Home) against a debug log before finalizing the deferral window.
 - Tests: cover `moveToLevelWithOnOff` from off (single write, no `1.005`), bare `on` (deferred `1.005` sent after window), `on` followed quickly by `moveToLevel` (only the level write), and `off` (immediate `LEVEL 0.0`).
+
+---
+
+#### FIX-1 — CUxD devices no longer discovered ([#5](https://github.com/hobbyquaker/matterbridge-homematic/issues/5))
+
+**Done:** [`73c9a77`](https://github.com/hobbyquaker/matterbridge-homematic/commit/73c9a77)
+
+**Effort: Low–Medium**  
+**Status: DONE** — the v1.0.3 diagnostic log from the reporter confirmed diagnosis 1: no `listDevices` handshake and no `newDevices` push from CUxD (and none from VirtualDevices either), `Discovery channels per interface: … VirtualDevices=0 CUxD=0`. Root cause was a regression in [`31fb2a2`](https://github.com/hobbyquaker/matterbridge-homematic/commit/31fb2a2), which removed the active `listDevices` RPC call and made discovery rely solely on pushed `newDevices` callbacks — CUxD never pushes them.
+
+**Fix (both parts implemented):**
+
+- **Active discovery:** after `init` (and after every ping re-init) the plugin now actively calls `listDevices` on each interface and ingests the result through the same path as pushed `newDevices` payloads. An empty result never overwrites a non-empty payload from the other path.
+- **Cache preservation:** `refreshChannelsCache` keeps the previously cached channels of any interface that delivered no device list in the current session instead of silently dropping them; the summary line marks these as `(cached)`.
+
+**Left open (only relevant if problems resurface):** the init callback URL is built from `rpcServerHost` when `rpcInitAddress` is unset (`xmlrpc_bin://0.0.0.0:2088` in the reporter's log). Events from a daemon that cannot connect back to `0.0.0.0` would still be missing even though discovery and control now work — if reported, resolve the actual local IP toward the CCU for the init URL (node-red-contrib-ccu pattern).
 
 ---
 
