@@ -192,6 +192,8 @@ describe('TemplatePlatform private method coverage', () => {
       id: 'mock-id',
       number: 1,
       hasClusterServer: (name: string) => clusters.includes(name),
+      // A mocked PowerSource cluster is a battery one: every attribute of a present cluster exists.
+      hasAttributeServer: (name: string) => clusters.includes(name),
       getAttribute: vi.fn(async (cluster: string, attr: string) => attrValues[`${cluster}.${attr}`] ?? null),
       updateAttribute: vi.fn(async () => {}),
       triggerSwitchEvent: vi.fn(async () => {}),

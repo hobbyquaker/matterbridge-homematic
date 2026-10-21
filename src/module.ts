@@ -1553,6 +1553,12 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
     const endpoint = this.deviceAddressToDevice.get(deviceAddress);
     if (!endpoint?.hasClusterServer('PowerSource')) return;
+    if (!this.hasBatteryPowerSource(endpoint)) {
+      // Mains-powered HmIP devices (HmIP-FBL, HmIP-BROLL, HmIP-PS, ...) report OPERATING_VOLTAGE too, but have no
+      // LOW_BAT and therefore a wired PowerSource cluster, on which Matter rejects every battery attribute.
+      this.log.debug(`OPERATING_VOLTAGE event ignored for device=${deviceAddress} with a wired PowerSource cluster`);
+      return;
+    }
 
     const voltage = typeof event.value === 'number' ? event.value : 0;
     const ch0 = this.discoveredChannels.find((ch) => ch.deviceAddress === deviceAddress && ch.channelIndex === 0);
@@ -2580,7 +2586,7 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
 
       if (lowBatteryDevices.has(deviceAddress)) {
         await this.setDeviceBatteryLowState(deviceAddress, true, 'startup service message');
-      } else if (!hasFailure && endpoint.hasClusterServer('PowerSource')) {
+      } else if (!hasFailure && this.hasBatteryPowerSource(endpoint)) {
         // Only clear LOWBAT when all startup calls succeeded.
         await this.setDeviceBatteryLowState(deviceAddress, false, 'startup service message');
       }
@@ -2661,6 +2667,21 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     return looksLikeAddress ? trimmed : undefined;
   }
 
+  /**
+   * Return whether an endpoint's PowerSource cluster has the Battery feature.
+   *
+   * The cluster is created once, from the device's LOW_BAT datapoint (see `finalizeEndpoint`): battery devices get a
+   * replaceable-battery cluster, all others a wired one. Battery attributes (`batChargeLevel`, `batPercentRemaining`)
+   * may only be written to the former; Matter rejects them on a wired cluster (conformance "BAT").
+   *
+   * @param {MatterbridgeEndpoint} endpoint The device endpoint.
+   *
+   * @returns {boolean} `true` when the endpoint has a PowerSource cluster with battery attributes.
+   */
+  private hasBatteryPowerSource(endpoint: MatterbridgeEndpoint): boolean {
+    return endpoint.hasClusterServer('PowerSource') && endpoint.hasAttributeServer('PowerSource', 'batChargeLevel');
+  }
+
   private async setDeviceBatteryLowState(deviceAddress: string, batteryLow: boolean, source: string): Promise<void> {
     if (this.mainsPoweredDevices.has(deviceAddress)) {
       this.log.debug(`Battery state update ignored for mains-powered device=${deviceAddress} source=${source}`);
@@ -2682,6 +2703,10 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       if (batteryLow) {
         this.scheduleBatteryRediscovery(`${source} for ${deviceAddress}`);
       }
+      return;
+    }
+    if (!this.hasBatteryPowerSource(endpoint)) {
+      this.log.debug(`Battery state from ${source} for ${deviceAddress} ignored: the PowerSource cluster is wired (low=${batteryLow})`);
       return;
     }
 

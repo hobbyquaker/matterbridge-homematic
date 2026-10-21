@@ -19,6 +19,12 @@
 - `syncChannelListEntriesWithRegaNames` and `migrateChannelListEntry` (superseded by `migrateSelectListEntriesToSerial`).
 - Proof-of-concept device mapper `hmip-bsm.ts`; HmIP-BSM is fully handled by the standard channel mappers.
 
+## [1.0.6] - 2026-10-21
+
+### Fixed
+
+- Mains-powered devices no longer get battery attributes written to their wired PowerSource cluster. HmIP actuators such as the HmIP-FBL report `OPERATING_VOLTAGE` without `LOW_BAT`; the plugin wrote `batPercentRemaining` (and, from the startup service messages, `batChargeLevel`) to them and Matter rejected it with `Conformance "BAT": Matter does not allow you to set this attribute`. Battery attributes are now only written when the endpoint's PowerSource cluster has the Battery feature (#6, @matthiasnhoffmann-design).
+
 ## [1.0.5] - 2026-10-21
 
 ### Fixed
