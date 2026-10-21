@@ -2758,35 +2758,43 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
     const disabledInterfacePrefixes = this.getDisabledInterfacePrefixes(new Set(enabledInterfaces));
     if (disabledInterfacePrefixes.length === 0) return;
 
-    const matchesDisabled = (entry: string): boolean => disabledInterfacePrefixes.some((p) => entry.startsWith(p));
+    const matchesDisabled = (entry: unknown): boolean => typeof entry === 'string' && disabledInterfacePrefixes.some((p) => entry.startsWith(p));
 
     // Remove select-list entries for disabled interfaces and collect their serials for pre-blacklisting.
     const evictedSerials: string[] = [];
     let removedSelectDevices = 0;
     for (const selectDevice of this.getSelectDevices()) {
-      if (!matchesDisabled(selectDevice.serial)) continue;
-      await this.clearDeviceSelect(selectDevice.serial);
-      evictedSerials.push(selectDevice.serial);
+      const serial = this.getSelectDeviceSerial(selectDevice);
+      if (serial === undefined) {
+        this.log.debug(`Disabled interface cleanup: skipping select device without a serial: ${JSON.stringify(selectDevice)}`);
+        continue;
+      }
+      if (!matchesDisabled(serial)) continue;
+      await this.clearDeviceSelect(serial);
+      evictedSerials.push(serial);
       removedSelectDevices++;
     }
 
     const config = this.getPlatformConfig();
 
     // Remove whiteList entries for disabled interfaces so they cannot override the blackList on re-enable.
-    const currentWhiteList = Array.isArray(config.whiteList) ? (config.whiteList as string[]) : [];
-    const nextWhiteList = currentWhiteList.filter((e) => typeof e !== 'string' || !matchesDisabled(e));
+    // Non-string entries (null, undefined, numbers from a hand-edited config) never match and are kept as they are.
+    const currentWhiteList: unknown[] = Array.isArray(config.whiteList) ? config.whiteList : [];
+    this.logNonStringListEntries('whiteList', currentWhiteList);
+    const nextWhiteList = currentWhiteList.filter((e) => !matchesDisabled(e));
     const removedWhiteListEntries = currentWhiteList.length - nextWhiteList.length;
 
     // Update blackList: drop stale prefix-matching entries, then re-add the evicted serials so that
     // channels from a re-enabled interface always come back disabled — regardless of newDevicesDefaultEnabled.
-    const currentBlackList = Array.isArray(config.blackList) ? (config.blackList as string[]) : [];
-    const nextBlackList = currentBlackList.filter((e) => typeof e !== 'string' || !matchesDisabled(e));
+    const currentBlackList: unknown[] = Array.isArray(config.blackList) ? config.blackList : [];
+    this.logNonStringListEntries('blackList', currentBlackList);
+    const nextBlackList = currentBlackList.filter((e) => !matchesDisabled(e));
     for (const serial of evictedSerials) {
       if (!nextBlackList.includes(serial)) nextBlackList.push(serial);
     }
 
-    const prevSet = new Set<string>(currentBlackList);
-    const nextSet = new Set<string>(nextBlackList);
+    const prevSet = new Set<unknown>(currentBlackList);
+    const nextSet = new Set<unknown>(nextBlackList);
     const blackListChanged = nextSet.size !== prevSet.size || Array.from(nextSet).some((e) => !prevSet.has(e));
 
     if (removedWhiteListEntries > 0 || blackListChanged) {
@@ -2940,6 +2948,40 @@ export class TemplatePlatform extends MatterbridgeDynamicPlatform {
       `${typeLabel}:${channel.address}`,
       `${channel.interfaceName}:${channel.type}:${channel.address}`,
     ].filter((key) => key !== selectSerial);
+  }
+
+  /**
+   * Read the serial (the select-list key) of an entry returned by `getSelectDevices()`.
+   *
+   * Matterbridge 3.10.14 returns `serialNumber` and `deviceName` there; older versions return the stored
+   * `serial` and `name`. Both shapes are accepted.
+   *
+   * Edge cases:
+   *  - an entry without a string serial in either field returns undefined
+   *
+   * @param {object} selectDevice An entry of `getSelectDevices()`.
+   *
+   * @returns {string | undefined} The serial, or undefined when the entry carries none.
+   */
+  private getSelectDeviceSerial(selectDevice: object): string | undefined {
+    const entry: { serialNumber?: unknown; serial?: unknown } = selectDevice;
+    if (typeof entry.serialNumber === 'string') return entry.serialNumber;
+    if (typeof entry.serial === 'string') return entry.serial;
+    return undefined;
+  }
+
+  /**
+   * Log, at debug level, the entries of a config select list that are not strings.
+   *
+   * @param {string} listName The config key, `whiteList` or `blackList`.
+   * @param {unknown[]} entries The list as stored in the config.
+   *
+   * @returns {void}
+   */
+  private logNonStringListEntries(listName: string, entries: readonly unknown[]): void {
+    const nonStringEntries = entries.filter((e) => typeof e !== 'string');
+    if (nonStringEntries.length === 0) return;
+    this.log.debug(`Disabled interface cleanup: ignoring ${nonStringEntries.length} non-string ${listName} entries: ${JSON.stringify(nonStringEntries)}`);
   }
 
   private getDisabledInterfacePrefixes(enabledInterfaceSet: ReadonlySet<CcuInterfaceName>): string[] {

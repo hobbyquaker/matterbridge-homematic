@@ -110,7 +110,7 @@ describe('TemplatePlatform config selection migration', () => {
     // @ts-expect-error Accessing private method for testing purposes
     await instance.cleanupDisabledInterfaceChannels(['HmIP-RF']);
 
-    const remaining = instance.getSelectDevices().map((d) => d.serial);
+    const remaining = instance.getSelectDevices().map((d) => d.serialNumber);
     expect(remaining).toEqual(['HmIP-RF:SWITCH:000111222333:1']);
     expect(config.blackList as string[]).toEqual(expect.arrayContaining(['BidCos-RF:SWITCH:LEQ0000001:1', 'VirtualDevices:SWITCH:V0000001:1']));
     expect((config.blackList as string[]).length).toBe(2);
@@ -157,7 +157,7 @@ describe('TemplatePlatform config selection migration', () => {
     await instance.cleanupDisabledInterfaceChannels(['HmIP-RF']);
 
     // HmIP-RF entry untouched in select list.
-    expect(instance.getSelectDevices().map((d) => d.serial)).toContain('HmIP-RF:SWITCH:AAABBB:1');
+    expect(instance.getSelectDevices().map((d) => d.serialNumber)).toContain('HmIP-RF:SWITCH:AAABBB:1');
     // HmIP-RF whiteList entry untouched.
     expect(config.whiteList as string[]).toContain('HmIP-RF:SWITCH:AAABBB:1');
     // BidCos-RF whiteList entry removed, moved to blackList.
@@ -165,6 +165,76 @@ describe('TemplatePlatform config selection migration', () => {
     expect(config.blackList as string[]).toContain('BidCos-RF:SWITCH:LEQ0000001:1');
     // Config saved because whiteList changed.
     expect(saveConfigSpy).toHaveBeenCalled();
+  });
+
+  test('should read the serial from the pre-3.10.14 select device shape (serial, name)', async () => {
+    const config = makeConfig();
+    const instance = makePlatform(config);
+    vi.spyOn(instance, 'saveConfig').mockImplementation(() => {});
+    // Matterbridge before 3.10.14 returned the stored entries with `serial` and `name`.
+    vi.spyOn(instance, 'getSelectDevices').mockReturnValue([
+      { pluginName: 'matterbridge-homematic', serial: 'BidCos-RF:SWITCH:LEQ0000001:1', name: 'BidCos Switch' },
+      { pluginName: 'matterbridge-homematic', serial: 'HmIP-RF:SWITCH:000111222333:1', name: 'HmIP Switch' },
+    ] as unknown as ReturnType<TemplatePlatform['getSelectDevices']>);
+    const clearSpy = vi.spyOn(instance, 'clearDeviceSelect').mockResolvedValue();
+
+    // @ts-expect-error Accessing private method for testing purposes
+    await instance.cleanupDisabledInterfaceChannels(['HmIP-RF']);
+
+    expect(clearSpy).toHaveBeenCalledExactlyOnceWith('BidCos-RF:SWITCH:LEQ0000001:1');
+    expect(config.blackList).toEqual(['BidCos-RF:SWITCH:LEQ0000001:1']);
+  });
+
+  test('should skip select devices without a string serial instead of throwing', async () => {
+    const config = makeConfig();
+    const instance = makePlatform(config);
+    vi.spyOn(instance, 'saveConfig').mockImplementation(() => {});
+    const logDebugSpy = vi.spyOn(instance.log, 'debug');
+    vi.spyOn(instance, 'getSelectDevices').mockReturnValue([
+      { plugin: 'matterbridge-homematic', serialNumber: undefined, deviceName: 'no serial' },
+      { plugin: 'matterbridge-homematic', serialNumber: null, deviceName: 'null serial' },
+      { plugin: 'matterbridge-homematic', serial: 42, name: 'numeric serial' },
+      { plugin: 'matterbridge-homematic', deviceName: 'missing serial' },
+      { plugin: 'matterbridge-homematic', serialNumber: 'BidCos-RF:SWITCH:LEQ0000001:1', deviceName: 'BidCos Switch' },
+    ] as unknown as ReturnType<TemplatePlatform['getSelectDevices']>);
+    const clearSpy = vi.spyOn(instance, 'clearDeviceSelect').mockResolvedValue();
+
+    // @ts-expect-error Accessing private method for testing purposes
+    await expect(instance.cleanupDisabledInterfaceChannels(['HmIP-RF'])).resolves.toBeUndefined();
+
+    expect(clearSpy).toHaveBeenCalledExactlyOnceWith('BidCos-RF:SWITCH:LEQ0000001:1');
+    expect(config.blackList).toEqual(['BidCos-RF:SWITCH:LEQ0000001:1']);
+    expect(logDebugSpy.mock.calls.filter(([message]) => String(message).includes('skipping select device without a serial'))).toHaveLength(4);
+  });
+
+  test('should keep undefined and null whiteList entries and not throw', async () => {
+    const config = makeConfig();
+    config.whiteList = [undefined, null, 'BidCos-RF:SWITCH:LEQ0000001:1', 'HmIP-RF:SWITCH:AAABBB:1'] as unknown as string[];
+    const instance = makePlatform(config);
+    const saveConfigSpy = vi.spyOn(instance, 'saveConfig').mockImplementation(() => {});
+    const logDebugSpy = vi.spyOn(instance.log, 'debug');
+
+    // @ts-expect-error Accessing private method for testing purposes
+    await expect(instance.cleanupDisabledInterfaceChannels(['HmIP-RF'])).resolves.toBeUndefined();
+
+    expect(config.whiteList).toEqual([undefined, null, 'HmIP-RF:SWITCH:AAABBB:1']);
+    expect(saveConfigSpy).toHaveBeenCalledExactlyOnceWith(config);
+    expect(logDebugSpy).toHaveBeenCalledWith(expect.stringContaining('ignoring 2 non-string whiteList entries'));
+  });
+
+  test('should keep undefined and null blackList entries and not throw', async () => {
+    const config = makeConfig();
+    config.blackList = [undefined, 'BidCos-RF:SWITCH:STALE00001:1', null, 'HmIP-RF:SWITCH:AAABBB:1'] as unknown as string[];
+    const instance = makePlatform(config);
+    const saveConfigSpy = vi.spyOn(instance, 'saveConfig').mockImplementation(() => {});
+    const logDebugSpy = vi.spyOn(instance.log, 'debug');
+
+    // @ts-expect-error Accessing private method for testing purposes
+    await expect(instance.cleanupDisabledInterfaceChannels(['HmIP-RF'])).resolves.toBeUndefined();
+
+    expect(config.blackList).toEqual([undefined, null, 'HmIP-RF:SWITCH:AAABBB:1']);
+    expect(saveConfigSpy).toHaveBeenCalledExactlyOnceWith(config);
+    expect(logDebugSpy).toHaveBeenCalledWith(expect.stringContaining('ignoring 2 non-string blackList entries'));
   });
 
   test('should not save config when no disabled interfaces have registered channels', async () => {
