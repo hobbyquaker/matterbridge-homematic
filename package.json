@@ -1,6 +1,6 @@
 {
   "name": "matterbridge-homematic",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Matterbridge Homematic CCU Plugin",
   "author": "https://github.com/hobbyquaker",
   "license": "Apache-2.0",
