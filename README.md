@@ -3,6 +3,11 @@
 [![npm version](https://img.shields.io/npm/v/matterbridge-homematic.svg)](https://www.npmjs.com/package/matterbridge-homematic)
 [![codecov](https://codecov.io/gh/hobbyquaker/matterbridge-homematic/branch/main/graph/badge.svg)](https://codecov.io/gh/hobbyquaker/matterbridge-homematic)
 
+> [!WARNING]
+> **This project is discontinued.** I stopped using Matterbridge and will not continue to work on this plugin.
+> I don't advise using it. To bring Homematic devices to Matter, see
+> [RedMatic-Matter](https://github.com/rdmtc/RedMatic-Matter) instead.
+
 A [Matterbridge](https://github.com/Luligu/matterbridge) plugin for Homematic
 
 This plugin bridges your Homematic CCU's devices to the Matter ecosystem
